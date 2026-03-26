@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Taobao Context Extractor</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <main class="popup">
+      <section class="panel">
+        <p class="eyebrow">MV3 Extractor</p>
+        <h1>页面数据提取</h1>
+        <p class="hint">
+          直接提取当前页面中已渲染的
+          <code>loaderData.home.data</code>，并下载转换后的
+          <code>target.json</code>。
+        </p>
+
+        <button id="extractButton" class="extract-button" type="button">
+          提取并下载
+        </button>
+
+        <p id="status" class="status" aria-live="polite"></p>
+      </section>
+    </main>
+
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>

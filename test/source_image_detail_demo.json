@@ -1,0 +1,741 @@
+{
+    "components": {
+        "layout": [
+            {
+                "ID": "detail_pic_1763998687376_1_1",
+                "key": "desc_single_image"
+            },
+            {
+                "ID": "detail_pic_1763998687376_2_2",
+                "key": "desc_single_image"
+            },
+            {
+                "ID": "detail_pic_1763998687376_3_3",
+                "key": "desc_single_image"
+            },
+            {
+                "ID": "detail_pic_1763998687376_4_4",
+                "key": "desc_single_image"
+            },
+            {
+                "ID": "detail_pic_1763998687376_5_5",
+                "key": "desc_single_image"
+            },
+            {
+                "ID": "detail_pic_1763998687376_6_6",
+                "key": "desc_single_image"
+            },
+            {
+                "ID": "detail_pic_1763998687376_7_7",
+                "key": "desc_single_image"
+            },
+            {
+                "ID": "detail_pic_1763998687376_8_8",
+                "key": "desc_single_image"
+            },
+            {
+                "ID": "detail_pic_1763998687376_9_9",
+                "key": "desc_single_image"
+            },
+            {
+                "ID": "detail_pic_1763998687376_10_10",
+                "key": "desc_single_image"
+            },
+            {
+                "ID": "detail_pic_1763998687376_11_11",
+                "key": "desc_single_image"
+            },
+            {
+                "ID": "detail_pic_1763998687376_12_12",
+                "key": "desc_single_image"
+            },
+            {
+                "ID": "detail_pic_1763998687376_13_13",
+                "key": "desc_single_image"
+            },
+            {
+                "ID": "detail_pic_1763998687376_14_14",
+                "key": "desc_single_image"
+            },
+            {
+                "ID": "detail_pic_1763998687376_15_15",
+                "key": "desc_single_image"
+            },
+            {
+                "ID": "detail_pic_1763998687376_16_16",
+                "key": "desc_single_image"
+            },
+            {
+                "ID": "detail_pic_1763998687376_17_17",
+                "key": "desc_single_image"
+            },
+            {
+                "ID": "detail_pic_1763998687376_18_18",
+                "key": "desc_single_image"
+            },
+            {
+                "ID": "detail_pic_1763998687376_19_19",
+                "key": "desc_single_image"
+            },
+            {
+                "ID": "detail_pic_tmallPriceDesc_20",
+                "key": "desc_single_image"
+            }
+        ],
+        "componentData": {
+            "detail_pic_tmallPriceDesc_20": {
+                "children": [],
+                "model": {
+                    "picUrl": "//img.alicdn.com/imgextra/i3/O1CN01XU1Y2d1Sk7fIMOkeU_!!6000000002284-2-tps-1125-1446.png",
+                    "itemId": "889792636059",
+                    "locateId": "-1617056835",
+                    "sellerId": "2211891851778",
+                    "anchorPoints": []
+                },
+                "styles": {
+                    "size": {
+                        "width": "375",
+                        "height": "440"
+                    }
+                },
+                "actions": [
+                    "utOpenBigPic"
+                ]
+            },
+            "detail_pic_1763998687376_2_2": {
+                "children": [],
+                "model": {
+                    "picUrl": "//img.alicdn.com/imgextra/i4/2211891851778/O1CN017jA44w1P0NEuPrNr5_!!2211891851778.jpg",
+                    "itemId": "889792636059",
+                    "locateId": "-392632300",
+                    "sellerId": "2211891851778",
+                    "anchorPoints": []
+                },
+                "styles": {
+                    "size": {
+                        "width": "620",
+                        "height": "991"
+                    }
+                },
+                "actions": [
+                    "utOpenBigPic"
+                ]
+            },
+            "division_blank_id": {
+                "model": {
+                    "text": ""
+                },
+                "styles": {
+                    "topLine": "double",
+                    "bgcolor": "#eeeeee",
+                    "type": "blank"
+                }
+            },
+            "detail_pic_1763998687376_3_3": {
+                "children": [],
+                "model": {
+                    "picUrl": "//img.alicdn.com/imgextra/i4/2211891851778/O1CN01TuN8vg1P0NEsdV5u6_!!2211891851778.jpg",
+                    "itemId": "889792636059",
+                    "locateId": "1588100312",
+                    "sellerId": "2211891851778",
+                    "anchorPoints": []
+                },
+                "styles": {
+                    "size": {
+                        "width": "620",
+                        "height": "247"
+                    }
+                },
+                "actions": [
+                    "utOpenBigPic"
+                ]
+            },
+            "detail_pic_1763998687376_1_1": {
+                "children": [],
+                "model": {
+                    "picUrl": "//img.alicdn.com/imgextra/i1/2211891851778/O1CN01nnEB3p1P0NEuwyIKE_!!2211891851778.jpg",
+                    "itemId": "889792636059",
+                    "locateId": "1545052274",
+                    "sellerId": "2211891851778",
+                    "anchorPoints": []
+                },
+                "styles": {
+                    "size": {
+                        "width": "620",
+                        "height": "701"
+                    }
+                },
+                "actions": [
+                    "utOpenBigPic"
+                ]
+            },
+            "detail_pic_1763998687376_6_6": {
+                "children": [],
+                "model": {
+                    "picUrl": "//img.alicdn.com/imgextra/i1/2211891851778/O1CN01euWEM71P0NEvMj5pr_!!2211891851778.jpg",
+                    "itemId": "889792636059",
+                    "locateId": "-1428169636",
+                    "sellerId": "2211891851778",
+                    "anchorPoints": []
+                },
+                "styles": {
+                    "size": {
+                        "width": "620",
+                        "height": "968"
+                    }
+                },
+                "actions": [
+                    "utOpenBigPic"
+                ]
+            },
+            "division_id": {
+                "model": {
+                    "text": "已经到最底了"
+                },
+                "styles": {
+                    "topLine": "double",
+                    "bgcolor": "#eeeeee",
+                    "type": "text"
+                }
+            },
+            "detail_pic_1763998687376_7_7": {
+                "children": [],
+                "model": {
+                    "picUrl": "//img.alicdn.com/imgextra/i3/2211891851778/O1CN01uCecRw1P0NEqrDEgP_!!2211891851778.jpg",
+                    "itemId": "889792636059",
+                    "locateId": "-2099217124",
+                    "sellerId": "2211891851778",
+                    "anchorPoints": []
+                },
+                "styles": {
+                    "size": {
+                        "width": "620",
+                        "height": "1213"
+                    }
+                },
+                "actions": [
+                    "utOpenBigPic"
+                ]
+            },
+            "detail_pic_1763998687376_18_18": {
+                "children": [],
+                "model": {
+                    "picUrl": "//img.alicdn.com/imgextra/i1/2211891851778/O1CN01xeBzuV1P0NEuPotyd_!!2211891851778.jpg",
+                    "itemId": "889792636059",
+                    "locateId": "-16499579",
+                    "sellerId": "2211891851778",
+                    "anchorPoints": []
+                },
+                "styles": {
+                    "size": {
+                        "width": "620",
+                        "height": "958"
+                    }
+                },
+                "actions": [
+                    "utOpenBigPic"
+                ]
+            },
+            "detail_pic_1763998687376_19_19": {
+                "children": [],
+                "model": {
+                    "picUrl": "//img.alicdn.com/imgextra/i1/2211891851778/O1CN01TGir7g1P0NEtmyzVW_!!2211891851778.jpg",
+                    "itemId": "889792636059",
+                    "locateId": "1942570287",
+                    "sellerId": "2211891851778",
+                    "anchorPoints": []
+                },
+                "styles": {
+                    "size": {
+                        "width": "620",
+                        "height": "922"
+                    }
+                },
+                "actions": [
+                    "utOpenBigPic"
+                ]
+            },
+            "detail_pic_1763998687376_4_4": {
+                "children": [],
+                "model": {
+                    "picUrl": "//img.alicdn.com/imgextra/i3/2211891851778/O1CN01uVd28d1P0NEtSCWDo_!!2211891851778.jpg",
+                    "itemId": "889792636059",
+                    "locateId": "-2020499035",
+                    "sellerId": "2211891851778",
+                    "anchorPoints": []
+                },
+                "styles": {
+                    "size": {
+                        "width": "620",
+                        "height": "316"
+                    }
+                },
+                "actions": [
+                    "utOpenBigPic"
+                ]
+            },
+            "detail_pic_1763998687376_16_16": {
+                "children": [],
+                "model": {
+                    "picUrl": "//img.alicdn.com/imgextra/i2/2211891851778/O1CN01hjBj951P0NErejdQn_!!2211891851778.jpg",
+                    "itemId": "889792636059",
+                    "locateId": "-133053275",
+                    "sellerId": "2211891851778",
+                    "anchorPoints": []
+                },
+                "styles": {
+                    "size": {
+                        "width": "620",
+                        "height": "1227"
+                    }
+                },
+                "actions": [
+                    "utOpenBigPic"
+                ]
+            },
+            "detail_pic_1763998687376_17_17": {
+                "children": [],
+                "model": {
+                    "picUrl": "//img.alicdn.com/imgextra/i2/2211891851778/O1CN01ekpOLu1P0NEtw3hhm_!!2211891851778.jpg",
+                    "itemId": "889792636059",
+                    "locateId": "-101136912",
+                    "sellerId": "2211891851778",
+                    "anchorPoints": []
+                },
+                "styles": {
+                    "size": {
+                        "width": "620",
+                        "height": "968"
+                    }
+                },
+                "actions": [
+                    "utOpenBigPic"
+                ]
+            },
+            "detail_pic_1763998687376_14_14": {
+                "children": [],
+                "model": {
+                    "picUrl": "//img.alicdn.com/imgextra/i4/2211891851778/O1CN01ojWqEc1P0NEtSFKqE_!!2211891851778.jpg",
+                    "itemId": "889792636059",
+                    "locateId": "-218646488",
+                    "sellerId": "2211891851778",
+                    "anchorPoints": []
+                },
+                "styles": {
+                    "size": {
+                        "width": "620",
+                        "height": "976"
+                    }
+                },
+                "actions": [
+                    "utOpenBigPic"
+                ]
+            },
+            "detail_pic_1763998687376_15_15": {
+                "children": [],
+                "model": {
+                    "picUrl": "//img.alicdn.com/imgextra/i4/2211891851778/O1CN01JNvJ7H1P0NEvMjMTP_!!2211891851778.jpg",
+                    "itemId": "889792636059",
+                    "locateId": "-2031494704",
+                    "sellerId": "2211891851778",
+                    "anchorPoints": []
+                },
+                "styles": {
+                    "size": {
+                        "width": "620",
+                        "height": "867"
+                    }
+                },
+                "actions": [
+                    "utOpenBigPic"
+                ]
+            },
+            "detail_pic_1763998687376_5_5": {
+                "children": [],
+                "model": {
+                    "picUrl": "//img.alicdn.com/imgextra/i4/2211891851778/O1CN01ZeGp731P0NErela14_!!2211891851778.jpg",
+                    "itemId": "889792636059",
+                    "locateId": "-1811058210",
+                    "sellerId": "2211891851778",
+                    "anchorPoints": []
+                },
+                "styles": {
+                    "size": {
+                        "width": "620",
+                        "height": "992"
+                    }
+                },
+                "actions": [
+                    "utOpenBigPic"
+                ]
+            },
+            "detail_pic_1763998687376_12_12": {
+                "children": [],
+                "model": {
+                    "picUrl": "//img.alicdn.com/imgextra/i3/2211891851778/O1CN01Clt3SV1P0NEmX8hoS_!!2211891851778.jpg",
+                    "itemId": "889792636059",
+                    "locateId": "83362870",
+                    "sellerId": "2211891851778",
+                    "anchorPoints": []
+                },
+                "styles": {
+                    "size": {
+                        "width": "620",
+                        "height": "975"
+                    }
+                },
+                "actions": [
+                    "utOpenBigPic"
+                ]
+            },
+            "detail_pic_1763998687376_13_13": {
+                "children": [],
+                "model": {
+                    "picUrl": "//img.alicdn.com/imgextra/i2/2211891851778/O1CN011VLErw1P0NEsdUtQ7_!!2211891851778.jpg",
+                    "itemId": "889792636059",
+                    "locateId": "-1171158924",
+                    "sellerId": "2211891851778",
+                    "anchorPoints": []
+                },
+                "styles": {
+                    "size": {
+                        "width": "620",
+                        "height": "993"
+                    }
+                },
+                "actions": [
+                    "utOpenBigPic"
+                ]
+            },
+            "detail_pic_1763998687376_10_10": {
+                "children": [],
+                "model": {
+                    "picUrl": "//img.alicdn.com/imgextra/i4/2211891851778/O1CN01Q57XKs1P0NEuPrFWY_!!2211891851778.jpg",
+                    "itemId": "889792636059",
+                    "locateId": "-603340729",
+                    "sellerId": "2211891851778",
+                    "anchorPoints": []
+                },
+                "styles": {
+                    "size": {
+                        "width": "620",
+                        "height": "1038"
+                    }
+                },
+                "actions": [
+                    "utOpenBigPic"
+                ]
+            },
+            "detail_pic_1763998687376_11_11": {
+                "children": [],
+                "model": {
+                    "picUrl": "//img.alicdn.com/imgextra/i4/2211891851778/O1CN01nmnXNp1P0NEuPr333_!!2211891851778.jpg",
+                    "itemId": "889792636059",
+                    "locateId": "842506804",
+                    "sellerId": "2211891851778",
+                    "anchorPoints": []
+                },
+                "styles": {
+                    "size": {
+                        "width": "620",
+                        "height": "974"
+                    }
+                },
+                "actions": [
+                    "utOpenBigPic"
+                ]
+            },
+            "detail_pic_1763998687376_8_8": {
+                "children": [],
+                "model": {
+                    "picUrl": "//img.alicdn.com/imgextra/i1/2211891851778/O1CN01roSi821P0NEuwxcjE_!!2211891851778.jpg",
+                    "itemId": "889792636059",
+                    "locateId": "1600672539",
+                    "sellerId": "2211891851778",
+                    "anchorPoints": []
+                },
+                "styles": {
+                    "size": {
+                        "width": "620",
+                        "height": "1075"
+                    }
+                },
+                "actions": [
+                    "utOpenBigPic"
+                ]
+            },
+            "detail_pic_1763998687376_9_9": {
+                "children": [],
+                "model": {
+                    "picUrl": "//img.alicdn.com/imgextra/i4/2211891851778/O1CN01jv6euX1P0NEvMjd6e_!!2211891851778.jpg",
+                    "itemId": "889792636059",
+                    "locateId": "-829986875",
+                    "sellerId": "2211891851778",
+                    "anchorPoints": []
+                },
+                "styles": {
+                    "size": {
+                        "width": "620",
+                        "height": "643"
+                    }
+                },
+                "actions": [
+                    "utOpenBigPic"
+                ]
+            }
+        },
+        "componentActions": {
+            "utHotArea": {
+                "params": {
+                    "trackParams": {
+                        "spm": "a2141.7631564.1999060322.${componentId}",
+                        "scm": "${scm}"
+                    },
+                    "trackNamePre": "Button-",
+                    "trackName": "DESC-Hotarea"
+                },
+                "key": "user_track"
+            },
+            "utGotoVideoTimeline": {
+                "params": {
+                    "trackParams": {
+                        "spm": "a2141.7631564.2017922",
+                        "item_id": "${itemId}",
+                        "seller_id": "${sellerId}"
+                    },
+                    "trackNamePre": "Button-",
+                    "trackName": "ShopVideo"
+                },
+                "key": "user_track"
+            },
+            "utFetchCoupons": {
+                "params": {
+                    "trackParams": {
+                        "spm": "a2141.7631564.1999019704",
+                        "coupon_id": "${couponId}",
+                        "coupon_price": "${price}",
+                        "scm": "${scm}"
+                    },
+                    "trackNamePre": "Button-",
+                    "trackName": "DESC-GetCoupon"
+                },
+                "key": "user_track"
+            },
+            "utGotoDetailRec": {
+                "params": {
+                    "trackParams": {
+                        "rec_item_id": "${itemId}",
+                        "pvid": "${pvid}",
+                        "match_type": "${matchType}",
+                        "index": "${index}"
+                    },
+                    "trackNamePre": "Button-",
+                    "trackName": "DESC-GotoDetail"
+                },
+                "key": "user_track"
+            },
+            "utOpenStoreList": {
+                "params": {
+                    "trackNamePre": "Button-",
+                    "trackName": "MiaoTong-Desc-More"
+                },
+                "key": "user_track"
+            },
+            "utGotoActivityPage": {
+                "params": {
+                    "trackParams": {
+                        "spm": "a2141.7631564.1999019700",
+                        "activity_id": "${activityId}",
+                        "scm": "${scm}"
+                    },
+                    "trackNamePre": "Button-",
+                    "trackName": "DESC-activity"
+                },
+                "key": "user_track"
+            },
+            "utExposureRcmdVideo": {
+                "params": {
+                    "spm": "a2141.7631564.2017922",
+                    "trackPage": "Page_Detail_Show_ShopVideo",
+                    "item_id": "${itemId}",
+                    "seller_id": "${sellerId}"
+                },
+                "key": "ut_exposure"
+            },
+            "utSkuBar": {
+                "params": {
+                    "trackParams": {
+                        "spm": "a2141.7631564.1999073209.${path}",
+                        "scm": "${scm}"
+                    },
+                    "trackNamePre": "Button-",
+                    "trackName": "DESC-SKU"
+                },
+                "key": "user_track"
+            },
+            "OpenPageWeex": {
+                "params": {
+                    "urlParams": {
+                        "itemId": "${itemId}",
+                        "spm": "a2141.7631564.2315538",
+                        "showId": "${pgcId}",
+                        "sellerId": "${sellerId}",
+                        "from": "detail",
+                        "type": "${type}",
+                        "pgcId": "${pgcId}"
+                    },
+                    "url": "https://market.m.taobao.com/apps/market/detailrax/usertalk-detail.html?wh_weex=true"
+                },
+                "key": "open_url"
+            },
+            "utExposureWeexComponent": {
+                "params": {
+                    "spm": "${utParams.spm}",
+                    "trackPage": "Page_Detail_Show_ProductDetail",
+                    "item_id": "${utParams.item_id}",
+                    "seller_id": "${utParams.seller_id}"
+                },
+                "key": "ut_exposure"
+            },
+            "utCharity": {
+                "params": {
+                    "spm": "${utParams.spm}",
+                    "trackPage": "Page_Detail_Show_ProductDetail",
+                    "item_id": "${utParams.item_id}",
+                    "seller_id": "${utParams.seller_id}"
+                },
+                "key": "ut_exposure"
+            },
+            "gotoPage": {
+                "params": {
+                    "url": "${jumpUrl}"
+                },
+                "key": "open_url"
+            },
+            "utExposureRcmd": {
+                "params": {
+                    "rec_item_id": "${rec_item_id}",
+                    "trackPage": "Page_Detail_Show_ProductDetail",
+                    "pvid": "${pvid}",
+                    "index": "${index}",
+                    "match_type": "${matchType}"
+                },
+                "key": "ut_exposure"
+            },
+            "utGotoDetail": {
+                "params": {
+                    "trackParams": {
+                        "spm": "a2141.7631564.1999019701.${index}",
+                        "rec_item_id": "${itemId}",
+                        "pvid": "${pvid}",
+                        "index": "${index}",
+                        "scm": "${scm}",
+                        "rn": "${rn}",
+                        "av_type": "SellerRecommend"
+                    },
+                    "trackNamePre": "Button-",
+                    "trackName": "DESC-GotoDetail"
+                },
+                "key": "user_track"
+            },
+            "utOpenBigPic": {
+                "params": {
+                    "trackParams": {
+                        "spm": "a2141.7631564.1999020244.${componentId}",
+                        "scm": "${scm}"
+                    },
+                    "trackNamePre": "Button-",
+                    "trackName": "DESC-BigPic"
+                },
+                "key": "user_track"
+            },
+            "utGotoService": {
+                "params": {
+                    "trackParams": {
+                        "spm": "a2141.7631564.1999070259"
+                    },
+                    "trackNamePre": "Button-",
+                    "trackName": "DESC-Servicewldesc_service_miaoshifu_Component1"
+                },
+                "key": "user_track"
+            },
+            "utGotoSpecification": {
+                "params": {
+                    "trackNamePre": "Button-",
+                    "trackName": "DESC-Serviceservice_miaoshifu"
+                },
+                "key": "user_track"
+            },
+            "utOpenStore": {
+                "params": {
+                    "trackNamePre": "Button-",
+                    "trackName": "MiaoTong-Desc-Item"
+                },
+                "key": "user_track"
+            },
+            "utOpenThreeD": {
+                "params": {
+                    "trackNamePre": "Button-",
+                    "trackName": "DESC-view-3D"
+                },
+                "key": "user_track"
+            },
+            "utCinemaGraph": {
+                "params": {
+                    "spm": "${utParams.spm}",
+                    "shop_id": "${utParams.shop_id}",
+                    "trackPage": "Page_Detail_Show_ProductDetail",
+                    "mediaType": "${utParams.mediaType}",
+                    "page": "${utParams.page}",
+                    "seller_id": "${utParams.seller_id}",
+                    "video_id": "${utParams.video_id}"
+                },
+                "key": "ut_exposure"
+            },
+            "utExposureUserTalk": {
+                "params": {
+                    "spm": "a2141.7631564.1999230121.${pgcId}",
+                    "trackPage": "Page_Detail_Show_ProductDetail",
+                    "pcg_id": "${pgcId}"
+                },
+                "key": "ut_exposure"
+            },
+            "utOpenFans": {
+                "params": {
+                    "trackNamePre": "Button-",
+                    "trackName": "Tmall-Fans-Party"
+                },
+                "key": "user_track"
+            },
+            "utUserTalk": {
+                "params": {
+                    "trackParams": {
+                        "spm": "a2141.7631564.2315538",
+                        "pgc_id": "${pgcId}"
+                    },
+                    "trackNamePre": "Button-",
+                    "trackName": "UserTalkEntry"
+                },
+                "key": "user_track"
+            }
+        }
+    },
+    "catalog": {
+        "list": []
+    },
+    "templateVersion": "20260106",
+    "abtestParam": "",
+    "page": {
+        "pageActions": [
+            {
+                "params": {
+                    "spm": "a2141.7631564.1999077549",
+                    "trackPage": "Page_Detail_Show_ProductDetail",
+                    "isNative": "yes"
+                },
+                "key": "ut_exposure"
+            }
+        ]
+    },
+    "weexData": {}
+}

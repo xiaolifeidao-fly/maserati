@@ -1,0 +1,1173 @@
+{
+    "res": {
+        "seller": {
+            "sellerNick": "徽农石斛",
+            "shopIcon": "https://img.alicdn.com/imgextra/i4/2211891851778/O1CN019iNZs61P0NEt4JoZm_!!2211891851778.jpg",
+            "shopName": "安徽霍山铁皮石斛直销店",
+            "evaluates": [{
+                "score": "4.9 ",
+                "level": "1",
+                "levelText": "高",
+                "title": "宝贝描述",
+                "type": "desc"
+            }, {
+                "score": "4.9 ",
+                "level": "1",
+                "levelText": "高",
+                "title": "卖家服务",
+                "type": "serv"
+            }, {
+                "score": "4.9 ",
+                "level": "1",
+                "levelText": "高",
+                "title": "物流服务",
+                "type": "post"
+            }],
+            "certIcon": "http://gw.alicdn.com/tfs/TB1zgzmlZLJ8KJjy0FnXXcFDpXa-171-148.png",
+            "certText": "金牌卖家",
+            "userId": "2211891851778",
+            "creditLevel": "9",
+            "sellerId": "2211891851778",
+            "pcShopUrl": "//shop347684934.taobao.com",
+            "creditLevelIcon": "//gw.alicdn.com/tfs/TB1zg2CixrI8KJjy0FpXXb5hVXa-132-24.png",
+            "shopId": "347684934",
+            "sellerType": "C",
+            "encryptUid": "RAzN8HWNyMunWr3zBT6jnofJPxBfrRLPkkzeEd3dwh8QPc84QGt"
+        },
+        "item": {
+            "vagueSellCount": "3000+",
+            "images": ["https://img.alicdn.com/imgextra/i3/2211891851778/O1CN01kS8jQT1P0NEstmaPD_!!2211891851778.jpg", "https://img.alicdn.com/imgextra/i4/2211891851778/O1CN01NF3ixJ1P0NEtoUyid_!!2211891851778.jpg", "https://img.alicdn.com/imgextra/i3/2211891851778/O1CN01sSDl071P0NEmYYijC_!!2211891851778.jpg", "https://img.alicdn.com/imgextra/i3/2211891851778/O1CN016rMuQB1P0NEuSqTif_!!2211891851778.jpg", "https://img.alicdn.com/imgextra/i4/2211891851778/O1CN01jbtOzV1P0NJNp6hBG_!!2211891851778.jpg"],
+            "videos": [{
+                "itemId": "889792636059",
+                "videoThumbnailURL": "https://img.alicdn.com/imgextra/i2/6000000006574/O1CN01XXNr3S1yQwmb45BF3_!!6000000006574-0-tmap.jpg",
+                "weexRecommendUrl": "https://market.m.taobao.com/apps/market/detailrax/recommend-items.html?spm=a2116h.app.0.0.16d957e9U2bxVj&wh_weex=true&itemId=889792636059",
+                "videoId": "514536492167",
+                "actionEvent": {
+                    "openUrlEventArgs": {
+                        "enableUserTrackEvent": "true",
+                        "userTrackArgs": {
+                            "item_id": "889792636059",
+                            "arg1": "Page_Detail_Videos_Dx_Skip",
+                            "page": "Page_Detail",
+                            "type": "userTrack",
+                            "video_id": "514536492167"
+                        }
+                    },
+                    "exposureArgs": {
+                        "item_id": "889792636059",
+                        "video_id": "514536492167"
+                    }
+                },
+                "spatialVideoDimension": "3:4",
+                "type": 3,
+                "url": "https://cloud.video.taobao.com/play/u/2211891851778/p/2/e/6/t/1/514536492167.mp4?appKey=38829"
+            }],
+            "title": "正宗霍山铁皮石斛粉纯粉天然纯正养生茶批发石斛安徽省中药材500g",
+            "itemId": "889792636059",
+            "useWirelessDesc": "true",
+            "qrCode": "https://h5.m.taobao.com/awp/core/detail.htm?id=889792636059",
+            "pcADescUrl": "//market.m.taobao.com/app/detail-project/desc/index.html?id=889792636059&descVersion=7.0&type=1&f=desc/icoss3459326108672e99b36f75da41&sellerType=C",
+            "bottomIcons": [],
+            "spuId": "0",
+            "titleIcon": ""
+        },
+        "feature": {
+            "pcResistDetail": "false",
+            "tmwOverseasScene": "false",
+            "pcIdentityRisk": "false"
+        },
+        "plusViewVO": {
+            "askAnswerVO": {
+                "ext": {
+                    "skeletonImg": "https://img.alicdn.com/imgextra/i2/O1CN01MLPxBr1flZy969k5W_!!6000000004047-2-tps-1376-1216.png"
+                },
+                "hit": "true"
+            },
+            "addCartActionVO": {
+                "ext": {
+                    "type": "dialogWithRecommond_2",
+                    "frequency": "day:1;repeat:1"
+                },
+                "hit": "true"
+            },
+            "guessLikeVO": {
+                "hit": "true"
+            },
+            "wangwangFlowSplitVO": {
+                "hit": "true"
+            },
+            "rankVO": {
+                "hit": "true"
+            },
+            "tabPlaceholderVO": {
+                "hit": "true"
+            },
+            "industryParamVO": {
+                "hit": "true",
+                "basicParamList": [{
+                    "valueName": "石尊仙",
+                    "propertyName": "品牌"
+                }, {
+                    "valueName": "霍山铁皮石斛",
+                    "propertyName": "系列"
+                }, {
+                    "valueName": "250克/500克/1000克",
+                    "propertyName": "规格"
+                }, {
+                    "valueName": "常温",
+                    "propertyName": "储存条件"
+                }, {
+                    "valueName": "全部适用",
+                    "propertyName": "适用对象"
+                }, {
+                    "valueName": "否",
+                    "propertyName": "是否保健食品（国食健字号）"
+                }, {
+                    "valueName": "石斛粉",
+                    "propertyName": "石斛工艺种类"
+                }, {
+                    "valueName": "100%霍山铁皮石斛纯粉【假一罚十】",
+                    "propertyName": "套餐类型"
+                }, {
+                    "valueName": "250g,500g,1000g",
+                    "propertyName": "净含量"
+                }, {
+                    "valueName": "六安市",
+                    "propertyName": "城市"
+                }, {
+                    "valueName": "铁皮",
+                    "propertyName": "营养品种类"
+                }, {
+                    "valueName": "种植铁皮",
+                    "propertyName": "铁皮种类"
+                }, {
+                    "valueName": "中国大陆",
+                    "propertyName": "产地"
+                }, {
+                    "valueName": "安徽省",
+                    "propertyName": "省份"
+                }, {
+                    "valueName": "食用农产品",
+                    "propertyName": "包装方式"
+                }, {
+                    "valueName": "源头批发价【安徽霍山原产地发货】,源头批发价【安徽霍山原产地发货】+电动搅拌杯",
+                    "propertyName": "颜色分类"
+                }]
+            },
+            "headAtmosphereBeltVO": {
+                "eventParam": {
+                    "code": "dp-pchongbaoduduantwo-*-online"
+                },
+                "icon": "https://gw.alicdn.com/imgextra/i4/O1CN01QDlQIO1otCyVAdqgb_!!6000000005282-2-tps-56-56.png",
+                "bgColors": ["#FCEFE8"],
+                "textColor": "#11192D",
+                "valid": "true",
+                "actionType": "timeAction",
+                "hit": "true",
+                "text": "您有130元消费券待使用",
+                "actionParam": {
+                    "timeActionType": "countdown",
+                    "leftTime": "115986",
+                    "timeActionText": "115986"
+                }
+            },
+            "commentListVO": {
+                "ext": {
+                    "countShow": "\"false\""
+                },
+                "hit": "true"
+            },
+            "pcFrontSkuQuantityLimitVO": {
+                "hit": "true"
+            },
+            "buyParamVO": {
+                "ext": {
+                    "autoApplCoupSource": "pcDetailOrder",
+                    "needAutoApplCoup": "true"
+                },
+                "hit": "true"
+            }
+        },
+        "skuCore": {
+            "skuItem": {
+                "renderSku": "true",
+                "itemStatus": 0,
+                "unitBuy": 1
+            },
+            "sku2info": {
+                "0": {
+                    "moreQuantity": "true",
+                    "quantity": 200,
+                    "logisticsTime": "承诺24小时内发货，预计明天送达",
+                    "price": {
+                        "priceTitle": "优惠前",
+                        "priceColorNew": "#FFFFFF",
+                        "priceText": "112",
+                        "priceDesc": "起",
+                        "priceMoney": "11200"
+                    },
+                    "quantityDisplayValue": 1,
+                    "quantityText": "有货",
+                    "buyExParams": {
+                        "mi_id": "00000pBLMyKjpdeMQEntoa_PRe-0YitDwVSz4tsnvv5Cy80kKLZefceAcF0pwuMCi55Q"
+                    },
+                    "subPrice": {
+                        "priceColor": "#FFFFFF",
+                        "priceTitle": "券后",
+                        "priceColorNew": "#FFFFFF",
+                        "priceBgColor": "#FF5000",
+                        "priceTitleColor": "#FFFFFF",
+                        "priceText": "98起",
+                        "priceMoney": "9800"
+                    }
+                },
+                "5934963655767": {
+                    "moreQuantity": "true",
+                    "quantity": 200,
+                    "logisticsTime": "承诺24小时内发货，预计明天送达",
+                    "price": {
+                        "priceTitle": "优惠前",
+                        "priceColorNew": "#FFFFFF",
+                        "priceText": "448",
+                        "priceMoney": "44800"
+                    },
+                    "quantityDisplayValue": 1,
+                    "cartParam": {
+                        "addCartCheck": "true"
+                    },
+                    "quantityText": "有货",
+                    "buyExParams": {
+                        "mi_id": "00000pBLMyKjpdeMQEntoa_PRe-0YitDwVSz4tsnvv5Cy80kKLZefceAcF0pwuMCi55Q"
+                    },
+                    "subPrice": {
+                        "priceColor": "#FFFFFF",
+                        "priceTitle": "券后",
+                        "priceColorNew": "#FFFFFF",
+                        "priceBgColor": "#FF5000",
+                        "priceTitleColor": "#FFFFFF",
+                        "priceText": "394",
+                        "priceMoney": "39400"
+                    }
+                },
+                "5934963655766": {
+                    "moreQuantity": "true",
+                    "quantity": 200,
+                    "logisticsTime": "承诺24小时内发货，预计明天送达",
+                    "price": {
+                        "priceTitle": "优惠前",
+                        "priceColorNew": "#FFFFFF",
+                        "priceText": "238",
+                        "priceMoney": "23800"
+                    },
+                    "quantityDisplayValue": 1,
+                    "cartParam": {
+                        "addCartCheck": "true"
+                    },
+                    "quantityText": "有货",
+                    "buyExParams": {
+                        "mi_id": "00000pBLMyKjpdeMQEntoa_PRe-0YitDwVSz4tsnvv5Cy80kKLZefceAcF0pwuMCi55Q"
+                    },
+                    "subPrice": {
+                        "priceColor": "#FFFFFF",
+                        "priceTitle": "券后",
+                        "priceColorNew": "#FFFFFF",
+                        "priceBgColor": "#FF5000",
+                        "priceTitleColor": "#FFFFFF",
+                        "priceText": "209",
+                        "priceMoney": "20900"
+                    }
+                },
+                "5934963655765": {
+                    "moreQuantity": "true",
+                    "quantity": 200,
+                    "logisticsTime": "承诺24小时内发货，预计明天送达",
+                    "price": {
+                        "priceTitle": "优惠前",
+                        "priceColorNew": "#FFFFFF",
+                        "priceText": "131",
+                        "priceMoney": "13100"
+                    },
+                    "quantityDisplayValue": 1,
+                    "cartParam": {
+                        "addCartCheck": "true"
+                    },
+                    "quantityText": "有货",
+                    "buyExParams": {
+                        "mi_id": "00000pBLMyKjpdeMQEntoa_PRe-0YitDwVSz4tsnvv5Cy80kKLZefceAcF0pwuMCi55Q"
+                    },
+                    "subPrice": {
+                        "priceColor": "#FFFFFF",
+                        "priceTitle": "券后",
+                        "priceColorNew": "#FFFFFF",
+                        "priceBgColor": "#FF5000",
+                        "priceTitleColor": "#FFFFFF",
+                        "priceText": "115",
+                        "priceMoney": "11500"
+                    }
+                },
+                "5902417211353": {
+                    "moreQuantity": "true",
+                    "quantity": 200,
+                    "logisticsTime": "承诺24小时内发货，预计明天送达",
+                    "price": {
+                        "priceTitle": "优惠前",
+                        "priceColorNew": "#FFFFFF",
+                        "priceText": "215",
+                        "priceMoney": "21500"
+                    },
+                    "quantityDisplayValue": 1,
+                    "cartParam": {
+                        "addCartCheck": "true"
+                    },
+                    "quantityText": "有货",
+                    "buyExParams": {
+                        "mi_id": "00000pBLMyKjpdeMQEntoa_PRe-0YitDwVSz4tsnvv5Cy80kKLZefceAcF0pwuMCi55Q"
+                    },
+                    "subPrice": {
+                        "priceColor": "#FFFFFF",
+                        "priceTitle": "券后",
+                        "priceColorNew": "#FFFFFF",
+                        "priceBgColor": "#FF5000",
+                        "priceTitleColor": "#FFFFFF",
+                        "priceText": "189",
+                        "priceMoney": "18900"
+                    }
+                },
+                "5902417211352": {
+                    "moreQuantity": "true",
+                    "quantity": 200,
+                    "logisticsTime": "承诺24小时内发货，预计明天送达",
+                    "price": {
+                        "priceTitle": "优惠前",
+                        "priceColorNew": "#FFFFFF",
+                        "priceText": "112",
+                        "priceMoney": "11200"
+                    },
+                    "quantityDisplayValue": 1,
+                    "cartParam": {
+                        "addCartCheck": "true"
+                    },
+                    "quantityText": "有货",
+                    "buyExParams": {
+                        "mi_id": "00000pBLMyKjpdeMQEntoa_PRe-0YitDwVSz4tsnvv5Cy80kKLZefceAcF0pwuMCi55Q"
+                    },
+                    "subPrice": {
+                        "priceColor": "#FFFFFF",
+                        "priceTitle": "券后",
+                        "priceColorNew": "#FFFFFF",
+                        "priceBgColor": "#FF5000",
+                        "priceTitleColor": "#FFFFFF",
+                        "priceText": "98",
+                        "priceMoney": "9800"
+                    }
+                },
+                "5902417211354": {
+                    "moreQuantity": "true",
+                    "quantity": 200,
+                    "logisticsTime": "承诺24小时内发货，预计明天送达",
+                    "price": {
+                        "priceTitle": "优惠前",
+                        "priceColorNew": "#FFFFFF",
+                        "priceText": "425",
+                        "priceMoney": "42500"
+                    },
+                    "quantityDisplayValue": 1,
+                    "cartParam": {
+                        "addCartCheck": "true"
+                    },
+                    "quantityText": "有货",
+                    "buyExParams": {
+                        "mi_id": "00000pBLMyKjpdeMQEntoa_PRe-0YitDwVSz4tsnvv5Cy80kKLZefceAcF0pwuMCi55Q"
+                    },
+                    "subPrice": {
+                        "priceColor": "#FFFFFF",
+                        "priceTitle": "券后",
+                        "priceColorNew": "#FFFFFF",
+                        "priceBgColor": "#FF5000",
+                        "priceTitleColor": "#FFFFFF",
+                        "priceText": "374",
+                        "priceMoney": "37400"
+                    }
+                }
+            }
+        },
+        "params": {
+            "trackParams": {
+                "detailabtestdetail": ""
+            },
+            "safeParams": {
+                "mi_id": "00000pBLMyKjpdeMQEntoa_PRe-0YitDwVSz4tsnvv5Cy80kKLZefceAcF0pwuMCi55Q"
+            },
+            "aplusParams": "[]"
+        },
+        "skuBase": {
+            "components": [],
+            "skus": [{
+                "propPath": "1627207:37594338606;147956252:75366510;5919063:36723811656",
+                "skuId": "5902417211352"
+            }, {
+                "propPath": "1627207:37594338607;147956252:75366510;5919063:36723811656",
+                "skuId": "5934963655765"
+            }, {
+                "propPath": "1627207:37594338606;147956252:75368623;5919063:36723811656",
+                "skuId": "5902417211353"
+            }, {
+                "propPath": "1627207:37594338607;147956252:75368623;5919063:36723811656",
+                "skuId": "5934963655766"
+            }, {
+                "propPath": "1627207:37594338606;147956252:92219;5919063:36723811656",
+                "skuId": "5902417211354"
+            }, {
+                "propPath": "1627207:37594338607;147956252:92219;5919063:36723811656",
+                "skuId": "5934963655767"
+            }],
+            "props": [{
+                "hasGroupTags": "false",
+                "packProp": "false",
+                "shouldGroup": "false",
+                "comboProperty": "false",
+                "values": [{
+                    "comboPropertyValue": "false",
+                    "vid": "37594338606",
+                    "corner": {},
+                    "name": "源头批发价【安徽霍山原产地发货】"
+                }, {
+                    "comboPropertyValue": "false",
+                    "vid": "37594338607",
+                    "corner": {},
+                    "name": "源头批发价【安徽霍山原产地发货】+电动搅拌杯"
+                }],
+                "hasImage": "false",
+                "pid": "1627207",
+                "bigImageMode": "true",
+                "name": "颜色分类",
+                "valueMap": {
+                    "37594338606": {
+                        "comboPropertyValue": "false",
+                        "vid": "37594338606",
+                        "corner": {},
+                        "name": "源头批发价【安徽霍山原产地发货】"
+                    },
+                    "37594338607": {
+                        "comboPropertyValue": "false",
+                        "vid": "37594338607",
+                        "corner": {},
+                        "name": "源头批发价【安徽霍山原产地发货】+电动搅拌杯"
+                    }
+                }
+            }, {
+                "hasGroupTags": "false",
+                "packProp": "false",
+                "shouldGroup": "false",
+                "comboProperty": "false",
+                "values": [{
+                    "comboPropertyValue": "false",
+                    "vid": "75366510",
+                    "corner": {},
+                    "name": "250g"
+                }, {
+                    "comboPropertyValue": "false",
+                    "vid": "75368623",
+                    "corner": {},
+                    "name": "500g"
+                }, {
+                    "comboPropertyValue": "false",
+                    "vid": "92219",
+                    "corner": {},
+                    "name": "1000g"
+                }],
+                "hasImage": "false",
+                "pid": "147956252",
+                "bigImageMode": "true",
+                "name": "净含量",
+                "valueMap": {
+                    "92219": {
+                        "comboPropertyValue": "false",
+                        "vid": "92219",
+                        "corner": {},
+                        "name": "1000g"
+                    },
+                    "75366510": {
+                        "comboPropertyValue": "false",
+                        "vid": "75366510",
+                        "corner": {},
+                        "name": "250g"
+                    },
+                    "75368623": {
+                        "comboPropertyValue": "false",
+                        "vid": "75368623",
+                        "corner": {},
+                        "name": "500g"
+                    }
+                }
+            }, {
+                "hasGroupTags": "false",
+                "packProp": "false",
+                "shouldGroup": "false",
+                "comboProperty": "false",
+                "values": [{
+                    "comboPropertyValue": "false",
+                    "vid": "36723811656",
+                    "corner": {},
+                    "name": "100%霍山铁皮石斛纯粉【假一罚十】"
+                }],
+                "hasImage": "false",
+                "pid": "5919063",
+                "bigImageMode": "true",
+                "name": "套餐类型",
+                "valueMap": {
+                    "36723811656": {
+                        "comboPropertyValue": "false",
+                        "vid": "36723811656",
+                        "corner": {},
+                        "name": "100%霍山铁皮石斛纯粉【假一罚十】"
+                    }
+                }
+            }]
+        },
+        "pcTrade": {
+            "buyNowUrl": "//buy.taobao.com/auction/buy_now.jhtml",
+            "pcCartParam": {
+                "areaId": "310118",
+                "addressId": "16146720518",
+                "mi_id": "00000pBLMyKjpdeMQEntoa_PRe-0YitDwVSz4tsnvv5Cy80kKLZefceAcF0pwuMCi55Q"
+            },
+            "pcBuyExParams": {
+                "mi_id": "00000pBLMyKjpdeMQEntoa_PRe-0YitDwVSz4tsnvv5Cy80kKLZefceAcF0pwuMCi55Q"
+            },
+            "pcBuyParams": {
+                "virtual": "false",
+                "buy_now": "135.00",
+                "auction_type": "b",
+                "x-uid": "",
+                "title": "正宗霍山铁皮石斛粉纯粉天然纯正养生茶批发石斛安徽省中药材500g",
+                "buyer_from": "ecity",
+                "page_from_type": "main_site_pc",
+                "detailIsLimit": "false",
+                "who_pay_ship": "卖家承担运费",
+                "rootCatId": "50020275",
+                "routeToNewPc": "1",
+                "auto_post": "false",
+                "seller_nickname": "安徽霍山铁皮石斛直销店",
+                "photo_url": "i3/2211891851778/O1CN012h0mq91P0NJP7tyiE_!!2211891851778.jpg",
+                "current_price": "135.00",
+                "region": "安徽六安",
+                "seller_id": "ef6e9361b3b158148f6b450ac8541b9a",
+                "etm": ""
+            },
+            "tradeType": 1
+        },
+        "componentsVO": {
+            "headerVO": {
+                "logoJumpUrl": "https://www.taobao.com",
+                "mallLogo": "https://gw.alicdn.com/imgextra/i1/O1CN01z163bz1lHF5yQ50CC_!!6000000004793-2-tps-172-108.png",
+                "searchText": "搜索宝贝",
+                "buttons": [{
+                    "subTitle": {},
+                    "background": {
+                        "alpha": "1.0",
+                        "disabledAlpha": "1.0"
+                    },
+                    "disabled": "false",
+                    "title": {
+                        "text": "搜索"
+                    },
+                    "type": "search_in_taobao",
+                    "events": [{
+                        "type": "onClick",
+                        "fields": {
+                            "url": "//s.taobao.com/search"
+                        }
+                    }]
+                }, {
+                    "subTitle": {},
+                    "background": {
+                        "alpha": "1.0",
+                        "disabledAlpha": "1.0"
+                    },
+                    "disabled": "false",
+                    "title": {
+                        "text": "搜本店"
+                    },
+                    "type": "search_in_store",
+                    "events": [{
+                        "type": "onClick",
+                        "fields": {
+                            "url": "//shop347684934.taobao.com/search.htm"
+                        }
+                    }]
+                }]
+            },
+            "headImageVO": {
+                "images": ["https://img.alicdn.com/imgextra/i3/2211891851778/O1CN012h0mq91P0NJP7tyiE_!!2211891851778.jpg", "https://img.alicdn.com/imgextra/i3/2211891851778/O1CN01fresgP1P0NJOoYvyz_!!2211891851778.jpg", "https://img.alicdn.com/imgextra/i1/2211891851778/O1CN01obHiHI1P0NErelJIm_!!2211891851778.jpg", "https://img.alicdn.com/imgextra/i2/2211891851778/O1CN01uW8EWF1P0NJP7oTV9_!!2211891851778.jpg", "https://img.alicdn.com/imgextra/i2/2211891851778/O1CN013SX3B51P0NEtw29xd_!!2211891851778.jpg"],
+                "videos": [{
+                    "itemId": "889792636059",
+                    "videoThumbnailURL": "https://img.alicdn.com/imgextra/i3/2211891851778/O1CN012h0mq91P0NJP7tyiE_!!2211891851778.jpg",
+                    "videoId": "514536492167",
+                    "spatialVideoDimension": "3:4",
+                    "url": "http://cloud.video.taobao.com/play/u/2211891851778/p/2/e/6/t/1/514536492167.mp4?appKey=38829"
+                }]
+            },
+            "storeCardVO": {
+                "buttons": [{
+                    "image": {
+                        "imageUrl": "https://img.alicdn.com/imgextra/i1/O1CN016DNujx1yMMj6NMXVv_!!6000000006564-55-tps-24-24.svg",
+                        "gifAnimated": "false"
+                    },
+                    "disabled": "false",
+                    "title": {
+                        "text": "客服"
+                    },
+                    "type": "customer_service"
+                }, {
+                    "image": {
+                        "imageUrl": "https://img.alicdn.com/imgextra/i4/O1CN01jn67ow1ZhYeiTJlZn_!!6000000003226-55-tps-24-24.svg",
+                        "gifAnimated": "false"
+                    },
+                    "disabled": "false",
+                    "title": {
+                        "text": "进店"
+                    },
+                    "type": "enter_shop",
+                    "events": [{
+                        "type": "openUrl",
+                        "fields": {
+                            "url": "//shop347684934.taobao.com"
+                        }
+                    }]
+                }],
+                "overallScore": "4.9",
+                "shopIcon": "https://img.alicdn.com/imgextra/i4/2211891851778/O1CN019iNZs61P0NEt4JoZm_!!2211891851778.jpg",
+                "shopName": "安徽霍山铁皮石斛直销店",
+                "evaluates": [{
+                    "score": "4.9",
+                    "title": "宝贝质量"
+                }, {
+                    "score": "4.9",
+                    "title": "物流速度"
+                }, {
+                    "score": "4.9",
+                    "title": "服务保障"
+                }],
+                "certIcon": "http://gw.alicdn.com/tfs/TB1zgzmlZLJ8KJjy0FnXXcFDpXa-171-148.png",
+                "shopUrl": "//shop347684934.taobao.com",
+                "certText": "金牌卖家",
+                "labelList": [{
+                    "contentDesc": "好评率99%"
+                }, {
+                    "contentDesc": "次日达超91%同行"
+                }, {
+                    "contentDesc": "客服满意度96%"
+                }],
+                "creditLevel": "9",
+                "creditLevelIcon": "//gtms01.alicdn.com/tps/i1/TB1D9j.HpXXXXbNXpXX97kJ_XXX-105-24.png",
+                "sellerType": "C",
+                "starNum": "5.0"
+            },
+            "titleVO": {
+                "salesDesc": "已售 3000+",
+                "subTitles": [],
+                "title": {
+                    "title": "正宗霍山铁皮石斛粉纯粉天然纯正养生茶批发石斛安徽省中药材500g"
+                }
+            },
+            "debugVO": {
+                "traceId": "3daa4d2317744248117524840e",
+                "host": "taodetail033045121123.unsh.ea119@33.45.121.123"
+            },
+            "rateVO": {
+                "keywords": [{
+                    "labelId": "415101101-11",
+                    "count": "11",
+                    "title": "发货速度超快",
+                    "status": "1"
+                }, {
+                    "labelId": "407101143-11",
+                    "count": "9",
+                    "title": "口感顺滑",
+                    "status": "1"
+                }, {
+                    "labelId": "405101306-11",
+                    "count": "4",
+                    "title": "颜色很漂亮",
+                    "status": "1"
+                }, {
+                    "labelId": "417101101-11",
+                    "count": "2",
+                    "title": "来自正宗产地",
+                    "status": "1"
+                }, {
+                    "labelId": "408101165-11",
+                    "count": "2",
+                    "title": "肤质细腻",
+                    "status": "1"
+                }, {
+                    "labelId": "409101101-11",
+                    "count": "1",
+                    "title": "外型真的好看",
+                    "status": "1"
+                }, {
+                    "labelId": "407101145-11",
+                    "count": "10",
+                    "title": "人参味道纯正",
+                    "status": "1"
+                }],
+                "totalCount": "2000+",
+                "favorableRate": {
+                    "rateText": "近3个月好评率高达99.9%"
+                },
+                "group": {
+                    "items": [{
+                        "dateTime": "2026-03-14",
+                        "highLightPositions": [],
+                        "memberLevel": "11",
+                        "createTimeInterval": "1周前",
+                        "media": [{
+                            "imageUrl": "//gw.alicdn.com/bao/uploaded/i4/O1CN01RpRYJj288ItlKpRsr_!!4611686018427382255-0-rate.jpg",
+                            "type": "image"
+                        }, {
+                            "imageUrl": "//gw.alicdn.com/bao/uploaded/i4/O1CN0166zdTB288ItlWfQ0U_!!4611686018427382255-0-rate.jpg",
+                            "type": "image"
+                        }, {
+                            "imageUrl": "//gw.alicdn.com/bao/uploaded/i4/O1CN013Sv0ic288ItlWe0hC_!!4611686018427382255-0-rate.jpg",
+                            "type": "image"
+                        }, {
+                            "imageUrl": "//gw.alicdn.com/bao/uploaded/i2/O1CN017GgW69288ItlWe90R_!!4611686018427382255-0-rate.jpg",
+                            "type": "image"
+                        }],
+                        "userName": "义薄云天771022",
+                        "headPic": "//sns.m.taobao.com/avatar/sns/user/flag/sns_logo?type=taobao&kn=wwc_tb_11&bizCode=taobao_avatar&userFlag=RAzN84GK7wS8eNWeA4xefbrA73NkpVVn7teFbgpVjmm2PweyvZqgFEWgPumG9dGkB8r1fdgAr5FgY3wUynxTAajJKzxsuCJpruFQd1TsMz9f8CPaqp344fLeU3XTT36DZRVD7895ySPufzaNwbH9zQGNeoK8Hk9kcNFEYjs",
+                        "content": "是正宗的霍山石斛，我颗粒状的也吃了一段时间了，现在改吃粉了，吃起来和颗粒的味道一样的，无异味，容易下口，有颗粒一样的胶质，不错",
+                        "repurchaseCountText": "本店买过2次",
+                        "mediaSize": "4",
+                        "feedId": "1299777893246",
+                        "skuInfo": "净含量:250g;颜色分类:源头批发价【安徽霍山原产地发货】;套餐类型:100%霍山铁皮石斛纯粉【假一罚十】",
+                        "tmallMemberLevel": "1"
+                    }, {
+                        "dateTime": "2026-03-12",
+                        "highLightPositions": [],
+                        "memberLevel": "6",
+                        "createTimeInterval": "1周前",
+                        "media": [{
+                            "imageUrl": "//gw.alicdn.com/bao/uploaded/i1/O1CN014vhSZg1t0m9RtlB6G_!!4611686018427384512-2-rate.png",
+                            "type": "image"
+                        }, {
+                            "imageUrl": "//gw.alicdn.com/bao/uploaded/i3/O1CN01DRIWPN1t0m9RDMkMA_!!4611686018427384512-2-rate.png",
+                            "type": "image"
+                        }, {
+                            "imageUrl": "//gw.alicdn.com/bao/uploaded/i2/O1CN01vPeveF1t0m9RSDVm1_!!4611686018427384512-2-rate.png",
+                            "type": "image"
+                        }],
+                        "userName": "用户_19452145",
+                        "headPic": "//sns.m.taobao.com/avatar/sns/user/flag/sns_logo?type=taobao&kn=wwc_tb_11&bizCode=taobao_avatar&userFlag=RAzN84GK7wS8eNWeA4xefbrA73NkpVVn7teFmGkfqNp5tYFFgzPPejVis1r3KzcKA1Wi1mj1qvYuRuucJKkQ8afP4mY8zdfiiimdK9E4ZAX6jNA7S8AXu7pfJBsyEKhze6h4kmhbKUdzs74922NC1weFmRtyZ43LvEDFT9K",
+                        "content": "粉质很细腻，胶质比较浓郁，口感非常好，准备每天和一杯，提高下自身免疫力",
+                        "mediaSize": "3",
+                        "feedId": "1299587935954",
+                        "skuInfo": "净含量:250g;颜色分类:源头批发价【安徽霍山原产地发货】;套餐类型:100%霍山铁皮石斛纯粉【假一罚十】",
+                        "tmallMemberLevel": "0"
+                    }]
+                }
+            },
+            "umpPriceLogVO": {
+                "umpCreateTime": "2026-03-25 15:46:52",
+                "traceId": "3daa4d2317744248117524840e",
+                "xObjectId": "889792636059",
+                "type": 99,
+                "bcType": "c",
+                "version": "2.1",
+                "sId": "0",
+                "bS": "businessScenario",
+                "sellerId": "2211891851778",
+                "dUmpInvoke": 0,
+                "map": "{}"
+            },
+            "deliveryVO": {
+                "agingDescColor": "#00A67C",
+                "freight": "快递: 免运费",
+                "deliveryFromAddr": "安徽六安",
+                "addressId": "16146720518",
+                "deliverToCity": "上海",
+                "areaId": 310118,
+                "deliveryToAddr": "上海 青浦 徐泾",
+                "agingDesc": "承诺24小时内发货，预计明天送达",
+                "agingDescIcon": "https://gw.alicdn.com/imgextra/i4/O1CN01slkvlu1hsZCa4ltCZ_!!6000000004333-2-tps-360-84.png",
+                "deliveryToDistrict": "青浦"
+            },
+            "o2oVo": {
+                "enableJzLocalizationProduct": "false"
+            },
+            "itemEndorseVO": {
+                "endorseList": [{
+                    "textList": ["多人评价\"发货速度超快\""],
+                    "type": "itemRate"
+                }, {
+                    "textList": ["回头客351人"],
+                    "type": "itemRepurchase"
+                }, {
+                    "textList": ["超3千人加购"],
+                    "type": "itemAddCart"
+                }]
+            },
+            "bottomBarVO": {
+                "rightButtons": [{
+                    "icon": {
+                        "iconFontName": "뀚",
+                        "color": "#666666",
+                        "size": "14",
+                        "alpha": "1.0",
+                        "disabledColor": "#dddddd",
+                        "disabledAlpha": "1.0"
+                    },
+                    "disabled": "false",
+                    "title": {
+                        "color": "#666666",
+                        "alpha": "1.0",
+                        "fontSize": "14",
+                        "bold": "false",
+                        "text": "收藏",
+                        "disabledColor": "#666666",
+                        "disabledAlpha": "1.0"
+                    },
+                    "type": "collect"
+                }],
+                "buyInMobile": "false",
+                "leftButtons": [{
+                    "background": {
+                        "gradientColor": ["#ffcb00", "#ff9402"],
+                        "alpha": "1.0",
+                        "disabledColor": ["#ffcb00", "#ff9402"],
+                        "disabledAlpha": "1.0"
+                    },
+                    "disabled": "false",
+                    "title": {
+                        "color": "#ffffff",
+                        "alpha": "1.0",
+                        "fontSize": "16",
+                        "bold": "true",
+                        "text": "加入购物车",
+                        "disabledColor": "#33ffffff",
+                        "disabledAlpha": "0.2"
+                    },
+                    "type": "add_cart"
+                }, {
+                    "background": {
+                        "gradientColor": ["#ff7700", "#ff4900"],
+                        "alpha": "1.0",
+                        "disabledColor": ["#ff7700", "#ff4900"],
+                        "disabledAlpha": "1.0"
+                    },
+                    "disabled": "false",
+                    "title": {
+                        "color": "#ffffff",
+                        "alpha": "1.0",
+                        "fontSize": "16",
+                        "bold": "true",
+                        "text": "领券购买",
+                        "disabledColor": "#80ffffff",
+                        "disabledAlpha": "0.2"
+                    },
+                    "type": "buy_now"
+                }]
+            },
+            "extensionInfoVO": {
+                "infos": [{
+                    "title": "优惠",
+                    "type": "BIG_MARK_DOWN_COUPON",
+                    "items": [{
+                        "detail4Text": [{
+                            "text": "官方立减12%省14元",
+                            "bold": "false",
+                            "type": "TEXT"
+                        }],
+                        "text": ["官方立减12%省14元"]
+                    }]
+                }, {
+                    "title": "保障",
+                    "type": "GUARANTEE",
+                    "items": [{
+                        "text": ["大促价保", "退货宝", "7天无理由退货", "极速退款"]
+                    }]
+                }, {
+                    "title": "参数",
+                    "type": "BASE_PROPS",
+                    "items": [{
+                        "text": ["石尊仙"],
+                        "title": "品牌"
+                    }, {
+                        "text": ["霍山铁皮石斛"],
+                        "title": "系列"
+                    }, {
+                        "text": ["250克/500克/1000克"],
+                        "title": "规格"
+                    }, {
+                        "text": ["常温"],
+                        "title": "储存条件"
+                    }, {
+                        "text": ["全部适用"],
+                        "title": "适用对象"
+                    }, {
+                        "text": ["否"],
+                        "title": "是否保健食品（国食健字号）"
+                    }, {
+                        "text": ["石斛粉"],
+                        "title": "石斛工艺种类"
+                    }, {
+                        "text": ["100%霍山铁皮石斛纯粉【假一罚十】"],
+                        "title": "套餐类型"
+                    }, {
+                        "text": ["250g,500g,1000g"],
+                        "title": "净含量"
+                    }, {
+                        "text": ["六安市"],
+                        "title": "城市"
+                    }, {
+                        "text": ["铁皮"],
+                        "title": "营养品种类"
+                    }, {
+                        "text": ["种植铁皮"],
+                        "title": "铁皮种类"
+                    }, {
+                        "text": ["中国大陆"],
+                        "title": "产地"
+                    }, {
+                        "text": ["安徽省"],
+                        "title": "省份"
+                    }, {
+                        "text": ["食用农产品"],
+                        "title": "包装方式"
+                    }, {
+                        "text": ["源头批发价【安徽霍山原产地发货】,源头批发价【安徽霍山原产地发货】+电动搅拌杯"],
+                        "title": "颜色分类"
+                    }]
+                }, {
+                    "title": "保障",
+                    "type": "GUARANTEE_NEW",
+                    "items": [{
+                        "icon": "https://gw.alicdn.com/imgextra/i2/O1CN01KdloOc1iYhaZElYLo_!!6000000004425-2-tps-88-88.png",
+                        "action": "更多",
+                        "text": ["订单付款后，若在价保期（在订单详情展示）内降价，可通过“手机淘宝首页搜索-价保中心”申请补差，部分特定场景除外"],
+                        "title": "大促价保",
+                        "actionLink": "https://rulesale.taobao.com/?type=detail&ruleId=10000095&cId=347#/rule/detail?ruleId=10000095&cId=347"
+                    }, {
+                        "icon": "https://gw.alicdn.com/imgextra/i3/O1CN01ywvaIw1Vf23dTriiP_!!6000000002679-2-tps-88-88.png",
+                        "text": ["退货运费险保障：选择上门取件，自动减免首重运费；若选择自寄，参照首重标准补偿，具体以“订单详情-退货宝”为准"],
+                        "title": "退货宝"
+                    }, {
+                        "icon": "https://gw.alicdn.com/imgextra/i3/O1CN018OeEm11qBoiyKY6F6_!!6000000005458-2-tps-88-88.png",
+                        "text": ["满足相应条件（密封包装拆封后不支持）时，消费者可申请 “7天无理由退货”"],
+                        "title": "7天无理由退货"
+                    }, {
+                        "icon": "https://gw.alicdn.com/imgextra/i3/O1CN017M9n9g24KtBtclhMh_!!6000000007373-2-tps-88-88.png",
+                        "text": ["满足相应条件时，信誉良好的用户在退货寄出后，享受极速退款到账。"],
+                        "title": "极速退款"
+                    }]
+                }]
+            },
+            "rightBarVO": {
+                "toolkit": {
+                    "plugin": {
+                        "icon": "https://gw.alicdn.com/imgextra/i4/O1CN0165n4Cr1CGK2faBVbj_!!6000000000053-1-tps-56-56.gif",
+                        "disabled": "false",
+                        "href": "https://pc.taobao.com?channel=item",
+                        "label": "桌面版",
+                        "priority": 201
+                    },
+                    "webww2": {
+                        "openType": "manual",
+                        "icon": "https://img.alicdn.com/imgextra/i2/O1CN012pqGiT1gp4XhKkkRs_!!6000000004190-2-tps-96-96.png",
+                        "disabled": "false",
+                        "label": "联系客服",
+                        "priority": 200
+                    },
+                    "cart2": {
+                        "icon": "https://img.alicdn.com/imgextra/i4/O1CN01FOK30u1SymJbsQUtk_!!6000000002316-2-tps-96-96.png",
+                        "disabled": "false",
+                        "href": "//cart.taobao.com",
+                        "label": "购物车",
+                        "priority": 199
+                    },
+                    "qrcode": {
+                        "priority": 198,
+                        "url": "https://pages-g.m.taobao.com/wow/z/app/detail-next/item/index?fromPc=true&id=889792636059",
+                        "spm": "0.0.sidebar.qrcode",
+                        "icon": "https://img.alicdn.com/imgextra/i3/O1CN01CkZbKp27arsx4ktdK_!!6000000007814-2-tps-96-96.png",
+                        "disabled": "false",
+                        "href": "https://h5.m.taobao.com/awp/core/detail.htm?id=889792636059",
+                        "label": "商品码"
+                    },
+                    "survey": {
+                        "icon": "https://gw.alicdn.com/imgextra/i3/O1CN01js47DP1J3DxYBQG4g_!!6000000000972-1-tps-56-56.gif",
+                        "disabled": "false",
+                        "href": "https://survey.taobao.com/apps/zhiliao/GUShqv-xp",
+                        "label": "用户调研",
+                        "priority": 197
+                    },
+                    "copyUrl": {
+                        "openType": "manual",
+                        "icon": "https://img.alicdn.com/imgextra/i1/O1CN01Go6lqn28DnZ3MlmFE_!!6000000007899-2-tps-96-96.png",
+                        "disabled": "false",
+                        "label": "复制链接",
+                        "priority": 196
+                    },
+                    "feedback": {
+                        "priority": 195,
+                        "icon": "https://img.alicdn.com/imgextra/i1/O1CN01at70Km26oJu1Kk0vt_!!6000000007708-2-tps-96-96.png",
+                        "disabled": "false"
+                    },
+                    "report": {
+                        "priority": 99,
+                        "href": "//jubao.taobao.com/index.htm?itemId=889792636059&spm=a1z6q.7847058",
+                        "icon": "https://img.alicdn.com/imgextra/i2/O1CN01RAWBfz20zsCKuENux_!!6000000006921-2-tps-96-96.png",
+                        "label": "举报",
+                        "disabled": "false"
+                    },
+                    "backTop": {
+                        "disabled": "false",
+                        "priority": 1
+                    }
+                },
+                "buyerButtons": [{
+                    "icon": "https://gw.alicdn.com/imgextra/i4/O1CN0165n4Cr1CGK2faBVbj_!!6000000000053-1-tps-56-56.gif",
+                    "disabled": "false",
+                    "href": "https://pc.taobao.com?channel=item",
+                    "label": "桌面版",
+                    "priority": 201,
+                    "type": "plugin"
+                }, {
+                    "icon": "https://img.alicdn.com/imgextra/i2/O1CN012pqGiT1gp4XhKkkRs_!!6000000004190-2-tps-96-96.png",
+                    "disabled": "false",
+                    "label": "联系客服",
+                    "priority": 200,
+                    "type": "webww2"
+                }, {
+                    "icon": "https://img.alicdn.com/imgextra/i4/O1CN01FOK30u1SymJbsQUtk_!!6000000002316-2-tps-96-96.png",
+                    "disabled": "false",
+                    "href": "//cart.taobao.com",
+                    "label": "购物车",
+                    "priority": 199,
+                    "type": "cart2"
+                }, {
+                    "icon": "https://img.alicdn.com/imgextra/i3/O1CN01CkZbKp27arsx4ktdK_!!6000000007814-2-tps-96-96.png",
+                    "disabled": "false",
+                    "href": "https://h5.m.taobao.com/awp/core/detail.htm?id=889792636059",
+                    "label": "商品码",
+                    "priority": 198,
+                    "type": "qrcode"
+                }, {
+                    "icon": "https://gw.alicdn.com/imgextra/i3/O1CN01js47DP1J3DxYBQG4g_!!6000000000972-1-tps-56-56.gif",
+                    "disabled": "false",
+                    "href": "https://survey.taobao.com/apps/zhiliao/GUShqv-xp",
+                    "label": "用户调研",
+                    "priority": 197,
+                    "type": "survey"
+                }, {
+                    "icon": "https://img.alicdn.com/imgextra/i1/O1CN01Go6lqn28DnZ3MlmFE_!!6000000007899-2-tps-96-96.png",
+                    "disabled": "false",
+                    "label": "复制链接",
+                    "priority": 196,
+                    "type": "copyUrl"
+                }, {
+                    "icon": "https://img.alicdn.com/imgextra/i1/O1CN01at70Km26oJu1Kk0vt_!!6000000007708-2-tps-96-96.png",
+                    "disabled": "false",
+                    "priority": 195,
+                    "type": "feedback"
+                }, {
+                    "icon": "https://img.alicdn.com/imgextra/i2/O1CN01RAWBfz20zsCKuENux_!!6000000006921-2-tps-96-96.png",
+                    "disabled": "false",
+                    "href": "//jubao.taobao.com/index.htm?itemId=889792636059&spm=a1z6q.7847058",
+                    "label": "举报",
+                    "priority": 99,
+                    "type": "report"
+                }, {
+                    "disabled": "false",
+                    "priority": 1,
+                    "type": "backTop"
+                }],
+                "sellerButtons": []
+            },
+            "payVO": {
+                "payConfigList": [{
+                    "text": "信用卡支付"
+                }]
+            },
+            "priceVO": {
+                "extraPrice": {
+                    "priceUnit": "￥",
+                    "priceColor": "#FFFFFF",
+                    "priceTitle": "券后",
+                    "priceColorNew": "#FFFFFF",
+                    "priceBgColor": "#FF5000",
+                    "priceTitleColor": "#FFFFFF",
+                    "priceText": "98",
+                    "priceDesc": "起",
+                    "priceMoney": "9800",
+                    "hiddenPrice": "false"
+                },
+                "mainBelt": {
+                    "priceBeltImg": "https://img.alicdn.com/i2/O1CN01bMZ7dB1Nfw2YalBoH_!!4611686018427384654-2-atmosphere_center_image_storag-merlin-1500-256.png",
+                    "rightBelt": {
+                        "extraTextColor": "#FFFFFF",
+                        "countdown": "false",
+                        "extraText": "结束",
+                        "text": "3月31日 24点",
+                        "textColor": "#FFFFFF"
+                    },
+                    "logo": "https://img.alicdn.com/i2/O1CN0163VRtr1Nfw2Ybuvi7_!!4611686018427384654-2-atmosphere_center_image_storag-merlin-639-72.png",
+                    "beltStyleType": 2
+                },
+                "price": {
+                    "priceUnit": "￥",
+                    "priceColor": "#FF4F00",
+                    "priceTitle": "优惠前",
+                    "priceColorNew": "#FFFFFF",
+                    "priceTitleColor": "#FF4F00",
+                    "priceText": "112",
+                    "priceDesc": "起",
+                    "priceMoney": "11200",
+                    "hiddenPrice": "false"
+                },
+                "isNewStyle": "true"
+            },
+            "webfontVO": {
+                "enableWebfont": "false"
+            },
+            "tabVO": {
+                "tabList": [{
+                    "icon": "https://img.alicdn.com/imgextra/i1/O1CN016DNujx1yMMj6NMXVv_!!6000000006564-55-tps-24-24.svg",
+                    "name": "comments",
+                    "sort": 1,
+                    "title": "用户评价"
+                }, {
+                    "icon": "https://img.alicdn.com/imgextra/i1/O1CN016DNujx1yMMj6NMXVv_!!6000000006564-55-tps-24-24.svg",
+                    "name": "base_drops",
+                    "sort": 2,
+                    "title": "参数信息"
+                }, {
+                    "name": "factory_qualification",
+                    "sort": 4,
+                    "title": "验厂资质"
+                }, {
+                    "icon": "https://img.alicdn.com/imgextra/i1/O1CN016DNujx1yMMj6NMXVv_!!6000000006564-55-tps-24-24.svg",
+                    "name": "desc",
+                    "sort": 5,
+                    "title": "图文详情"
+                }, {
+                    "icon": "https://img.alicdn.com/imgextra/i1/O1CN016DNujx1yMMj6NMXVv_!!6000000006564-55-tps-24-24.svg",
+                    "name": "recommends",
+                    "sort": 6,
+                    "title": "本店推荐"
+                }, {
+                    "name": "guessULike",
+                    "sort": 8,
+                    "title": "看了又看"
+                }]
+            }
+        },
+        "frontendVO": {
+            "skuImageLayoutMode": "listMode",
+            "isAplusDropPurlHit": false
+        }
+    },
+    "serverData": "success",
+    "ssrItemId": "889792636059"
+}

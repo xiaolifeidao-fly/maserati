@@ -1,0 +1,20 @@
+{
+    "compilerOptions": {
+      "module": "commonjs",
+      "target": "esnext",
+      "declaration": true,
+      "experimentalDecorators": true,
+      "emitDecoratorMetadata": true,
+      "baseUrl": "./",  
+      "paths": {
+        "@/*": ["./*"],
+        "@api/*": ["./api/*"],
+        "@utils/*": ["./utils/*"],
+        "@eleapi/*": ["./eleapi/*"],
+        "@model/*": ["./model/*"],
+        "@enums/*": ["./enums/*"]
+      }
+    },
+    "include": ["**/*"]
+  }
+  
