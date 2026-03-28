@@ -1,5 +1,4 @@
 // require('module-alias/register');
-import { plainToInstance } from 'class-transformer';
 import 'reflect-metadata';
 
 export const Protocols = {
@@ -83,7 +82,10 @@ abstract class ElectronApi {
   
 
   jsonToObject(clazz: any, data: {}){
-    return plainToInstance(clazz, data)
+    if (data && typeof data === 'object') {
+      return Object.assign(new clazz(), data);
+    }
+    return data;
   }
 
   send(key : string, ...args: any): void{
@@ -112,9 +114,11 @@ abstract class ElectronApi {
               apiName = this.getNamespace() + "_" + apiName;
           }
           //@ts-ignore
-          // console.log(window[this.getApiName()])
-          //@ts-ignore
-          return await window[this.getApiName()][functionName](...args);
+          const rendererApi = window[apiName];
+          if (!rendererApi || typeof rendererApi[functionName] !== 'function') {
+            throw new Error(`electron api '${apiName}.${functionName}' is not available`);
+          }
+          return await rendererApi[functionName](...args);
       }
       return {};
   }
@@ -137,7 +141,11 @@ abstract class ElectronApi {
         }
         await this.removeOnMessage(apiName, functionName);
         //@ts-ignore
-        return await window[apiName][functionName](callback);
+        const rendererApi = window[apiName];
+        if (!rendererApi || typeof rendererApi[functionName] !== 'function') {
+          throw new Error(`electron api '${apiName}.${functionName}' is not available`);
+        }
+        return await rendererApi[functionName](callback);
     }
     return {};
   }

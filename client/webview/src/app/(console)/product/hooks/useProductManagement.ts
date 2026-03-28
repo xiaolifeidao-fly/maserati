@@ -2,35 +2,44 @@
 
 import { useEffect, useState } from "react";
 import {
+  fetchCategoryOptions,
   createProduct,
   deleteProduct,
   fetchProducts,
+  fetchShopOptions,
   updateProduct,
-  type ShopListQuery,
-  type ShopPayload,
+  type CategoryRecord,
+  type ProductListQuery,
+  type ProductPayload,
+  type ProductRecord,
   type ShopRecord,
 } from "../api/product.api";
 
-const defaultQuery: Required<ShopListQuery> = {
+const defaultQuery: Required<ProductListQuery> = {
   pageIndex: 1,
   pageSize: 10,
-  code: "",
-  name: "",
+  shopId: 0,
+  categoryId: 0,
+  title: "",
+  outerProductId: "",
+  status: "",
 };
 
 export function useProductManagement() {
-  const [products, setProducts] = useState<ShopRecord[]>([]);
+  const [products, setProducts] = useState<ProductRecord[]>([]);
+  const [shops, setShops] = useState<ShopRecord[]>([]);
+  const [categories, setCategories] = useState<CategoryRecord[]>([]);
   const [total, setTotal] = useState(0);
-  const [query, setQuery] = useState<Required<ShopListQuery>>(defaultQuery);
+  const [query, setQuery] = useState<Required<ProductListQuery>>(defaultQuery);
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
-  const refresh = async (nextQuery?: Partial<ShopListQuery>) => {
+  const refresh = async (nextQuery?: Partial<ProductListQuery>) => {
     const mergedQuery = { ...query, ...nextQuery };
     setLoading(true);
     try {
       const result = await fetchProducts(mergedQuery);
-      setProducts(result.data);
+      setProducts(Array.isArray(result.data) ? result.data : []);
       setTotal(result.total);
       setQuery(mergedQuery);
     } finally {
@@ -38,7 +47,13 @@ export function useProductManagement() {
     }
   };
 
-  const saveProduct = async (id: number | null, payload: ShopPayload) => {
+  const refreshOptions = async () => {
+    const [shopResult, categoryResult] = await Promise.all([fetchShopOptions(), fetchCategoryOptions()]);
+    setShops(Array.isArray(shopResult.data) ? shopResult.data : []);
+    setCategories(Array.isArray(categoryResult.data) ? categoryResult.data : []);
+  };
+
+  const saveProduct = async (id: number | null, payload: ProductPayload) => {
     setSubmitting(true);
     try {
       if (id === null) {
@@ -56,8 +71,7 @@ export function useProductManagement() {
     setSubmitting(true);
     try {
       await deleteProduct(id);
-      const nextPage =
-        products.length === 1 && query.pageIndex > 1 ? query.pageIndex - 1 : query.pageIndex;
+      const nextPage = products.length === 1 && query.pageIndex > 1 ? query.pageIndex - 1 : query.pageIndex;
       await refresh({ pageIndex: nextPage });
     } finally {
       setSubmitting(false);
@@ -65,11 +79,13 @@ export function useProductManagement() {
   };
 
   useEffect(() => {
-    void refresh();
+    void Promise.all([refresh(), refreshOptions()]);
   }, []);
 
   return {
     products,
+    shops,
+    categories,
     total,
     query,
     loading,

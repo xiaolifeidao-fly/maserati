@@ -2,7 +2,7 @@
 
 import axios from "axios";
 import { plainToInstance } from "class-transformer";
-import { clearAuthToken, getAuthToken } from "@/utils/auth";
+import { getAuthToken, logout } from "@/utils/auth";
 
 export interface ApiResponse<T> {
   success: boolean;
@@ -23,12 +23,14 @@ export const instance = axios.create({
 });
 
 instance.interceptors.request.use((config) => {
-  const token = getAuthToken();
-  if (token) {
-    config.headers = config.headers ?? {};
-    config.headers.token = token;
-  }
-  return config;
+  return Promise.resolve(config).then(async (resolvedConfig) => {
+    const token = await getAuthToken();
+    if (token) {
+      resolvedConfig.headers = resolvedConfig.headers ?? {};
+      resolvedConfig.headers.token = token;
+    }
+    return resolvedConfig;
+  });
 });
 
 function handleAuthFailure(message?: string | null, error?: string | null) {
@@ -36,7 +38,7 @@ function handleAuthFailure(message?: string | null, error?: string | null) {
   if (!content.includes("not login")) {
     return;
   }
-  clearAuthToken();
+  void logout();
   if (typeof window !== "undefined" && window.location.pathname !== "/login") {
     window.location.href = "/login";
   }

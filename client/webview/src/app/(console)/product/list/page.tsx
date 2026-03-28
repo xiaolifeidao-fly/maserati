@@ -1,7 +1,5 @@
-"use client";
-
-import { ProductManagementPanel } from "./components/ProductManagementPanel";
+import { redirect } from "next/navigation";
 
 export default function ProductListPage() {
-  return <ProductManagementPanel />;
+  redirect("/product");
 }

@@ -16,11 +16,13 @@ export default function ConsoleLayout({
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    if (!isAuthenticated()) {
-      router.replace("/login");
-      return;
-    }
-    setReady(true);
+    void (async () => {
+      if (!(await isAuthenticated())) {
+        router.replace("/login");
+        return;
+      }
+      setReady(true);
+    })();
   }, [router]);
 
   if (!ready) {

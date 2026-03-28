@@ -26,23 +26,13 @@ func (s *NoticeService) EnsureTable() error {
 }
 
 func (s *NoticeService) ListNotices(query noticeDTO.NoticeQueryDTO) (*baseDTO.PageDTO[noticeDTO.NoticeDTO], error) {
-	if s.noticeRepository.Db == nil {
-		return nil, fmt.Errorf("database is not initialized")
-	}
-
 	pageIndex, pageSize := normalizeNoticePage(query.Page, query.PageIndex, query.PageSize)
-	dbQuery := s.noticeRepository.Db.Model(&noticeRepository.Notice{}).Where("active = ?", 1)
-	if title := strings.TrimSpace(query.Title); title != "" {
-		dbQuery = dbQuery.Where("title LIKE ?", "%"+title+"%")
-	}
-
-	var total int64
-	if err := dbQuery.Count(&total).Error; err != nil {
+	total, err := s.noticeRepository.CountByQuery(query)
+	if err != nil {
 		return nil, err
 	}
-
-	var entities []*noticeRepository.Notice
-	if err := dbQuery.Order("id DESC").Offset((pageIndex - 1) * pageSize).Limit(pageSize).Find(&entities).Error; err != nil {
+	entities, err := s.noticeRepository.ListByQuery(query, pageIndex, pageSize)
+	if err != nil {
 		return nil, err
 	}
 
@@ -61,9 +51,6 @@ func (s *NoticeService) GetNoticeByID(id uint) (*noticeDTO.NoticeDTO, error) {
 }
 
 func (s *NoticeService) CreateNotice(req *noticeDTO.CreateNoticeDTO) (*noticeDTO.NoticeDTO, error) {
-	if s.noticeRepository.Db == nil {
-		return nil, fmt.Errorf("database is not initialized")
-	}
 	if req == nil {
 		return nil, fmt.Errorf("request is nil")
 	}

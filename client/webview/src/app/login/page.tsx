@@ -2,7 +2,6 @@
 
 import { Col, Row } from "antd";
 import { LoginFormCard } from "./components/LoginFormCard";
-import { LoginHero } from "./components/LoginHero";
 
 export default function LoginPage() {
   return (
@@ -13,11 +12,8 @@ export default function LoginPage() {
           width: "100%",
         }}
       >
-        <Row gutter={[32, 32]} align="middle" style={{ position: "relative", zIndex: 1 }}>
-          <Col xs={24} lg={14}>
-            <LoginHero />
-          </Col>
-          <Col xs={24} lg={10}>
+        <Row justify="center" style={{ position: "relative", zIndex: 1 }}>
+          <Col xs={24} sm={20} md={16} lg={10} xl={8}>
             <LoginFormCard />
           </Col>
         </Row>

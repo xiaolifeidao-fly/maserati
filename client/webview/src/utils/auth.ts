@@ -1,35 +1,143 @@
 "use client";
 
-const AUTH_TOKEN_KEY = "phoenix_manager_token";
+import { AuthApi, type AuthSession, type LoginInput, type RegisterInput } from "@eleapi/auth/auth.api";
 
-function canUseBrowserStorage() {
-  return typeof window !== "undefined";
+type AuthBridge = {
+  login?: (...args: unknown[]) => Promise<unknown>;
+  register?: (...args: unknown[]) => Promise<unknown>;
+  logout?: (...args: unknown[]) => Promise<unknown>;
+  getAuthState?: (...args: unknown[]) => Promise<unknown>;
+  getToken?: (...args: unknown[]) => Promise<unknown>;
+};
+
+function getWindowBridgeState() {
+  if (typeof window === "undefined") {
+    return {
+      authBridge: undefined,
+      bridgeMeta: undefined,
+      preloadPing: undefined,
+      bridgeError: undefined,
+    };
+  }
+
+  const electronWindow = window as typeof window & {
+    auth?: AuthBridge;
+    __ELECTRON_BRIDGE__?: {
+      ready?: boolean;
+      apis?: string[];
+    };
+    __ELECTRON_PRELOAD_PING__?: {
+      loaded?: boolean;
+    };
+    __ELECTRON_BRIDGE_ERROR__?: {
+      message?: string;
+    };
+  };
+
+  return {
+    authBridge: electronWindow.auth,
+    bridgeMeta: electronWindow.__ELECTRON_BRIDGE__,
+    preloadPing: electronWindow.__ELECTRON_PRELOAD_PING__,
+    bridgeError: electronWindow.__ELECTRON_BRIDGE_ERROR__,
+  };
 }
 
-export function getAuthToken() {
-  if (!canUseBrowserStorage()) {
+function hasAuthBridge(authBridge?: AuthBridge) {
+  return Boolean(
+    authBridge &&
+      typeof authBridge.login === "function" &&
+      typeof authBridge.register === "function" &&
+      typeof authBridge.logout === "function" &&
+      typeof authBridge.getAuthState === "function" &&
+      typeof authBridge.getToken === "function",
+  );
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitForAuthBridge(timeoutMs = 1500) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    const { authBridge } = getWindowBridgeState();
+    if (hasAuthBridge(authBridge)) {
+      return true;
+    }
+    await sleep(50);
+  }
+  return false;
+}
+
+function buildUnavailableMessage() {
+  if (typeof window === "undefined") {
+    return "electron auth api is not available";
+  }
+
+  const { authBridge, bridgeMeta, preloadPing, bridgeError } = getWindowBridgeState();
+  const hasElectronUA = window.navigator.userAgent.includes("Electron");
+  const bridgeApis = Array.isArray(bridgeMeta?.apis) ? bridgeMeta.apis.join(",") : "";
+  const authMethods = authBridge ? Object.keys(authBridge).join(",") : "";
+
+  return [
+    "electron auth api is not available",
+    `electronUserAgent=${hasElectronUA}`,
+    `preloadLoaded=${Boolean(preloadPing?.loaded)}`,
+    `bridgeReady=${Boolean(bridgeMeta?.ready)}`,
+    `bridgeApis=${bridgeApis || "none"}`,
+    `authMethods=${authMethods || "none"}`,
+    `bridgeError=${bridgeError?.message || "none"}`,
+  ].join(" | ");
+}
+
+async function createAuthApi() {
+  if (!(await waitForAuthBridge())) {
+    return null;
+  }
+  return new AuthApi();
+}
+
+export async function login(input: LoginInput): Promise<AuthSession> {
+  const authApi = await createAuthApi();
+  if (!authApi) {
+    throw new Error(buildUnavailableMessage());
+  }
+  return authApi.login(input);
+}
+
+export async function register(input: RegisterInput): Promise<AuthSession> {
+  const authApi = await createAuthApi();
+  if (!authApi) {
+    throw new Error(buildUnavailableMessage());
+  }
+  return authApi.register(input);
+}
+
+export async function logout() {
+  const authApi = await createAuthApi();
+  if (!authApi) {
+    return;
+  }
+  await authApi.logout();
+}
+
+export async function getAuthState(): Promise<AuthSession> {
+  const authApi = await createAuthApi();
+  if (!authApi) {
+    return { authenticated: false };
+  }
+  return authApi.getAuthState();
+}
+
+export async function getAuthToken() {
+  const authApi = await createAuthApi();
+  if (!authApi) {
     return "";
   }
-  return window.localStorage.getItem(AUTH_TOKEN_KEY) || window.sessionStorage.getItem(AUTH_TOKEN_KEY) || "";
+  return authApi.getToken();
 }
 
-export function setAuthToken(token: string, remember = true) {
-  if (!canUseBrowserStorage()) {
-    return;
-  }
-  clearAuthToken();
-  const storage = remember ? window.localStorage : window.sessionStorage;
-  storage.setItem(AUTH_TOKEN_KEY, token);
-}
-
-export function clearAuthToken() {
-  if (!canUseBrowserStorage()) {
-    return;
-  }
-  window.localStorage.removeItem(AUTH_TOKEN_KEY);
-  window.sessionStorage.removeItem(AUTH_TOKEN_KEY);
-}
-
-export function isAuthenticated() {
-  return getAuthToken().trim().length > 0;
+export async function isAuthenticated() {
+  const session = await getAuthState();
+  return Boolean(session.authenticated);
 }

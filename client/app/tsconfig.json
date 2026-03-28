@@ -1,0 +1,38 @@
+{
+  "compilerOptions": {
+    "target": "ES2015",                                  
+    /* Modules */
+    "module": "CommonJS",    
+    "lib": ["es2015"],
+    "esModuleInterop": true,                            
+    "forceConsistentCasingInFileNames": true,     
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
+    "strict": true,                                     
+    "skipLibCheck": true  ,                             
+    "outDir": "./dist",
+    "types": ["node", "electron"],
+    "baseUrl": "./",
+    "paths": {
+      "@src/*": [
+        "./src/*"
+      ],
+      "@api/*": [
+        "../common/api/*"
+      ],
+      "@utils/*": [
+        "../common/utils/*"
+      ],
+      "@model/*": [
+        "../common/model/*"
+      ],
+      "@eleapi/*": [
+        "../common/eleapi/*"
+      ],
+      "@enums/*": [
+        "../common/enums/*"
+      ]
+    }
+  },
+  "include": ["src/**/*","../common/utils/**/*", "../common/utils/store/web.ts", "../common/utils/store/local.ts"]
+}

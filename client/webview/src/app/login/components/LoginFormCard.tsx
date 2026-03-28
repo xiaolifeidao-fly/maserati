@@ -1,53 +1,60 @@
 "use client";
 
-import {
-  LockOutlined,
-  MailOutlined,
-  SafetyCertificateOutlined,
-} from "@ant-design/icons";
-import { Button, Checkbox, Form, Input, Select, Space, Typography, message } from "antd";
+import { LockOutlined, MailOutlined } from "@ant-design/icons";
+import { Button, Form, Input, Segmented, Typography, message } from "antd";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { login } from "@/app/login/api/login.api";
-import { isAuthenticated, setAuthToken } from "@/utils/auth";
+import { login, register } from "@/app/login/api/login.api";
+import { isAuthenticated } from "@/utils/auth";
 
-const { Link, Paragraph, Text, Title } = Typography;
+const { Paragraph, Text, Title } = Typography;
 
-interface LoginValues {
+type AuthMode = "login" | "register";
+
+interface AuthFormValues {
+  name?: string;
   account: string;
   password: string;
-  workspace: string;
-  remember: boolean;
+  confirmPassword?: string;
 }
-
-const passkeys = [
-  { label: "工作空间", value: "凤凰云后台" },
-  { label: "会话保护", value: "24 小时" },
-] as const;
 
 export function LoginFormCard() {
   const router = useRouter();
   const [messageApi, contextHolder] = message.useMessage();
   const [submitting, setSubmitting] = useState(false);
+  const [mode, setMode] = useState<AuthMode>("login");
 
   useEffect(() => {
-    if (isAuthenticated()) {
-      router.replace("/product/list");
-    }
+    void (async () => {
+      if (await isAuthenticated()) {
+        router.replace("/workspace");
+      }
+    })();
   }, [router]);
 
-  const handleFinish = async (values: LoginValues) => {
+  const handleFinish = async (values: AuthFormValues) => {
     setSubmitting(true);
     try {
-      const response = await login({
-        username: values.account.trim(),
-        password: values.password,
-      });
-      setAuthToken(response.token, values.remember);
-      messageApi.success("登录成功，正在进入后台");
-      router.replace(values.workspace === "user" ? "/user" : "/product/list");
+      const username = values.account.trim();
+      const password = values.password;
+      const response =
+        mode === "login"
+          ? await login({
+              username,
+              password,
+            })
+          : await register({
+              name: values.name?.trim() || username,
+              username,
+              password,
+            });
+      if (!response.authenticated) {
+        throw new Error(mode === "login" ? "登录失败，请稍后重试" : "注册成功，但登录状态未建立");
+      }
+      messageApi.success(mode === "login" ? "登录成功，正在进入后台" : "注册成功，正在进入后台");
+      router.replace("/workspace");
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : "请输入登录密码";
+      const errorMessage = error instanceof Error ? error.message : mode === "login" ? "请输入登录信息" : "请输入注册信息";
       messageApi.error(errorMessage);
     } finally {
       setSubmitting(false);
@@ -66,104 +73,63 @@ export function LoginFormCard() {
             "linear-gradient(180deg, rgba(255,255,255,0.98) 0%, rgba(244,248,253,0.98) 100%)",
         }}
       >
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            gap: 16,
-            alignItems: "start",
-            marginBottom: 24,
-          }}
-        >
-          <div>
-            <div className="manager-brand-kicker">安全登录</div>
-            <Title
-              level={2}
-              className="manager-display-title"
-              style={{ marginTop: 12, marginBottom: 10, color: "var(--manager-text)" }}
-            >
-              欢迎回到凤凰后台
-            </Title>
-            <Paragraph style={{ color: "var(--manager-text-soft)", marginBottom: 0 }}>
-              输入后台账号和密码后即可进入管理台，当前系统统一使用中文文案。
-            </Paragraph>
-          </div>
-
-          <div
-            style={{
-              padding: 12,
-              borderRadius: 18,
-              background: "rgba(245,248,253,0.98)",
-              border: "1px solid rgba(145,171,212,0.18)",
-            }}
+        <div style={{ marginBottom: 28 }}>
+          <div className="manager-brand-kicker">电商辅助平台</div>
+          <Title
+            level={2}
+            className="manager-display-title"
+            style={{ marginTop: 10, marginBottom: 8, color: "var(--manager-text)" }}
           >
-            <SafetyCertificateOutlined style={{ color: "var(--manager-success)", fontSize: 20 }} />
-          </div>
+            {mode === "login" ? "登录管理台" : "注册账号"}
+          </Title>
+          <Paragraph style={{ color: "var(--manager-text-soft)", marginBottom: 0 }}>
+            {mode === "login" ? "请输入账号和密码。" : "填写基础信息后即可完成注册。"}
+          </Paragraph>
         </div>
 
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-            gap: 12,
-            marginBottom: 24,
-          }}
-        >
-          {passkeys.map((item) => (
-            <div
-              key={item.label}
-              style={{
-                padding: 14,
-                borderRadius: 18,
-                background: "rgba(248,250,255,0.98)",
-                border: "1px solid rgba(145, 171, 212, 0.16)",
-              }}
-            >
-              <Text style={{ color: "var(--manager-text-faint)", fontSize: 12 }}>{item.label}</Text>
-              <div style={{ color: "var(--manager-text)", fontWeight: 700, marginTop: 6 }}>{item.value}</div>
-            </div>
-          ))}
-        </div>
-        <div
-          style={{
-            marginBottom: 24,
-            padding: "12px 14px",
-            borderRadius: 18,
-            background: "rgba(239,244,251,0.98)",
-            border: "1px solid rgba(145,171,212,0.18)",
-            color: "rgba(16,40,64,0.76)",
-            fontSize: 13,
-            lineHeight: 1.7,
-          }}
-        >
-          用更浅的蓝、更整洁的层次和更统一的间距，让后台像截图里那样简洁、轻盈、稳定。
-        </div>
+        <Segmented<AuthMode>
+          block
+          value={mode}
+          options={[
+            { label: "登录", value: "login" },
+            { label: "注册", value: "register" },
+          ]}
+          onChange={(value) => setMode(value)}
+          style={{ marginBottom: 24 }}
+        />
 
-        <Form<LoginValues>
+        <Form<AuthFormValues>
           layout="vertical"
-          initialValues={{
-            account: "admin@phoenix.io",
-            password: "123456",
-            workspace: "product",
-            remember: true,
-          }}
           onFinish={handleFinish}
         >
+          {mode === "register" ? (
+            <Form.Item
+              label="昵称"
+              name="name"
+              rules={[{ required: true, message: "请输入昵称" }]}
+            >
+              <Input placeholder="请输入昵称" />
+            </Form.Item>
+          ) : null}
+
           <Form.Item
             label="账号"
             name="account"
-            rules={[{ required: true, message: "请输入登录账号" }]}
+            rules={[{ required: true, message: "请输入账号" }]}
           >
             <Input
               prefix={<MailOutlined style={{ color: "rgba(16,40,64,0.42)" }} />}
-              placeholder="请输入邮箱或账号"
+              placeholder="请输入账号"
             />
           </Form.Item>
 
           <Form.Item
             label="密码"
             name="password"
-            rules={[{ required: true, message: "请输入登录密码" }]}
+            rules={[
+              { required: true, message: "请输入密码" },
+              ...(mode === "register" ? [{ min: 6, message: "密码至少 6 位" }] : []),
+            ]}
           >
             <Input.Password
               prefix={<LockOutlined style={{ color: "rgba(16,40,64,0.42)" }} />}
@@ -171,23 +137,35 @@ export function LoginFormCard() {
             />
           </Form.Item>
 
-          <Form.Item label="工作台" name="workspace">
-            <Select
-              options={[
-                { label: "商品后台", value: "product" },
-                { label: "用户后台", value: "user" },
+          {mode === "register" ? (
+            <Form.Item
+              label="确认密码"
+              name="confirmPassword"
+              dependencies={["password"]}
+              rules={[
+                { required: true, message: "请再次输入密码" },
+                ({ getFieldValue }) => ({
+                  validator(_, value) {
+                    if (!value || getFieldValue("password") === value) {
+                      return Promise.resolve();
+                    }
+                    return Promise.reject(new Error("两次输入的密码不一致"));
+                  },
+                }),
               ]}
-            />
-          </Form.Item>
-
-          <Space
-            style={{ width: "100%", justifyContent: "space-between", marginBottom: 24 }}
-          >
-            <Form.Item name="remember" valuePropName="checked" noStyle>
-              <Checkbox>记住登录状态</Checkbox>
+            >
+              <Input.Password
+                prefix={<LockOutlined style={{ color: "rgba(16,40,64,0.42)" }} />}
+                placeholder="请再次输入密码"
+              />
             </Form.Item>
-            <Link>忘记密码</Link>
-          </Space>
+          ) : (
+            <div style={{ marginBottom: 24 }}>
+              <Text style={{ color: "var(--manager-text-soft)" }}>
+                登录状态仅保存在 Electron 主进程内存中，关闭客户端后需要重新登录。
+              </Text>
+            </div>
+          )}
 
           <Button
             type="primary"
@@ -203,8 +181,21 @@ export function LoginFormCard() {
               fontWeight: 800,
             }}
           >
-            登录后台
+            {mode === "login" ? "登录后台" : "注册并进入"}
           </Button>
+
+          <div style={{ marginTop: 18, textAlign: "center" }}>
+            <Text style={{ color: "var(--manager-text-soft)" }}>
+              {mode === "login" ? "还没有账号？" : "已经有账号？"}
+            </Text>
+            <Button
+              type="link"
+              style={{ paddingInline: 8 }}
+              onClick={() => setMode(mode === "login" ? "register" : "login")}
+            >
+              {mode === "login" ? "立即注册" : "返回登录"}
+            </Button>
+          </div>
         </Form>
       </div>
     </>

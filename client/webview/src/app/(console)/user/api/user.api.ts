@@ -68,7 +68,7 @@ export class UserStats {
   activeUsers = 0;
 }
 
-export interface UserListQuery {
+export interface UserListQuery extends Record<string, string | number | undefined> {
   pageIndex?: number;
   pageSize?: number;
   search?: string;

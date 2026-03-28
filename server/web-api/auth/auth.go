@@ -11,18 +11,23 @@ import (
 )
 
 const (
-	ContextUserKey      = "auth.user"
-	ContextUserIDKey    = "auth.userId"
-	ContextRoleIDsKey   = "auth.roleIds"
-	ContextTenantIDsKey = "auth.tenantIds"
-	ContextTokenKey     = "auth.token"
+	ContextUserKey   = "auth.user"
+	ContextUserIDKey = "auth.userId"
+	ContextTokenKey  = "auth.token"
 )
 
 var publicRouteRegistry sync.Map
 
+const tempBypassAuthMiddleware = false
+
 func Middleware() gin.HandlerFunc {
 	service := authService.NewAuthService()
 	return func(c *gin.Context) {
+		if tempBypassAuthMiddleware {
+			c.Next()
+			return
+		}
+
 		if c.Request.Method == "OPTIONS" {
 			c.Next()
 			return
@@ -44,8 +49,6 @@ func Middleware() gin.HandlerFunc {
 
 		c.Set(ContextUserKey, user)
 		c.Set(ContextUserIDKey, user.ID)
-		c.Set(ContextRoleIDsKey, user.RoleIDs)
-		c.Set(ContextTenantIDsKey, user.TenantIDs)
 		c.Set(ContextTokenKey, token)
 		c.Next()
 	}
@@ -100,7 +103,7 @@ func resolveRequestURL(c *gin.Context) string {
 	return trimRequestPathPrefix(c.Request.URL.Path)
 }
 
-func extractToken(c *gin.Context) string {
+func ExtractToken(c *gin.Context) string {
 	if token := strings.TrimSpace(c.GetHeader("token")); token != "" {
 		return token
 	}
@@ -115,6 +118,10 @@ func extractToken(c *gin.Context) string {
 		return strings.TrimSpace(authorization[7:])
 	}
 	return authorization
+}
+
+func extractToken(c *gin.Context) string {
+	return ExtractToken(c)
 }
 
 func joinRoute(basePath, relativePath string) string {

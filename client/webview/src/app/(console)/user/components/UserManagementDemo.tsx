@@ -38,6 +38,7 @@ import {
   type UserPayload,
   type UserRecord,
 } from "../api/user.api";
+import { formatCurrency, formatNumber } from "@/utils/format";
 import { UserFormModal } from "./UserFormModal";
 import { useUserManagement } from "../hooks/useUserManagement";
 
@@ -619,21 +620,6 @@ function formatStatus(value: string) {
     default:
       return value ? `未知(${value})` : "-";
   }
-}
-
-function formatNumber(value: number) {
-  return new Intl.NumberFormat("zh-CN", {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 4,
-  }).format(value);
-}
-
-function formatCurrency(value: number) {
-  return new Intl.NumberFormat("zh-CN", {
-    style: "currency",
-    currency: "CNY",
-    maximumFractionDigits: 2,
-  }).format(value);
 }
 
 function wrapText(value?: string) {

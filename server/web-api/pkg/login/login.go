@@ -3,6 +3,8 @@ package login
 import (
 	commonRouter "common/middleware/routers"
 	"common/middleware/vipper"
+	appUserService "service/app_user"
+	appUserDTO "service/app_user/dto"
 	authService "service/auth"
 	webAuth "web-api/auth"
 
@@ -10,6 +12,12 @@ import (
 )
 
 type LoginRequest struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
+}
+
+type RegisterRequest struct {
+	Name     string `json:"name"`
 	Username string `json:"username"`
 	Password string `json:"password"`
 }
@@ -32,6 +40,8 @@ func NewLoginHandler() *LoginHandler {
 
 func (h *LoginHandler) RegisterHandler(engine *gin.RouterGroup) {
 	webAuth.PublicPOST(engine, "/login", h.login)
+	webAuth.PublicPOST(engine, "/register", h.register)
+	engine.POST("/logout", h.logout)
 }
 
 func (h *LoginHandler) login(context *gin.Context) {
@@ -52,4 +62,34 @@ func (h *LoginHandler) login(context *gin.Context) {
 		return
 	}
 	commonRouter.ToJson(context, &LoginResponse{Token: token}, nil)
+}
+
+func (h *LoginHandler) logout(context *gin.Context) {
+	token := webAuth.ExtractToken(context)
+	if value, ok := context.Get(webAuth.ContextTokenKey); ok {
+		if contextToken, typeOK := value.(string); typeOK && contextToken != "" {
+			token = contextToken
+		}
+	}
+	if err := h.authService.Logout(token); err != nil {
+		commonRouter.ToError(context, err.Error())
+		return
+	}
+	commonRouter.ToJson(context, gin.H{"loggedOut": true}, nil)
+}
+
+func (h *LoginHandler) register(context *gin.Context) {
+	var req RegisterRequest
+	if err := context.ShouldBindJSON(&req); err != nil {
+		commonRouter.ToError(context, "参数错误")
+		return
+	}
+
+	service := appUserService.NewAppUserService()
+	result, err := service.RegisterUser(&appUserDTO.RegisterAppUserDTO{
+		Name:     req.Name,
+		Username: req.Username,
+		Password: req.Password,
+	})
+	commonRouter.ToJson(context, result, err)
 }

@@ -3,65 +3,48 @@ package auth
 import (
 	"common/middleware/db"
 	redisMiddleware "common/middleware/redis"
-	"crypto/md5"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
-	permissionRepository "service/permission/repository"
-	userRepository "service/user/repository"
 	"strconv"
 	"strings"
 	"time"
+
+	appUserPassword "service/app_user/password"
+	appUserRepository "service/app_user/repository"
 
 	"gorm.io/gorm"
 )
 
 const (
-	userTokenPrefix     = "KAKROLOT_USER_TOKEN_PRE_"
-	userRolePrefix      = "KAKROLOT_USER_ROLE_PRE_KEY_"
-	userTenantPrefix    = "KAKROLOT_USER_TENANT_PRE_KEY_"
-	userIPLoginPrefix   = "Kakrolot_user_ip_login_"
-	tokenExpireSeconds  = 2 * 60 * 60
-	resourceExpireHours = 24 * 60 * 60
+	userTokenPrefix    = "KAKROLOT_APP_USER_TOKEN_PRE_"
+	userIPLoginPrefix  = "Kakrolot_app_user_ip_login_"
+	tokenExpireSeconds = 2 * 60 * 60
 )
 
 var (
 	ErrNotLogin           = errors.New("user not login")
-	ErrUserNoResource     = errors.New("user not resource")
-	ErrUserTenantIsNull   = errors.New("user tenant is null")
 	ErrInvalidCredential  = errors.New("用户名或密码错误")
 	ErrUserDisabled       = errors.New("该用户已被封禁")
 	ErrLoginTooManyErrors = errors.New("用户密码错误次数太多,请一小时后再试")
 )
 
 type LoginUser struct {
-	ID        uint64   `json:"id"`
-	Name      string   `json:"name"`
-	Username  string   `json:"username"`
-	Role      string   `json:"role"`
-	Status    string   `json:"status"`
-	RoleIDs   []uint64 `json:"roleIds,omitempty"`
-	TenantIDs []uint64 `json:"tenantIds,omitempty"`
+	ID       uint64 `json:"id"`
+	Name     string `json:"name"`
+	Username string `json:"username"`
+	Status   string `json:"status"`
 }
 
 type AuthService struct {
-	userRepository            *userRepository.UserRepository
-	userLoginRecordRepository *userRepository.UserLoginRecordRepository
-	userRoleRepository        *userRepository.UserRoleRepository
-	tenantUserRepository      *userRepository.TenantUserRepository
-	resourceRepository        *permissionRepository.ResourceRepository
-	roleResourceRepository    *permissionRepository.RoleResourceRepository
+	appUserRepository            *appUserRepository.AppUserRepository
+	appUserLoginRecordRepository *appUserRepository.AppUserLoginRecordRepository
 }
 
 func NewAuthService() *AuthService {
 	return &AuthService{
-		userRepository:            db.GetRepository[userRepository.UserRepository](),
-		userLoginRecordRepository: db.GetRepository[userRepository.UserLoginRecordRepository](),
-		userRoleRepository:        db.GetRepository[userRepository.UserRoleRepository](),
-		tenantUserRepository:      db.GetRepository[userRepository.TenantUserRepository](),
-		resourceRepository:        db.GetRepository[permissionRepository.ResourceRepository](),
-		roleResourceRepository:    db.GetRepository[permissionRepository.RoleResourceRepository](),
+		appUserRepository:            db.GetRepository[appUserRepository.AppUserRepository](),
+		appUserLoginRecordRepository: db.GetRepository[appUserRepository.AppUserLoginRecordRepository](),
 	}
 }
 
@@ -78,11 +61,11 @@ func (s *AuthService) Login(username, password, ip string, maxLoginErrorNum int6
 	if s.isLimit(ip, maxLoginErrorNum) {
 		return "", nil, ErrLoginTooManyErrors
 	}
-	if s.userRepository.Db == nil {
+	if s.appUserRepository.Db == nil {
 		return "", nil, fmt.Errorf("database is not initialized")
 	}
 
-	user, err := s.userRepository.FindByUsername(username)
+	user, err := s.appUserRepository.FindByUsername(username)
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
 			s.calLoginError(ip)
@@ -90,22 +73,23 @@ func (s *AuthService) Login(username, password, ip string, maxLoginErrorNum int6
 		}
 		return "", nil, err
 	}
-	if !strings.EqualFold(strings.TrimSpace(user.Status), "active") {
+	if user.Active == 0 || !strings.EqualFold(strings.TrimSpace(user.Status), "active") {
 		return "", nil, ErrUserDisabled
 	}
-	encryptedPassword := encryptPassword(username, password)
+	encryptedPassword := appUserPassword.Encrypt(username, password)
 	if !strings.EqualFold(encryptedPassword, strings.TrimSpace(user.Password)) {
 		s.calLoginError(ip)
 		return "", nil, ErrInvalidCredential
 	}
 
-	user.LastLoginTime = time.Now()
-	if _, err := s.userRepository.SaveOrUpdate(user); err != nil {
+	now := time.Now()
+	user.LastLoginTime = &now
+	if _, err := s.appUserRepository.SaveOrUpdate(user); err != nil {
 		return "", nil, err
 	}
-	if _, err := s.userLoginRecordRepository.Create(&userRepository.UserLoginRecord{
-		IP:     ip,
-		UserID: uint64(user.Id),
+	if _, err := s.appUserLoginRecordRepository.Create(&appUserRepository.AppUserLoginRecord{
+		IP:        ip,
+		AppUserID: uint64(user.Id),
 	}); err != nil {
 		return "", nil, err
 	}
@@ -122,6 +106,8 @@ func (s *AuthService) ValidateToken(token, requestURL string) (*LoginUser, error
 	if err := ensureRedisReady(); err != nil {
 		return nil, err
 	}
+	_ = requestURL
+
 	token = strings.TrimSpace(token)
 	if token == "" {
 		return nil, ErrNotLogin
@@ -134,38 +120,28 @@ func (s *AuthService) ValidateToken(token, requestURL string) (*LoginUser, error
 	if loginUser == nil {
 		return nil, ErrNotLogin
 	}
-
-	roleIDs, err := s.findRoleIDsByUserID(loginUser.ID)
-	if err != nil {
+	if err := s.ensureLoginUserValid(loginUser); err != nil {
+		if err == ErrNotLogin || err == ErrUserDisabled {
+			redisMiddleware.Del(buildUserTokenKey(token))
+		}
 		return nil, err
 	}
-	if len(roleIDs) == 0 {
-		return nil, ErrUserNoResource
-	}
-
-	// 暂时不校验资源权限
-	hasResource, err := s.hadResource(roleIDs, requestURL)
-	if err != nil {
-		return nil, err
-	}
-	if !hasResource {
-		return nil, ErrUserNoResource
-	}
-
-	tenantIDs, err := s.getTenantIDsByUserID(loginUser.ID)
-	if err != nil {
-		return nil, err
-	}
-	if len(tenantIDs) == 0 {
-		return nil, ErrUserTenantIsNull
-	}
-
-	loginUser.RoleIDs = roleIDs
-	loginUser.TenantIDs = tenantIDs
 	if err := s.flushExpireTime(token); err != nil {
 		return nil, err
 	}
 	return loginUser, nil
+}
+
+func (s *AuthService) Logout(token string) error {
+	if err := ensureRedisReady(); err != nil {
+		return err
+	}
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return nil
+	}
+	redisMiddleware.Del(buildUserTokenKey(token))
+	return nil
 }
 
 func (s *AuthService) initAndGetToken(user *LoginUser) (string, error) {
@@ -174,8 +150,7 @@ func (s *AuthService) initAndGetToken(user *LoginUser) (string, error) {
 		return "", err
 	}
 	token := strings.ReplaceAll(fmt.Sprintf("%d_%d", user.ID, time.Now().UnixNano()), "-", "")
-	sessionKey := buildUserTokenKey(token)
-	redisMiddleware.SetEx(sessionKey, string(payload), tokenExpireSeconds)
+	redisMiddleware.SetEx(buildUserTokenKey(token), string(payload), tokenExpireSeconds)
 	return token, nil
 }
 
@@ -191,103 +166,36 @@ func (s *AuthService) findUserByToken(token string) (*LoginUser, error) {
 	return &user, nil
 }
 
-func (s *AuthService) flushExpireTime(token string) error {
-	redisMiddleware.Expire(buildUserTokenKey(token), time.Duration(tokenExpireSeconds)*time.Second)
+func (s *AuthService) ensureLoginUserValid(loginUser *LoginUser) error {
+	if loginUser == nil || loginUser.ID == 0 {
+		return ErrNotLogin
+	}
+	if s.appUserRepository.Db == nil {
+		return fmt.Errorf("database is not initialized")
+	}
+	entity, err := s.appUserRepository.FindById(uint(loginUser.ID))
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return ErrNotLogin
+		}
+		return err
+	}
+	if entity.Active == 0 {
+		return ErrNotLogin
+	}
+	if !strings.EqualFold(strings.TrimSpace(entity.Status), "active") {
+		return ErrUserDisabled
+	}
+
+	loginUser.Name = entity.Name
+	loginUser.Username = entity.Username
+	loginUser.Status = entity.Status
 	return nil
 }
 
-func (s *AuthService) findRoleIDsByUserID(userID uint64) ([]uint64, error) {
-	key := buildUserRoleKey(userID)
-	if value := redisMiddleware.Get(key); strings.TrimSpace(value) != "" {
-		return parseUint64List(value)
-	}
-	if s.userRoleRepository.Db == nil {
-		return nil, fmt.Errorf("database is not initialized")
-	}
-	var entities []*userRepository.UserRole
-	if err := s.userRoleRepository.Db.
-		Where("user_id = ? AND active = ?", userID, 1).
-		Order("id DESC").
-		Find(&entities).Error; err != nil {
-		return nil, err
-	}
-	roleIDs := make([]uint64, 0, len(entities))
-	for _, entity := range entities {
-		roleIDs = append(roleIDs, entity.RoleID)
-	}
-	if len(roleIDs) == 0 {
-		return []uint64{}, nil
-	}
-	redisMiddleware.SetEx(key, joinUint64List(roleIDs), resourceExpireHours)
-	return roleIDs, nil
-}
-
-func (s *AuthService) hadResource(roleIDs []uint64, resourceURL string) (bool, error) {
-	resourceURL = normalizeResourceURL(resourceURL)
-	resource, err := s.findResourceByURL(resourceURL)
-	if err != nil {
-		return false, err
-	}
-	if resource == nil {
-		return false, nil
-	}
-	if s.roleResourceRepository.Db == nil {
-		return false, fmt.Errorf("database is not initialized")
-	}
-	var count int64
-	if err := s.roleResourceRepository.Db.
-		Model(&permissionRepository.RoleResource{}).
-		Where("role_id IN ? AND resource_id = ? AND active = ?", roleIDs, resource.Id, 1).
-		Count(&count).Error; err != nil {
-		return false, err
-	}
-	return count > 0, nil
-}
-
-func (s *AuthService) findResourceByURL(resourceURL string) (*permissionRepository.Resource, error) {
-	if s.resourceRepository.Db == nil {
-		return nil, fmt.Errorf("database is not initialized")
-	}
-	candidates := buildResourceURLCandidates(resourceURL)
-	for _, candidate := range candidates {
-		var entity permissionRepository.Resource
-		err := s.resourceRepository.Db.
-			Where("resource_url = ? AND active = ?", candidate, 1).
-			First(&entity).Error
-		if err == nil {
-			return &entity, nil
-		}
-		if err != gorm.ErrRecordNotFound {
-			return nil, err
-		}
-	}
-	return nil, nil
-}
-
-func (s *AuthService) getTenantIDsByUserID(userID uint64) ([]uint64, error) {
-	key := buildUserTenantKey(userID)
-	if value := redisMiddleware.Get(key); strings.TrimSpace(value) != "" {
-		return parseUint64List(value)
-	}
-	if s.tenantUserRepository.Db == nil {
-		return nil, fmt.Errorf("database is not initialized")
-	}
-	var entities []*userRepository.TenantUser
-	if err := s.tenantUserRepository.Db.
-		Where("user_id = ? AND active = ?", userID, 1).
-		Order("id DESC").
-		Find(&entities).Error; err != nil {
-		return nil, err
-	}
-	tenantIDs := make([]uint64, 0, len(entities))
-	for _, entity := range entities {
-		tenantIDs = append(tenantIDs, entity.TenantID)
-	}
-	if len(tenantIDs) == 0 {
-		return []uint64{}, nil
-	}
-	redisMiddleware.SetEx(key, joinUint64List(tenantIDs), resourceExpireHours)
-	return tenantIDs, nil
+func (s *AuthService) flushExpireTime(token string) error {
+	redisMiddleware.Expire(buildUserTokenKey(token), time.Duration(tokenExpireSeconds)*time.Second)
+	return nil
 }
 
 func (s *AuthService) isLimit(ip string, maxLoginErrorNum int64) bool {
@@ -322,117 +230,15 @@ func buildUserTokenKey(token string) string {
 	return userTokenPrefix + "_" + strings.TrimSpace(token)
 }
 
-func buildUserRoleKey(userID uint64) string {
-	return userRolePrefix + strconv.FormatUint(userID, 10)
-}
-
-func buildUserTenantKey(userID uint64) string {
-	return userTenantPrefix + strconv.FormatUint(userID, 10)
-}
-
-func ClearUserRoleCache(userID uint64) {
-	if redisMiddleware.Rdb == nil || userID == 0 {
-		return
-	}
-	redisMiddleware.Del(buildUserRoleKey(userID))
-}
-
-func ClearUserTenantCache(userID uint64) {
-	if redisMiddleware.Rdb == nil || userID == 0 {
-		return
-	}
-	redisMiddleware.Del(buildUserTenantKey(userID))
-}
-
 func buildIPKey(ip string) string {
 	return userIPLoginPrefix + strings.TrimSpace(ip)
 }
 
-func joinUint64List(values []uint64) string {
-	if len(values) == 0 {
-		return ""
-	}
-	parts := make([]string, 0, len(values))
-	for _, value := range values {
-		parts = append(parts, strconv.FormatUint(value, 10))
-	}
-	return strings.Join(parts, ",")
-}
-
-func parseUint64List(value string) ([]uint64, error) {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return []uint64{}, nil
-	}
-	parts := strings.Split(value, ",")
-	result := make([]uint64, 0, len(parts))
-	for _, part := range parts {
-		trimmed := strings.TrimSpace(part)
-		if trimmed == "" {
-			continue
-		}
-		id, err := strconv.ParseUint(trimmed, 10, 64)
-		if err != nil {
-			return nil, err
-		}
-		result = append(result, id)
-	}
-	return result, nil
-}
-
-func buildResourceURLCandidates(resourceURL string) []string {
-	resourceURL = normalizeResourceURL(resourceURL)
-	if resourceURL == "" {
-		return []string{}
-	}
-	candidates := []string{resourceURL}
-	if strings.HasPrefix(resourceURL, "/api/") {
-		candidates = append(candidates, strings.TrimPrefix(resourceURL, "/api"))
-	}
-	if strings.HasPrefix(resourceURL, "api/") {
-		candidates = append(candidates, "/"+strings.TrimPrefix(resourceURL, "api/"))
-	}
-	return uniqueStrings(candidates)
-}
-
-func normalizeResourceURL(resourceURL string) string {
-	resourceURL = strings.TrimSpace(resourceURL)
-	if resourceURL == "" {
-		return ""
-	}
-	if !strings.HasPrefix(resourceURL, "/") {
-		return "/" + resourceURL
-	}
-	return resourceURL
-}
-
-func uniqueStrings(values []string) []string {
-	seen := make(map[string]struct{}, len(values))
-	result := make([]string, 0, len(values))
-	for _, value := range values {
-		if strings.TrimSpace(value) == "" {
-			continue
-		}
-		if _, ok := seen[value]; ok {
-			continue
-		}
-		seen[value] = struct{}{}
-		result = append(result, value)
-	}
-	return result
-}
-
-func encryptPassword(username, password string) string {
-	sum := md5.Sum([]byte(strings.TrimSpace(username) + "_" + strings.TrimSpace(password)))
-	return hex.EncodeToString(sum[:])
-}
-
-func toLoginUser(user *userRepository.User) *LoginUser {
+func toLoginUser(user *appUserRepository.AppUser) *LoginUser {
 	return &LoginUser{
 		ID:       uint64(user.Id),
 		Name:     user.Name,
 		Username: user.Username,
-		Role:     user.Role,
 		Status:   user.Status,
 	}
 }

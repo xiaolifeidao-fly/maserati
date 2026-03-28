@@ -1,19 +1,10 @@
 import { ElectronApi } from "@eleapi/base";
-import { WhatsAppSessionApi } from "./whatsapp/session.api";
-import { WhatsAppMessageApi } from "./whatsapp/message.api";
-import { WhatsAppHistoryApi } from "./whatsapp/history.api";
-import { WhatsAppAccountApi } from "./whatsapp/account.api";
-import { CaseInfoApi } from "./case/case.api";
-import { ChatroomApi } from "./chatroom/chatroom.api";
+import { AuthApi } from "./auth/auth.api";
+import { CollectApi } from "./collect/collect.api";
+import { CommerceApi } from "./commerce/commerce.api";
 
-const register : { new(...args: any[]): ElectronApi }[] = []
+const register: { new(...args: any[]): ElectronApi }[] = [AuthApi, CollectApi, CommerceApi];
 
 export function registerApi(){
-    register.push(WhatsAppSessionApi);
-    register.push(WhatsAppMessageApi);
-    register.push(WhatsAppHistoryApi);
-    register.push(WhatsAppAccountApi);
-    register.push(CaseInfoApi);
-    register.push(ChatroomApi);
     return register;
 }
