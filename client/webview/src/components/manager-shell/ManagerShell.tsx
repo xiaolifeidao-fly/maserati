@@ -2,13 +2,12 @@
 
 import {
   AppstoreOutlined,
+  BarcodeOutlined,
   BellOutlined,
-  DeploymentUnitOutlined,
   LogoutOutlined,
   PartitionOutlined,
   ShopOutlined,
   ShoppingOutlined,
-  TagsOutlined,
 } from "@ant-design/icons";
 import { Avatar, Badge, Button, Layout, Space, Typography } from "antd";
 import { usePathname, useRouter } from "next/navigation";
@@ -28,18 +27,6 @@ const navigationItems = [
     description: "实时经营看板",
   },
   {
-    key: "/platform",
-    label: "平台管理",
-    icon: <DeploymentUnitOutlined />,
-    description: "平台编码与站点配置",
-  },
-  {
-    key: "/category",
-    label: "分类管理",
-    icon: <TagsOutlined />,
-    description: "平台分类与映射维护",
-  },
-  {
     key: "/shop",
     label: "店铺管理",
     icon: <ShopOutlined />,
@@ -50,6 +37,12 @@ const navigationItems = [
     label: "商品管理",
     icon: <ShoppingOutlined />,
     description: "商品资料与状态维护",
+  },
+  {
+    key: "/collection",
+    label: "采集管理",
+    icon: <BarcodeOutlined />,
+    description: "采集任务与结果跟踪",
   },
 ] as const;
 
@@ -129,7 +122,7 @@ export function ManagerShell({ children }: ManagerShellProps) {
                     maxWidth: 380,
                   }}
                 >
-                  聚合工作台、店铺运营、商品经营与采集分析，帮助桌面端商家快速完成日常经营动作。
+                  聚合工作台、店铺管理、商品管理与采集管理，帮助桌面端商家快速完成日常经营动作。
                 </Paragraph>
               </div>
 

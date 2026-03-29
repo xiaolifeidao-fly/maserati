@@ -6,9 +6,11 @@ import {
   createShop,
   deleteShop,
   fetchShops,
+  loginShop,
   updateShop,
   type ShopAuthorizePayload,
   type ShopListQuery,
+  type ShopLoginPayload,
   type ShopPayload,
   type ShopRecord,
 } from "../api/shop.api";
@@ -36,7 +38,7 @@ export function useShopManagement() {
     setLoading(true);
     try {
       const result = await fetchShops(mergedQuery);
-      setShops(result.data);
+      setShops(Array.isArray(result.data) ? result.data : []);
       setTotal(result.total);
       setQuery(mergedQuery);
     } finally {
@@ -68,6 +70,16 @@ export function useShopManagement() {
     }
   };
 
+  const submitShopLogin = async (payload: ShopLoginPayload) => {
+    setSubmitting(true);
+    try {
+      await loginShop(payload);
+      await refresh({ businessId: payload.businessId || "" });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   const removeShop = async (id: number) => {
     setSubmitting(true);
     try {
@@ -91,6 +103,7 @@ export function useShopManagement() {
     submitting,
     refresh,
     saveShop,
+    submitShopLogin,
     bindActivationCode,
     removeShop,
   };

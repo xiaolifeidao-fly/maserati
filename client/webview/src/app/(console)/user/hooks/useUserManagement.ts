@@ -43,7 +43,7 @@ export function useUserManagement() {
     setLoading(true);
     try {
       const result = await fetchUsers(mergedQuery);
-      setUsers(result.data);
+      setUsers(Array.isArray(result.data) ? result.data : []);
       setTotal(result.total);
       setQuery(mergedQuery);
     } finally {

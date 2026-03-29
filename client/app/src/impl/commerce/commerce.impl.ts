@@ -9,6 +9,7 @@ import {
   type ProductPayload,
   type ShopAuthorizePayload,
   type ShopListQuery,
+  type ShopLoginPayload,
   type ShopPayload,
   type CategoryRecord,
   type PlatformRecord,
@@ -64,6 +65,10 @@ export class CommerceImpl extends CommerceApi {
 
   async authorizeShop(id: number, payload: ShopAuthorizePayload): Promise<ShopRecord> {
     return requestBackend("POST", `/shops/${id}/authorize`, { data: payload });
+  }
+
+  async loginShop(payload: ShopLoginPayload): Promise<ShopRecord> {
+    return requestBackend("POST", "/shops/login", { data: payload });
   }
 
   async deleteShop(id: number): Promise<{ deleted: boolean }> {

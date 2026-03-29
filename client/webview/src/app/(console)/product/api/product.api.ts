@@ -7,9 +7,11 @@ import {
   type ProductRecord,
   type ShopRecord,
 } from "@eleapi/commerce/commerce.api";
+import { type CollectBatchRecord } from "@eleapi/collect/collect.api";
 import { getCommerceApi } from "@/utils/commerce";
+import { getCollectApi } from "@/utils/collect";
 
-export type { ProductListQuery, ProductPayload, ProductRecord, CategoryRecord, ShopRecord };
+export type { ProductListQuery, ProductPayload, ProductRecord, CategoryRecord, ShopRecord, CollectBatchRecord };
 
 export async function fetchProducts(query: ProductListQuery) {
   return getCommerceApi().listProducts(query);
@@ -33,4 +35,8 @@ export async function fetchShopOptions() {
 
 export async function fetchCategoryOptions() {
   return getCommerceApi().listCategories({ pageIndex: 1, pageSize: 200 });
+}
+
+export async function fetchCollectBatchOptions() {
+  return getCollectApi().listCollectBatches({ pageIndex: 1, pageSize: 200 });
 }

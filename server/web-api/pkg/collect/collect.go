@@ -6,6 +6,7 @@ import (
 	collectService "service/collect"
 	collectDTO "service/collect/dto"
 	"strconv"
+	webAuth "web-api/auth"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -42,6 +43,7 @@ func (h *CollectHandler) listCollectBatches(c *gin.Context) {
 		commonRouter.ToError(c, "参数错误")
 		return
 	}
+	applyCollectAppUserID(c, &q.AppUserID)
 	r, e := h.collectService.ListCollectBatches(q)
 	commonRouter.ToJson(c, r, e)
 }
@@ -65,6 +67,7 @@ func (h *CollectHandler) createCollectBatch(c *gin.Context) {
 		commonRouter.ToError(c, "参数错误")
 		return
 	}
+	applyCollectAppUserID(c, &req.AppUserID)
 	r, e := h.collectService.CreateCollectBatch(&req)
 	commonRouter.ToJson(c, r, e)
 }
@@ -79,6 +82,7 @@ func (h *CollectHandler) updateCollectBatch(c *gin.Context) {
 		commonRouter.ToError(c, "参数错误")
 		return
 	}
+	applyCollectAppUserIDPtr(c, &req.AppUserID)
 	r, e := h.collectService.UpdateCollectBatch(id, &req)
 	if e == gorm.ErrRecordNotFound {
 		commonRouter.ToError(c, "collect batch not found")
@@ -106,6 +110,7 @@ func (h *CollectHandler) listCollectRecords(c *gin.Context) {
 		commonRouter.ToError(c, "参数错误")
 		return
 	}
+	applyCollectAppUserID(c, &q.AppUserID)
 	r, e := h.collectService.ListCollectRecords(q)
 	commonRouter.ToJson(c, r, e)
 }
@@ -129,6 +134,7 @@ func (h *CollectHandler) createCollectRecord(c *gin.Context) {
 		commonRouter.ToError(c, "参数错误")
 		return
 	}
+	applyCollectAppUserID(c, &req.AppUserID)
 	r, e := h.collectService.CreateCollectRecord(&req)
 	commonRouter.ToJson(c, r, e)
 }
@@ -143,6 +149,7 @@ func (h *CollectHandler) updateCollectRecord(c *gin.Context) {
 		commonRouter.ToError(c, "参数错误")
 		return
 	}
+	applyCollectAppUserIDPtr(c, &req.AppUserID)
 	r, e := h.collectService.UpdateCollectRecord(id, &req)
 	if e == gorm.ErrRecordNotFound {
 		commonRouter.ToError(c, "collect record not found")
@@ -172,4 +179,33 @@ func parseCollectID(c *gin.Context) (uint, bool) {
 		return 0, false
 	}
 	return uint(id), true
+}
+
+func applyCollectAppUserID(c *gin.Context, target *uint64) {
+	if target == nil || *target > 0 {
+		return
+	}
+	if userID, ok := c.Get(webAuth.ContextUserIDKey); ok {
+		switch value := userID.(type) {
+		case uint64:
+			*target = value
+		case uint:
+			*target = uint64(value)
+		case int:
+			if value > 0 {
+				*target = uint64(value)
+			}
+		}
+	}
+}
+
+func applyCollectAppUserIDPtr(c *gin.Context, target **uint64) {
+	if target == nil || *target != nil {
+		return
+	}
+	var userID uint64
+	applyCollectAppUserID(c, &userID)
+	if userID > 0 {
+		*target = &userID
+	}
 }

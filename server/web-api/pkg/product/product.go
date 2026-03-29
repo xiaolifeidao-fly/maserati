@@ -6,6 +6,7 @@ import (
 	productService "service/product"
 	productDTO "service/product/dto"
 	"strconv"
+	webAuth "web-api/auth"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -36,6 +37,7 @@ func (h *ProductHandler) listProducts(c *gin.Context) {
 		commonRouter.ToError(c, "参数错误")
 		return
 	}
+	applyProductAppUserID(c, &q.AppUserID)
 	r, e := h.productService.ListProducts(q)
 	commonRouter.ToJson(c, r, e)
 }
@@ -59,6 +61,7 @@ func (h *ProductHandler) createProduct(c *gin.Context) {
 		commonRouter.ToError(c, "参数错误")
 		return
 	}
+	applyProductAppUserID(c, &req.AppUserID)
 	r, e := h.productService.CreateProduct(&req)
 	commonRouter.ToJson(c, r, e)
 }
@@ -73,6 +76,7 @@ func (h *ProductHandler) updateProduct(c *gin.Context) {
 		commonRouter.ToError(c, "参数错误")
 		return
 	}
+	applyProductAppUserIDPtr(c, &req.AppUserID)
 	r, e := h.productService.UpdateProduct(id, &req)
 	if e == gorm.ErrRecordNotFound {
 		commonRouter.ToError(c, "product not found")
@@ -102,4 +106,33 @@ func parseProductID(c *gin.Context) (uint, bool) {
 		return 0, false
 	}
 	return uint(id), true
+}
+
+func applyProductAppUserID(c *gin.Context, target *uint64) {
+	if target == nil || *target > 0 {
+		return
+	}
+	if userID, ok := c.Get(webAuth.ContextUserIDKey); ok {
+		switch value := userID.(type) {
+		case uint64:
+			*target = value
+		case uint:
+			*target = uint64(value)
+		case int:
+			if value > 0 {
+				*target = uint64(value)
+			}
+		}
+	}
+}
+
+func applyProductAppUserIDPtr(c *gin.Context, target **uint64) {
+	if target == nil || *target != nil {
+		return
+	}
+	var userID uint64
+	applyProductAppUserID(c, &userID)
+	if userID > 0 {
+		*target = &userID
+	}
 }

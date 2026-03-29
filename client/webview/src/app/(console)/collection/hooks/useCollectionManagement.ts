@@ -35,7 +35,7 @@ export function useCollectionManagement() {
     setLoading(true);
     try {
       const result = await fetchCollectBatches(mergedQuery);
-      setCollections(result.data);
+      setCollections(Array.isArray(result.data) ? result.data : []);
       setTotal(result.total);
       setQuery(mergedQuery);
     } finally {
@@ -45,7 +45,7 @@ export function useCollectionManagement() {
 
   const refreshOptions = async () => {
     const result = await fetchCollectionShopOptions();
-    setShops(result.data);
+    setShops(Array.isArray(result.data) ? result.data : []);
   };
 
   const resolveAppUserId = (payload: { shopId: number; appUserId?: number }, record?: CollectBatchRecord | null) => {

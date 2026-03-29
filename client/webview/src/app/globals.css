@@ -181,6 +181,100 @@ select {
   pointer-events: none;
 }
 
+.manager-flow-hero {
+  display: flex;
+  gap: 20px;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+
+.manager-kpi-grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  margin-top: 20px;
+}
+
+.manager-kpi-card {
+  border-radius: 20px;
+  padding: 18px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.78), rgba(255, 247, 239, 0.9));
+  border: 1px solid rgba(214, 160, 118, 0.18);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+}
+
+.manager-step-strip {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 20px;
+}
+
+.manager-step-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 38px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(188, 125, 85, 0.2);
+  background: rgba(255, 252, 248, 0.76);
+  color: var(--manager-text-soft);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.manager-step-pill.is-active {
+  color: #fffaf4;
+  border-color: transparent;
+  background: linear-gradient(135deg, var(--manager-primary), var(--manager-accent-strong));
+  box-shadow: 0 10px 24px rgba(255, 122, 69, 0.22);
+}
+
+.manager-muted {
+  color: var(--manager-text-soft);
+}
+
+.manager-publish-layout {
+  display: grid;
+  gap: 18px;
+  grid-template-columns: minmax(280px, 340px) minmax(0, 1fr);
+}
+
+.manager-publish-config,
+.manager-publish-progress {
+  border-radius: 22px;
+  padding: 20px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.82), rgba(255, 247, 239, 0.88));
+  border: 1px solid rgba(214, 160, 118, 0.18);
+}
+
+.manager-panel-title {
+  margin-bottom: 10px;
+  color: var(--manager-text);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.manager-panel-title:not(:first-child) {
+  margin-top: 18px;
+}
+
+.manager-panel-header {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.manager-inline-tip {
+  margin: 12px 0;
+  color: var(--manager-text-soft);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
 .manager-section-label {
   color: var(--manager-text-faint);
   font-size: 12px;
@@ -202,6 +296,12 @@ select {
   font-size: 11px;
   letter-spacing: 0.2em;
   text-transform: uppercase;
+}
+
+@media (max-width: 1080px) {
+  .manager-publish-layout {
+    grid-template-columns: 1fr;
+  }
 }
 
 .manager-brand-kicker::before {

@@ -19,6 +19,12 @@ import {
 import { Button, Progress, Space, Table, Tag, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import type { ReactNode } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { type CollectBatchRecord } from "@eleapi/collect/collect.api";
+import { type ProductRecord, type ShopRecord } from "@eleapi/commerce/commerce.api";
+import { getCollectApi } from "@/utils/collect";
+import { getCommerceApi } from "@/utils/commerce";
+import { formatDateTime } from "@/utils/format";
 
 const { Paragraph, Text, Title } = Typography;
 
@@ -72,6 +78,18 @@ interface SectionConfig {
   actions: ActionItem[];
   healthTitle: string;
   health: HealthItem[];
+}
+
+interface WorkspaceOverview {
+  shopTotal: number;
+  authorizedShopTotal: number;
+  productTotal: number;
+  publishedProductTotal: number;
+  collectTotal: number;
+  runningCollectTotal: number;
+  latestShops: ShopRecord[];
+  latestProducts: ProductRecord[];
+  latestCollects: CollectBatchRecord[];
 }
 
 const sectionConfigs: Record<SectionKey, SectionConfig> = {
@@ -296,7 +314,188 @@ const tableColumns: ColumnsType<TableRow> = [
 ];
 
 export function EcommerceConsolePage({ section }: { section: SectionKey }) {
-  const config = sectionConfigs[section];
+  const [workspaceOverview, setWorkspaceOverview] = useState<WorkspaceOverview | null>(null);
+
+  useEffect(() => {
+    if (section !== "workspace") {
+      return;
+    }
+
+    let active = true;
+
+    void (async () => {
+      const commerceApi = getCommerceApi();
+      const collectApi = getCollectApi();
+      const [
+        shopResult,
+        authorizedShopResult,
+        productResult,
+        publishedProductResult,
+        collectResult,
+        runningCollectResult,
+      ] = await Promise.all([
+        commerceApi.listShops({ pageIndex: 1, pageSize: 3 }),
+        commerceApi.listShops({ pageIndex: 1, pageSize: 1, authorizationStatus: "AUTHORIZED" }),
+        commerceApi.listProducts({ pageIndex: 1, pageSize: 3 }),
+        commerceApi.listProducts({ pageIndex: 1, pageSize: 1, status: "PUBLISHED" }),
+        collectApi.listCollectBatches({ pageIndex: 1, pageSize: 3 }),
+        collectApi.listCollectBatches({ pageIndex: 1, pageSize: 1, status: "RUNNING" }),
+      ]);
+
+      if (!active) {
+        return;
+      }
+
+      setWorkspaceOverview({
+        shopTotal: shopResult.total,
+        authorizedShopTotal: authorizedShopResult.total,
+        productTotal: productResult.total,
+        publishedProductTotal: publishedProductResult.total,
+        collectTotal: collectResult.total,
+        runningCollectTotal: runningCollectResult.total,
+        latestShops: Array.isArray(shopResult.data) ? shopResult.data : [],
+        latestProducts: Array.isArray(productResult.data) ? productResult.data : [],
+        latestCollects: Array.isArray(collectResult.data) ? collectResult.data : [],
+      });
+    })().catch(() => {
+      if (active) {
+        setWorkspaceOverview(null);
+      }
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [section]);
+
+  const config: SectionConfig = useMemo(() => {
+    if (section !== "workspace" || !workspaceOverview) {
+      return sectionConfigs[section];
+    }
+
+    const shopCoverage = workspaceOverview.shopTotal > 0
+      ? Math.round((workspaceOverview.authorizedShopTotal / workspaceOverview.shopTotal) * 100)
+      : 0;
+    const productCoverage = workspaceOverview.productTotal > 0
+      ? Math.round((workspaceOverview.publishedProductTotal / workspaceOverview.productTotal) * 100)
+      : 0;
+    const collectCoverage = workspaceOverview.collectTotal > 0
+      ? Math.round((workspaceOverview.runningCollectTotal / workspaceOverview.collectTotal) * 100)
+      : 0;
+
+    const latestShop = workspaceOverview.latestShops?.[0];
+    const latestProduct = workspaceOverview.latestProducts?.[0];
+    const latestCollect = workspaceOverview.latestCollects?.[0];
+
+    return {
+      ...sectionConfigs.workspace,
+      spotlight: `当前已接入 ${workspaceOverview.shopTotal} 家店铺、沉淀 ${workspaceOverview.productTotal} 个商品、运行 ${workspaceOverview.collectTotal} 个采集任务，工作台数据已通过 Electron 实时联通服务端。`,
+      metrics: [
+        {
+          label: "已接入店铺",
+          value: String(workspaceOverview.shopTotal),
+          helper: `已授权 ${workspaceOverview.authorizedShopTotal} 家`,
+        },
+        {
+          label: "商品总量",
+          value: String(workspaceOverview.productTotal),
+          helper: `已发布 ${workspaceOverview.publishedProductTotal} 个`,
+        },
+        {
+          label: "采集任务",
+          value: String(workspaceOverview.collectTotal),
+          helper: `运行中 ${workspaceOverview.runningCollectTotal} 个`,
+        },
+        {
+          label: "授权覆盖率",
+          value: `${shopCoverage}%`,
+          helper: "来自店铺管理实时统计",
+        },
+      ],
+      rows: [
+        {
+          key: "shops",
+          name: "店铺接入情况",
+          status: shopCoverage >= 70 ? "稳定" : "预警",
+          owner: "店铺管理",
+          value: `总计 ${workspaceOverview.shopTotal} 家 / 已授权 ${workspaceOverview.authorizedShopTotal} 家`,
+          trend: `${shopCoverage}%`,
+        },
+        {
+          key: "products",
+          name: "商品资料情况",
+          status: productCoverage >= 60 ? "进行中" : "待加码",
+          owner: "商品管理",
+          value: `总计 ${workspaceOverview.productTotal} 个 / 已发布 ${workspaceOverview.publishedProductTotal} 个`,
+          trend: `${productCoverage}%`,
+        },
+        {
+          key: "collects",
+          name: "采集执行情况",
+          status: workspaceOverview.runningCollectTotal > 0 ? "自动运行" : "待审核",
+          owner: "采集管理",
+          value: `总计 ${workspaceOverview.collectTotal} 个 / 运行中 ${workspaceOverview.runningCollectTotal} 个`,
+          trend: `${collectCoverage}%`,
+        },
+        {
+          key: "bridge",
+          name: "数据链路状态",
+          status: "稳定",
+          owner: "Electron Bridge",
+          value: "WebView -> Electron -> Server",
+          trend: "已联通",
+        },
+      ],
+      feed: [
+        {
+          title: latestShop ? `店铺「${latestShop.name || latestShop.code || `#${latestShop.id}`}」最近有更新` : "暂未查询到店铺数据",
+          meta: latestShop
+            ? `平台 ${latestShop.platform || "-"} / 更新时间 ${formatDateTime(latestShop.updatedTime)}`
+            : "可前往店铺管理创建第一家店铺",
+          status: latestShop?.authorizationStatus || "待处理",
+        },
+        {
+          title: latestProduct
+            ? `商品「${latestProduct.title || latestProduct.outerProductId || `#${latestProduct.id}`}」最近有更新`
+            : "暂未查询到商品数据",
+          meta: latestProduct
+            ? `状态 ${latestProduct.status || "DRAFT"} / 更新时间 ${formatDateTime(latestProduct.updatedTime)}`
+            : "可前往商品管理补充商品资料",
+          status: latestProduct?.status || "待处理",
+        },
+        {
+          title: latestCollect
+            ? `采集任务「${latestCollect.name || `#${latestCollect.id}`}」最近有进展`
+            : "暂未查询到采集任务",
+          meta: latestCollect
+            ? `状态 ${latestCollect.status || "PENDING"} / 更新时间 ${formatDateTime(latestCollect.updatedTime)}`
+            : "可前往采集管理创建首个任务",
+          status: latestCollect?.status || "待处理",
+        },
+      ],
+      actions: [
+        {
+          title: shopCoverage < 100 ? "继续补齐店铺授权" : "店铺授权状态良好",
+          description:
+            shopCoverage < 100
+              ? `还有 ${workspaceOverview.shopTotal - workspaceOverview.authorizedShopTotal} 家店铺未完成授权，建议优先补齐，避免后续业务链路中断。`
+              : "当前店铺授权覆盖率已达 100%，可以继续推进店铺运营动作。",
+        },
+        {
+          title: productCoverage < 80 ? "推进商品发布与资料完善" : "商品资料同步保持稳定",
+          description:
+            productCoverage < 80
+              ? `当前已发布 ${workspaceOverview.publishedProductTotal} / ${workspaceOverview.productTotal} 个商品，建议继续完善未发布商品资料。`
+              : "商品发布覆盖率较高，可以把重点转向主推商品的经营优化。",
+        },
+      ],
+      health: [
+        { label: "店铺授权覆盖率", value: shopCoverage, tone: shopCoverage >= 70 ? "hot" : "risk" },
+        { label: "商品发布覆盖率", value: productCoverage, tone: productCoverage >= 60 ? "steady" : "risk" },
+        { label: "采集任务运行率", value: collectCoverage, tone: collectCoverage >= 40 ? "hot" : "steady" },
+      ],
+    };
+  }, [section, workspaceOverview]);
 
   return (
     <div className="manager-page-stack">

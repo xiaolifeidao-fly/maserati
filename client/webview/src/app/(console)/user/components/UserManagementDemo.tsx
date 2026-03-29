@@ -99,7 +99,7 @@ export function UserManagementDemo() {
     const loadTenants = async () => {
       try {
         const result = await fetchTenantOptions();
-        setTenantOptions(result.data);
+        setTenantOptions(Array.isArray(result.data) ? result.data : []);
       } catch {
         setTenantOptions([]);
       }

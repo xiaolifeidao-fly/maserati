@@ -6,6 +6,7 @@ import (
 	shopService "service/shop"
 	shopDTO "service/shop/dto"
 	"strconv"
+	webAuth "web-api/auth"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -39,6 +40,7 @@ func (h *ShopHandler) listShops(c *gin.Context) {
 		commonRouter.ToError(c, "参数错误")
 		return
 	}
+	applyCurrentAppUserID(c, &q.AppUserID)
 	r, e := h.shopService.ListShops(q)
 	commonRouter.ToJson(c, r, e)
 }
@@ -60,6 +62,7 @@ func (h *ShopHandler) createShop(c *gin.Context) {
 		commonRouter.ToError(c, "参数错误")
 		return
 	}
+	applyCurrentAppUserID(c, &req.AppUserID)
 	r, e := h.shopService.CreateShop(&req)
 	commonRouter.ToJson(c, r, e)
 }
@@ -69,6 +72,7 @@ func (h *ShopHandler) loginShop(c *gin.Context) {
 		commonRouter.ToError(c, "参数错误")
 		return
 	}
+	applyCurrentAppUserID(c, &req.AppUserID)
 	r, e := h.shopService.LoginShop(&req)
 	commonRouter.ToJson(c, r, e)
 }
@@ -82,6 +86,7 @@ func (h *ShopHandler) updateShop(c *gin.Context) {
 		commonRouter.ToError(c, "参数错误")
 		return
 	}
+	applyCurrentAppUserIDPtr(c, &req.AppUserID)
 	r, e := h.shopService.UpdateShop(id, &req)
 	if e == gorm.ErrRecordNotFound {
 		commonRouter.ToError(c, "shop not found")
@@ -124,6 +129,7 @@ func (h *ShopHandler) listShopAuthorizations(c *gin.Context) {
 		commonRouter.ToError(c, "参数错误")
 		return
 	}
+	applyCurrentAppUserID(c, &q.AppUserID)
 	r, e := h.shopService.ListShopAuthorizations(q)
 	commonRouter.ToJson(c, r, e)
 }
@@ -136,4 +142,33 @@ func parseShopID(c *gin.Context) (uint, bool) {
 		return 0, false
 	}
 	return uint(id), true
+}
+
+func applyCurrentAppUserID(c *gin.Context, target *uint64) {
+	if target == nil || *target > 0 {
+		return
+	}
+	if userID, ok := c.Get(webAuth.ContextUserIDKey); ok {
+		switch value := userID.(type) {
+		case uint64:
+			*target = value
+		case uint:
+			*target = uint64(value)
+		case int:
+			if value > 0 {
+				*target = uint64(value)
+			}
+		}
+	}
+}
+
+func applyCurrentAppUserIDPtr(c *gin.Context, target **uint64) {
+	if target == nil || *target != nil {
+		return
+	}
+	var userID uint64
+	applyCurrentAppUserID(c, &userID)
+	if userID > 0 {
+		*target = &userID
+	}
 }

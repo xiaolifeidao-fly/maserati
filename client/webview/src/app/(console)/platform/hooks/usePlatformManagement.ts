@@ -30,7 +30,7 @@ export function usePlatformManagement() {
     setLoading(true);
     try {
       const result = await fetchPlatforms(mergedQuery);
-      setPlatforms(result.data);
+      setPlatforms(Array.isArray(result.data) ? result.data : []);
       setTotal(result.total);
       setQuery(mergedQuery);
     } finally {

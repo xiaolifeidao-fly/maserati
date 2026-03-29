@@ -3,12 +3,14 @@
 import { useEffect, useState } from "react";
 import {
   fetchCategoryOptions,
+  fetchCollectBatchOptions,
   createProduct,
   deleteProduct,
   fetchProducts,
   fetchShopOptions,
   updateProduct,
   type CategoryRecord,
+  type CollectBatchRecord,
   type ProductListQuery,
   type ProductPayload,
   type ProductRecord,
@@ -29,6 +31,7 @@ export function useProductManagement() {
   const [products, setProducts] = useState<ProductRecord[]>([]);
   const [shops, setShops] = useState<ShopRecord[]>([]);
   const [categories, setCategories] = useState<CategoryRecord[]>([]);
+  const [collectBatches, setCollectBatches] = useState<CollectBatchRecord[]>([]);
   const [total, setTotal] = useState(0);
   const [query, setQuery] = useState<Required<ProductListQuery>>(defaultQuery);
   const [loading, setLoading] = useState(false);
@@ -48,9 +51,14 @@ export function useProductManagement() {
   };
 
   const refreshOptions = async () => {
-    const [shopResult, categoryResult] = await Promise.all([fetchShopOptions(), fetchCategoryOptions()]);
+    const [shopResult, categoryResult, batchResult] = await Promise.all([
+      fetchShopOptions(),
+      fetchCategoryOptions(),
+      fetchCollectBatchOptions(),
+    ]);
     setShops(Array.isArray(shopResult.data) ? shopResult.data : []);
     setCategories(Array.isArray(categoryResult.data) ? categoryResult.data : []);
+    setCollectBatches(Array.isArray(batchResult.data) ? batchResult.data : []);
   };
 
   const saveProduct = async (id: number | null, payload: ProductPayload) => {
@@ -86,6 +94,7 @@ export function useProductManagement() {
     products,
     shops,
     categories,
+    collectBatches,
     total,
     query,
     loading,
