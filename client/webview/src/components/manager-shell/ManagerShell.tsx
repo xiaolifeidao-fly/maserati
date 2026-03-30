@@ -5,7 +5,6 @@ import {
   BarcodeOutlined,
   BellOutlined,
   LogoutOutlined,
-  PartitionOutlined,
   ShopOutlined,
   ShoppingOutlined,
 } from "@ant-design/icons";
@@ -105,25 +104,60 @@ export function ManagerShell({ children }: ManagerShellProps) {
             }}
           >
             <div className="manager-shell-card manager-commerce-header">
-              <div className="manager-commerce-brand">
-                <div className="manager-brand-kicker">电商商家端</div>
-                <Space align="start" size={14} style={{ marginTop: 16 }}>
-                  <div className="manager-crest manager-crest-commerce" />
-                  <div className="manager-wordmark">
-                    <strong>MASERATI</strong>
-                    <span>Retail Commerce Center</span>
+              <div className="manager-commerce-top">
+                <div className="manager-commerce-summary">
+                  <div className="manager-commerce-brand">
+                    <div className="manager-brand-kicker">电商商家端</div>
+                    <Space align="start" size={14} style={{ marginTop: 16 }}>
+                      <div className="manager-crest manager-crest-commerce" />
+                      <div className="manager-wordmark">
+                        <strong>MASERATI</strong>
+                        <span>Retail Commerce Center</span>
+                      </div>
+                    </Space>
                   </div>
-                </Space>
-                <Paragraph
-                  style={{
-                    marginTop: 14,
-                    marginBottom: 0,
-                    color: "var(--manager-text-soft)",
-                    maxWidth: 380,
-                  }}
-                >
-                  聚合工作台、店铺管理、商品管理与采集管理，帮助桌面端商家快速完成日常经营动作。
-                </Paragraph>
+
+                  <Paragraph className="manager-commerce-description">
+                    聚合工作台、店铺管理、商品管理与采集管理，帮助桌面端商家快速完成日常经营动作。
+                  </Paragraph>
+                </div>
+
+                <div className="manager-commerce-actions">
+                  <Space size={12} wrap>
+                    <Badge count={6} size="small">
+                      <button type="button" className="manager-commerce-icon-button" aria-label="消息中心">
+                        <BellOutlined />
+                      </button>
+                    </Badge>
+
+                    <div className="manager-commerce-user-card">
+                      <Avatar
+                        style={{
+                          width: 42,
+                          height: 42,
+                          background: "linear-gradient(135deg, #ff9151, #ff5d47)",
+                          color: "#fff7f2",
+                          fontWeight: 700,
+                        }}
+                      >
+                        {(displayName || "管").slice(0, 1)}
+                      </Avatar>
+                      <div>
+                        <div style={{ fontWeight: 700, color: "var(--manager-text)" }}>{displayName}</div>
+                        <Text style={{ color: "var(--manager-text-soft)" }}>{username}</Text>
+                      </div>
+                      <Button
+                        type="text"
+                        onClick={handleLogout}
+                        icon={<LogoutOutlined />}
+                        loading={loggingOut}
+                        style={{ color: "var(--manager-text-soft)", fontWeight: 600 }}
+                      >
+                        退出
+                      </Button>
+                    </div>
+                  </Space>
+                </div>
               </div>
 
               <div className="manager-commerce-nav">
@@ -144,48 +178,6 @@ export function ManagerShell({ children }: ManagerShellProps) {
                     </button>
                   );
                 })}
-              </div>
-
-              <div className="manager-commerce-actions">
-                <div className="manager-commerce-chip">
-                  <PartitionOutlined />
-                  <span>Electron Bridge 已联通服务端</span>
-                </div>
-
-                <Space size={12} wrap>
-                  <Badge count={6} size="small">
-                    <button type="button" className="manager-commerce-icon-button" aria-label="消息中心">
-                      <BellOutlined />
-                    </button>
-                  </Badge>
-
-                  <div className="manager-commerce-user-card">
-                    <Avatar
-                      style={{
-                        width: 42,
-                        height: 42,
-                        background: "linear-gradient(135deg, #ff9151, #ff5d47)",
-                        color: "#fff7f2",
-                        fontWeight: 700,
-                      }}
-                    >
-                      {(displayName || "管").slice(0, 1)}
-                    </Avatar>
-                    <div>
-                      <div style={{ fontWeight: 700, color: "var(--manager-text)" }}>{displayName}</div>
-                      <Text style={{ color: "var(--manager-text-soft)" }}>{username}</Text>
-                    </div>
-                    <Button
-                      type="text"
-                      onClick={handleLogout}
-                      icon={<LogoutOutlined />}
-                      loading={loggingOut}
-                      style={{ color: "var(--manager-text-soft)", fontWeight: 600 }}
-                    >
-                      退出
-                    </Button>
-                  </div>
-                </Space>
               </div>
             </div>
           </Header>

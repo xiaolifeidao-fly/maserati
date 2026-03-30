@@ -7,10 +7,8 @@ type ShopDTO struct {
 	AppUserID              uint64 `json:"appUserId"`
 	Code                   string `json:"code"`
 	Name                   string `json:"name"`
-	SortID                 int64  `json:"sortId"`
-	ShopTypeCode           string `json:"shopTypeCode"`
-	ApproveFlag            int8   `json:"approveFlag"`
 	Platform               string `json:"platform"`
+	Remark                 string `json:"remark"`
 	PlatformShopID         string `json:"platformShopId"`
 	BusinessID             string `json:"businessId"`
 	LoginStatus            string `json:"loginStatus"`
@@ -21,27 +19,17 @@ type ShopDTO struct {
 }
 
 type CreateShopDTO struct {
-	AppUserID      uint64 `json:"appUserId"`
-	Code           string `json:"code"`
-	Name           string `json:"name"`
-	SortID         int64  `json:"sortId"`
-	ShopTypeCode   string `json:"shopTypeCode"`
-	ApproveFlag    int8   `json:"approveFlag"`
-	Platform       string `json:"platform"`
-	PlatformShopID string `json:"platformShopId"`
-	BusinessID     string `json:"businessId"`
+	AppUserID   uint64 `json:"appUserId"`
+	Platform    string `json:"platform"`
+	Remark      string `json:"remark"`
+	LoginStatus string `json:"loginStatus"`
 }
 
 type UpdateShopDTO struct {
-	AppUserID      *uint64 `json:"appUserId,omitempty"`
-	Code           *string `json:"code,omitempty"`
-	Name           *string `json:"name,omitempty"`
-	SortID         *int64  `json:"sortId,omitempty"`
-	ShopTypeCode   *string `json:"shopTypeCode,omitempty"`
-	ApproveFlag    *int8   `json:"approveFlag,omitempty"`
-	Platform       *string `json:"platform,omitempty"`
-	PlatformShopID *string `json:"platformShopId,omitempty"`
-	BusinessID     *string `json:"businessId,omitempty"`
+	AppUserID   *uint64 `json:"appUserId,omitempty"`
+	Platform    *string `json:"platform,omitempty"`
+	Remark      *string `json:"remark,omitempty"`
+	LoginStatus *string `json:"loginStatus,omitempty"`
 }
 
 type ShopQueryDTO struct {
@@ -52,6 +40,7 @@ type ShopQueryDTO struct {
 	Code                string `form:"code"`
 	Name                string `form:"name"`
 	Platform            string `form:"platform"`
+	Remark              string `form:"remark"`
 	BusinessID          string `form:"businessId"`
 	PlatformShopID      string `form:"platformShopId"`
 	LoginStatus         string `form:"loginStatus"`
@@ -69,8 +58,6 @@ type ShopLoginDTO struct {
 
 type ShopAuthorizeDTO struct {
 	ActivationCode string `json:"activationCode"`
-	BusinessID     string `json:"businessId"`
-	ValidDays      int    `json:"validDays"`
 }
 
 type ShopAuthorizationDTO struct {

@@ -55,11 +55,8 @@ export class ShopRecord {
   appUserId = 0;
   code = "";
   name = "";
-  sortId = 0;
-  shopGroupId = 0;
-  shopTypeCode = "";
-  approveFlag = 0;
   platform = "";
+  remark = "";
   platformShopId = "";
   businessId = "";
   loginStatus = "";
@@ -78,27 +75,21 @@ export interface ShopListQuery extends Record<string, string | number | undefine
   code?: string;
   name?: string;
   platform?: string;
+  remark?: string;
   businessId?: string;
   platformShopId?: string;
+  loginStatus?: string;
   authorizationStatus?: string;
 }
 
 export interface ShopPayload {
-  code: string;
-  name: string;
-  sortId: number;
-  shopGroupId: number;
-  shopTypeCode: string;
-  approveFlag: number;
   platform: string;
-  platformShopId: string;
-  businessId: string;
+  remark: string;
+  loginStatus?: string;
 }
 
 export interface ShopAuthorizePayload {
   activationCode: string;
-  businessId: string;
-  validDays: number;
 }
 
 export interface ShopLoginPayload {

@@ -1,10 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   ArrowRightOutlined,
-  CheckCircleOutlined,
   DeleteOutlined,
   EditOutlined,
   KeyOutlined,
@@ -12,36 +11,33 @@ import {
   PlusOutlined,
   ReloadOutlined,
   SearchOutlined,
-  ShopOutlined,
 } from "@ant-design/icons";
 import {
   Button,
   Form,
   Input,
-  InputNumber,
   Modal,
   Popconfirm,
   Select,
   Space,
-  Statistic,
   Table,
   Tag,
   message,
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import { type ShopLoginPayload, type ShopPayload, type ShopRecord } from "../api/shop.api";
+import { type ShopPayload, type ShopRecord } from "../api/shop.api";
 import { useShopManagement } from "../hooks/useShopManagement";
 import { formatDateTime } from "@/utils/format";
 
 interface ShopFormValues extends ShopPayload {}
 
 interface AuthorizeFormValues {
-  businessId: string;
   activationCode: string;
-  validDays: number;
 }
 
-interface LoginFormValues extends ShopLoginPayload {}
+function getShopDisplayName(record: Pick<ShopRecord, "remark" | "name" | "code" | "platform">) {
+  return record.remark || record.name || record.code || record.platform || "-";
+}
 
 const platformOptions = [
   { label: "淘宝", value: "taobao" },
@@ -69,7 +65,7 @@ function getShopStage(record: ShopRecord) {
   return {
     label: "待登录",
     color: "default" as const,
-    description: "先绑定外部账号并完成登录",
+    description: "先打开外部登录窗口，完成登录后再授权",
   };
 }
 
@@ -77,13 +73,12 @@ export function ShopManagementPanel() {
   const router = useRouter();
   const [shopForm] = Form.useForm<ShopFormValues>();
   const [authorizeForm] = Form.useForm<AuthorizeFormValues>();
-  const [loginForm] = Form.useForm<LoginFormValues>();
-  const { shops, total, query, loading, submitting, refresh, saveShop, submitShopLogin, bindActivationCode, removeShop } =
-    useShopManagement();
+  const { shops, total, query, loading, submitting, refresh, saveShop, bindActivationCode, removeShop } = useShopManagement();
   const [filters, setFilters] = useState({
     name: "",
     businessId: "",
     platform: "",
+    loginStatus: "",
     authorizationStatus: "",
   });
   const [editingShop, setEditingShop] = useState<ShopRecord | null>(null);
@@ -94,27 +89,11 @@ export function ShopManagementPanel() {
   const [loginTarget, setLoginTarget] = useState<ShopRecord | null>(null);
   const safeShops = Array.isArray(shops) ? shops : [];
 
-  const shopStats = useMemo(() => {
-    const authorized = safeShops.filter((item) => item.authorizationStatus === "AUTHORIZED").length;
-    const loggedIn = safeShops.filter((item) => item.loginStatus === "LOGGED_IN").length;
-    return {
-      authorized,
-      loggedIn,
-      pending: Math.max(safeShops.length - authorized, 0),
-    };
-  }, [safeShops]);
-
   const openCreateModal = () => {
     setEditingShop(null);
     shopForm.setFieldsValue({
-      code: "",
-      name: "",
-      sortId: 0,
-      shopTypeCode: "",
-      approveFlag: 0,
       platform: "taobao",
-      platformShopId: "",
-      businessId: "",
+      remark: "",
     });
     setEditOpen(true);
   };
@@ -122,14 +101,8 @@ export function ShopManagementPanel() {
   const openEditModal = (record: ShopRecord) => {
     setEditingShop(record);
     shopForm.setFieldsValue({
-      code: record.code,
-      name: record.name,
-      sortId: record.sortId,
-      shopTypeCode: record.shopTypeCode,
-      approveFlag: record.approveFlag,
       platform: record.platform || "taobao",
-      platformShopId: record.platformShopId,
-      businessId: record.businessId,
+      remark: record.remark,
     });
     setEditOpen(true);
   };
@@ -137,22 +110,13 @@ export function ShopManagementPanel() {
   const openAuthorizeModal = (record: ShopRecord) => {
     setAuthorizeTarget(record);
     authorizeForm.setFieldsValue({
-      businessId: record.businessId,
       activationCode: record.authorizationCode,
-      validDays: 365,
     });
     setAuthorizeOpen(true);
   };
 
   const openLoginModal = (record?: ShopRecord) => {
     setLoginTarget(record ?? null);
-    loginForm.setFieldsValue({
-      name: record?.name || "",
-      code: record?.code || "",
-      platform: record?.platform || "taobao",
-      platformShopId: record?.platformShopId || "",
-      businessId: record?.businessId || "",
-    });
     setLoginOpen(true);
   };
 
@@ -160,37 +124,15 @@ export function ShopManagementPanel() {
     const values = await shopForm.validateFields();
     try {
       await saveShop(editingShop?.id ?? null, {
-        ...values,
-        code: values.code.trim(),
-        name: values.name.trim(),
-        shopTypeCode: values.shopTypeCode.trim(),
         platform: values.platform.trim(),
-        platformShopId: values.platformShopId.trim(),
-        businessId: values.businessId.trim(),
+        remark: (values.remark || "").trim(),
+        loginStatus: editingShop?.loginStatus || "PENDING",
       });
       message.success(editingShop ? "店铺已更新" : "店铺已创建");
       setEditOpen(false);
       setEditingShop(null);
     } catch (error) {
       message.error(error instanceof Error ? error.message : "保存店铺失败");
-    }
-  };
-
-  const handleLoginShop = async () => {
-    const values = await loginForm.validateFields();
-    try {
-      await submitShopLogin({
-        name: values.name.trim(),
-        code: values.code.trim(),
-        platform: values.platform.trim(),
-        platformShopId: values.platformShopId.trim(),
-        businessId: values.businessId.trim(),
-      });
-      message.success(loginTarget ? "外部账号已重新登录" : "外部账号登录已完成");
-      setLoginOpen(false);
-      setLoginTarget(null);
-    } catch (error) {
-      message.error(error instanceof Error ? error.message : "外部账号登录失败");
     }
   };
 
@@ -202,8 +144,6 @@ export function ShopManagementPanel() {
     try {
       await bindActivationCode(authorizeTarget.id, {
         activationCode: values.activationCode.trim(),
-        businessId: values.businessId.trim(),
-        validDays: Number(values.validDays || 365),
       });
       message.success("店铺授权已完成");
       setAuthorizeOpen(false);
@@ -222,9 +162,9 @@ export function ShopManagementPanel() {
         const stage = getShopStage(record);
         return (
           <div>
-            <div style={{ color: "var(--manager-text)", fontWeight: 700 }}>{record.name || "-"}</div>
+            <div style={{ color: "var(--manager-text)", fontWeight: 700 }}>{getShopDisplayName(record)}</div>
             <div style={{ color: "var(--manager-text-faint)", marginTop: 4 }}>
-              {record.code || "-"} · {record.platform || "-"}
+              {record.platform || "-"}
             </div>
             <div style={{ marginTop: 8 }}>
               <Tag color={stage.color}>{stage.label}</Tag>
@@ -332,56 +272,11 @@ export function ShopManagementPanel() {
   return (
     <div className="manager-page-stack">
       <section className="manager-data-card">
-        <div className="manager-flow-hero">
-          <div>
-            <div className="manager-section-label">Step 1</div>
-            <h2 className="manager-display-title" style={{ margin: "10px 0 8px" }}>
-              新增店铺后，直接完成外部账号登录与授权
-            </h2>
-            <p className="manager-muted" style={{ margin: 0, maxWidth: 760 }}>
-              这一步只做三件事：先建店铺基础档案，再绑定外部账号登录，最后补齐激活码授权。完成后就可以直接进入采集批次。
-            </p>
-          </div>
-
-          <Space wrap>
-            <Button type="primary" icon={<PlusOutlined />} onClick={openCreateModal}>
-              新增店铺
-            </Button>
-            <Button icon={<LinkOutlined />} onClick={() => openLoginModal()}>
-              直接录入登录店铺
-            </Button>
-          </Space>
-        </div>
-
-        <div className="manager-kpi-grid">
-          <div className="manager-kpi-card">
-            <Statistic title="当前店铺数" value={total} prefix={<ShopOutlined />} />
-          </div>
-          <div className="manager-kpi-card">
-            <Statistic title="已完成外部登录" value={shopStats.loggedIn} prefix={<LinkOutlined />} />
-          </div>
-          <div className="manager-kpi-card">
-            <Statistic title="已授权可采集" value={shopStats.authorized} prefix={<CheckCircleOutlined />} />
-          </div>
-          <div className="manager-kpi-card">
-            <Statistic title="待继续处理" value={shopStats.pending} prefix={<ArrowRightOutlined />} />
-          </div>
-        </div>
-
-        <div className="manager-step-strip">
-          <div className="manager-step-pill is-active">1. 新增店铺资料</div>
-          <div className="manager-step-pill">2. 绑定外部账号登录</div>
-          <div className="manager-step-pill">3. 输入激活码授权</div>
-          <div className="manager-step-pill">4. 进入采集批次</div>
-        </div>
-      </section>
-
-      <section className="manager-data-card">
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap", justifyContent: "space-between" }}>
           <Space wrap size={12}>
             <Input
               className="manager-filter-input"
-              placeholder="按店铺名称筛选"
+              placeholder="按备注或店铺名称筛选"
               value={filters.name}
               onChange={(event) => setFilters((current) => ({ ...current, name: event.target.value }))}
               style={{ width: 220, maxWidth: "100%", height: 44 }}
@@ -413,11 +308,25 @@ export function ShopManagementPanel() {
               ]}
               style={{ width: 150 }}
             />
+            <Select
+              allowClear
+              placeholder="登录状态"
+              value={filters.loginStatus || undefined}
+              onChange={(value) => setFilters((current) => ({ ...current, loginStatus: value || "" }))}
+              options={[
+                { label: "已登录", value: "LOGGED_IN" },
+                { label: "待登录", value: "PENDING" },
+              ]}
+              style={{ width: 150 }}
+            />
             <Button type="primary" icon={<SearchOutlined />} onClick={() => void refresh({ pageIndex: 1, ...filters })}>
               查询
             </Button>
             <Button icon={<ReloadOutlined />} onClick={() => void refresh()}>
               刷新
+            </Button>
+            <Button type="primary" icon={<PlusOutlined />} onClick={openCreateModal}>
+              新增店铺
             </Button>
           </Space>
 
@@ -456,29 +365,11 @@ export function ShopManagementPanel() {
         destroyOnClose
       >
         <Form<ShopFormValues> form={shopForm} layout="vertical" preserve={false}>
-          <Form.Item name="name" label="店铺名称" rules={[{ required: true, message: "请输入店铺名称" }]}>
-            <Input placeholder="例如：华东旗舰店" />
-          </Form.Item>
-          <Form.Item name="code" label="店铺编码" rules={[{ required: true, message: "请输入店铺编码" }]}>
-            <Input placeholder="例如：SHOP_EAST_001" />
-          </Form.Item>
           <Form.Item name="platform" label="所属平台" rules={[{ required: true, message: "请选择平台" }]}>
             <Select options={platformOptions} />
           </Form.Item>
-          <Form.Item name="platformShopId" label="平台店铺ID">
-            <Input placeholder="例如：7291882" />
-          </Form.Item>
-          <Form.Item name="businessId" label="业务ID">
-            <Input placeholder="例如：biz-shop-east-01" />
-          </Form.Item>
-          <Form.Item name="shopTypeCode" label="店铺类型编码">
-            <Input placeholder="例如：flagship" />
-          </Form.Item>
-          <Form.Item name="sortId" label="排序值">
-            <InputNumber min={0} style={{ width: "100%" }} />
-          </Form.Item>
-          <Form.Item name="approveFlag" label="审核标记">
-            <InputNumber min={0} max={1} style={{ width: "100%" }} />
+          <Form.Item name="remark" label="备注">
+            <Input.TextArea placeholder="例如：华东旗舰店 / 运营备用号" rows={4} maxLength={255} showCount />
           </Form.Item>
         </Form>
       </Modal>
@@ -490,27 +381,35 @@ export function ShopManagementPanel() {
           setLoginOpen(false);
           setLoginTarget(null);
         }}
-        onOk={() => void handleLoginShop()}
-        confirmLoading={submitting}
+        footer={[
+          <Button
+            key="close"
+            type="primary"
+            onClick={() => {
+              setLoginOpen(false);
+              setLoginTarget(null);
+            }}
+          >
+            知道了
+          </Button>,
+        ]}
         destroyOnClose
       >
-        <Form<LoginFormValues> form={loginForm} layout="vertical" preserve={false}>
-          <Form.Item name="name" label="店铺名称" rules={[{ required: true, message: "请输入店铺名称" }]}>
-            <Input placeholder="例如：华东旗舰店" />
-          </Form.Item>
-          <Form.Item name="code" label="店铺编码">
-            <Input placeholder="例如：SHOP_EAST_001" />
-          </Form.Item>
-          <Form.Item name="platform" label="所属平台" rules={[{ required: true, message: "请选择平台" }]}>
-            <Select options={platformOptions} />
-          </Form.Item>
-          <Form.Item name="platformShopId" label="平台店铺ID" rules={[{ required: true, message: "请输入平台店铺ID" }]}>
-            <Input placeholder="例如：7291882" />
-          </Form.Item>
-          <Form.Item name="businessId" label="业务ID" rules={[{ required: true, message: "请输入业务ID" }]}>
-            <Input placeholder="例如：biz-shop-east-01" />
-          </Form.Item>
-        </Form>
+        <div style={{ display: "grid", gap: 16 }}>
+          <div style={{ padding: 16, borderRadius: 16, background: "rgba(170,192,238,0.12)", color: "var(--manager-text)" }}>
+            <div style={{ fontWeight: 700, marginBottom: 8 }}>{loginTarget ? getShopDisplayName(loginTarget) : "新店铺外部登录"}</div>
+            <div style={{ color: "var(--manager-text-faint)", lineHeight: 1.8 }}>
+              已为外部登录预留弹窗流程。
+              <br />
+              当前阶段先弹出等待界面，后续再接真实扫码、授权回调和登录态回填。
+            </div>
+          </div>
+          <div style={{ padding: "14px 16px", borderRadius: 14, border: "1px dashed rgba(170,192,238,0.28)", color: "var(--manager-text-faint)" }}>
+            等待外部登录中...
+            <br />
+            TODO: 接入真实外部登录窗口、登录成功回调、店铺信息自动回填。
+          </div>
+        </div>
       </Modal>
 
       <Modal
@@ -525,14 +424,8 @@ export function ShopManagementPanel() {
         destroyOnClose
       >
         <Form<AuthorizeFormValues> form={authorizeForm} layout="vertical" preserve={false}>
-          <Form.Item name="businessId" label="业务ID" rules={[{ required: true, message: "请输入业务ID" }]}>
-            <Input placeholder="例如：biz-shop-east-01" />
-          </Form.Item>
           <Form.Item name="activationCode" label="激活码" rules={[{ required: true, message: "请输入激活码" }]}>
             <Input placeholder="请输入激活码" />
-          </Form.Item>
-          <Form.Item name="validDays" label="有效天数" rules={[{ required: true, message: "请输入有效天数" }]}>
-            <InputNumber min={1} max={3650} style={{ width: "100%" }} />
           </Form.Item>
         </Form>
       </Modal>

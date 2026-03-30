@@ -115,6 +115,7 @@
     "node-machine-id": "^1.1.12",
     "pino": "^9.5.0",
     "platform-specific": "^1.1.0",
+    "playwright": "^1.58.2",
     "proxy-from-env": "^1.1.0",
     "qrcode": "^1.5.4",
     "reflect-metadata": "^0.2.2",

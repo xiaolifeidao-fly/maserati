@@ -27,3 +27,4 @@ package
 *.tar.gz
 !.codex
 old_source_code
+old_client_code

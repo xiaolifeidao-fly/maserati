@@ -6,11 +6,9 @@ import {
   createShop,
   deleteShop,
   fetchShops,
-  loginShop,
   updateShop,
   type ShopAuthorizePayload,
   type ShopListQuery,
-  type ShopLoginPayload,
   type ShopPayload,
   type ShopRecord,
 } from "../api/shop.api";
@@ -21,8 +19,10 @@ const defaultQuery: Required<ShopListQuery> = {
   code: "",
   name: "",
   platform: "",
+  remark: "",
   businessId: "",
   platformShopId: "",
+  loginStatus: "",
   authorizationStatus: "",
 };
 
@@ -64,17 +64,7 @@ export function useShopManagement() {
     setSubmitting(true);
     try {
       await authorizeShop(id, payload);
-      await refresh({ businessId: payload.businessId || "" });
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const submitShopLogin = async (payload: ShopLoginPayload) => {
-    setSubmitting(true);
-    try {
-      await loginShop(payload);
-      await refresh({ businessId: payload.businessId || "" });
+      await refresh();
     } finally {
       setSubmitting(false);
     }
@@ -103,7 +93,6 @@ export function useShopManagement() {
     submitting,
     refresh,
     saveShop,
-    submitShopLogin,
     bindActivationCode,
     removeShop,
   };

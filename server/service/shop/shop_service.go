@@ -77,6 +77,16 @@ func defaultShopDecimal(value string) string {
 	return value
 }
 
+func defaultShopDisplayName(platform, remark string) string {
+	if value := strings.TrimSpace(remark); value != "" {
+		return value
+	}
+	if value := strings.TrimSpace(platform); value != "" {
+		return value
+	}
+	return "店铺"
+}
+
 func normalizeShopStatus(value string) string {
 	switch strings.ToUpper(strings.TrimSpace(value)) {
 	case "LOGGED_IN":
@@ -102,6 +112,14 @@ func formatShopTime(value *time.Time) string {
 		return ""
 	}
 	return value.Format(time.RFC3339)
+}
+
+func resolveActivationCodeExpiration(now time.Time, activationCode string) (time.Time, error) {
+	if strings.TrimSpace(activationCode) == "" {
+		return time.Time{}, fmt.Errorf("activation code is required")
+	}
+	// TODO: replace this fallback with real activation-code verification.
+	return now.AddDate(1, 0, 0), nil
 }
 
 func defaultShopCode(platform, platformShopID, businessID string) string {
@@ -130,10 +148,8 @@ func toShopDTO(entity *shopRepository.Shop) *shopDTO.ShopDTO {
 		AppUserID:              entity.AppUserID,
 		Code:                   entity.Code,
 		Name:                   entity.Name,
-		SortID:                 entity.SortID,
-		ShopTypeCode:           entity.ShopTypeCode,
-		ApproveFlag:            entity.ApproveFlag,
 		Platform:               entity.Platform,
+		Remark:                 entity.Remark,
 		PlatformShopID:         entity.PlatformShopID,
 		BusinessID:             entity.BusinessID,
 		LoginStatus:            normalizeShopStatus(entity.LoginStatus),
@@ -229,8 +245,14 @@ func (s *ShopService) refreshShopAuthorizationState(shopEntity *shopRepository.S
 func (s *ShopService) ListShops(query shopDTO.ShopQueryDTO) (*baseDTO.PageDTO[shopDTO.ShopDTO], error) {
 	pageIndex, pageSize := normalizeShopPage(query.Page, query.PageIndex, query.PageSize)
 	repositoryQuery := query
-	repositoryQuery.LoginStatus = normalizeShopStatus(repositoryQuery.LoginStatus)
-	repositoryQuery.AuthorizationStatus = normalizeShopAuthorizationStatus(repositoryQuery.AuthorizationStatus)
+	repositoryQuery.LoginStatus = strings.TrimSpace(repositoryQuery.LoginStatus)
+	if repositoryQuery.LoginStatus != "" {
+		repositoryQuery.LoginStatus = normalizeShopStatus(repositoryQuery.LoginStatus)
+	}
+	repositoryQuery.AuthorizationStatus = strings.TrimSpace(repositoryQuery.AuthorizationStatus)
+	if repositoryQuery.AuthorizationStatus != "" {
+		repositoryQuery.AuthorizationStatus = normalizeShopAuthorizationStatus(repositoryQuery.AuthorizationStatus)
+	}
 	total, err := s.shopRepository.CountByQuery(repositoryQuery)
 	if err != nil {
 		return nil, err
@@ -263,25 +285,22 @@ func (s *ShopService) CreateShop(req *shopDTO.CreateShopDTO) (*shopDTO.ShopDTO, 
 	if req == nil {
 		return nil, fmt.Errorf("request is nil")
 	}
-	name := strings.TrimSpace(req.Name)
-	if name == "" {
-		return nil, fmt.Errorf("shop name is required")
+	platform := strings.TrimSpace(req.Platform)
+	if platform == "" {
+		return nil, fmt.Errorf("platform is required")
 	}
-	businessID := strings.TrimSpace(req.BusinessID)
+	remark := strings.TrimSpace(req.Remark)
+	displayName := defaultShopDisplayName(platform, remark)
 	if err := ensureShopAppUserExists(s.appUserRepository, req.AppUserID); err != nil {
 		return nil, err
 	}
 	created, err := s.shopRepository.Create(&shopRepository.Shop{
 		AppUserID:           req.AppUserID,
-		Code:                strings.TrimSpace(req.Code),
-		Name:                name,
-		SortID:              req.SortID,
-		ShopTypeCode:        strings.TrimSpace(req.ShopTypeCode),
-		ApproveFlag:         req.ApproveFlag,
-		Platform:            strings.TrimSpace(req.Platform),
-		PlatformShopID:      strings.TrimSpace(req.PlatformShopID),
-		BusinessID:          businessID,
-		LoginStatus:         "PENDING",
+		Code:                displayName,
+		Name:                displayName,
+		Platform:            platform,
+		Remark:              remark,
+		LoginStatus:         normalizeShopStatus(req.LoginStatus),
 		AuthorizationStatus: "UNAUTHORIZED",
 	})
 	if err != nil {
@@ -307,35 +326,28 @@ func (s *ShopService) UpdateShop(id uint, req *shopDTO.UpdateShopDTO) (*shopDTO.
 	if entity.Active == 0 {
 		return nil, gorm.ErrRecordNotFound
 	}
-	if req.Code != nil {
-		entity.Code = strings.TrimSpace(*req.Code)
-	}
 	if req.AppUserID != nil {
 		if err := ensureShopAppUserExists(s.appUserRepository, *req.AppUserID); err != nil {
 			return nil, err
 		}
 		entity.AppUserID = *req.AppUserID
 	}
-	if req.Name != nil {
-		entity.Name = strings.TrimSpace(*req.Name)
-	}
-	if req.SortID != nil {
-		entity.SortID = *req.SortID
-	}
-	if req.ShopTypeCode != nil {
-		entity.ShopTypeCode = strings.TrimSpace(*req.ShopTypeCode)
-	}
-	if req.ApproveFlag != nil {
-		entity.ApproveFlag = *req.ApproveFlag
-	}
+	previousDisplayName := defaultShopDisplayName(entity.Platform, entity.Remark)
 	if req.Platform != nil {
 		entity.Platform = strings.TrimSpace(*req.Platform)
 	}
-	if req.PlatformShopID != nil {
-		entity.PlatformShopID = strings.TrimSpace(*req.PlatformShopID)
+	if req.Remark != nil {
+		entity.Remark = strings.TrimSpace(*req.Remark)
 	}
-	if req.BusinessID != nil {
-		entity.BusinessID = strings.TrimSpace(*req.BusinessID)
+	if req.LoginStatus != nil {
+		entity.LoginStatus = normalizeShopStatus(*req.LoginStatus)
+	}
+	nextDisplayName := defaultShopDisplayName(entity.Platform, entity.Remark)
+	if strings.TrimSpace(entity.Name) == "" || entity.Name == previousDisplayName {
+		entity.Name = nextDisplayName
+	}
+	if strings.TrimSpace(entity.Code) == "" || entity.Code == previousDisplayName {
+		entity.Code = nextDisplayName
 	}
 	if err := s.refreshShopAuthorizationState(entity); err != nil {
 		return nil, err
@@ -451,20 +463,16 @@ func (s *ShopService) AuthorizeShop(id uint, req *shopDTO.ShopAuthorizeDTO) (*sh
 	if activationCode == "" {
 		return nil, fmt.Errorf("activation code is required")
 	}
-	businessID := strings.TrimSpace(req.BusinessID)
+	businessID := strings.TrimSpace(shopEntity.BusinessID)
 	if businessID == "" {
-		businessID = strings.TrimSpace(shopEntity.BusinessID)
-	}
-	if businessID == "" {
-		return nil, fmt.Errorf("business id is required")
-	}
-	validDays := req.ValidDays
-	if validDays <= 0 {
-		validDays = 365
+		return nil, fmt.Errorf("business id is required before authorization")
 	}
 
 	now := time.Now()
-	expiresAt := now.AddDate(0, 0, validDays)
+	expiresAt, err := resolveActivationCodeExpiration(now, activationCode)
+	if err != nil {
+		return nil, err
+	}
 	err = s.shopAuthorizationRepository.Transaction(func(tx *gorm.DB) error {
 		conflict, conflictErr := s.shopAuthorizationRepository.FindConflictActiveAuthorizationWithTx(tx, activationCode, businessID)
 		if conflictErr == nil {
@@ -524,7 +532,10 @@ func (s *ShopService) AuthorizeShop(id uint, req *shopDTO.ShopAuthorizeDTO) (*sh
 func (s *ShopService) ListShopAuthorizations(query shopDTO.ShopAuthorizationQueryDTO) (*baseDTO.PageDTO[shopDTO.ShopAuthorizationDTO], error) {
 	pageIndex, pageSize := normalizeShopPage(query.Page, query.PageIndex, query.PageSize)
 	repositoryQuery := query
-	repositoryQuery.Status = normalizeShopAuthorizationStatus(repositoryQuery.Status)
+	repositoryQuery.Status = strings.TrimSpace(repositoryQuery.Status)
+	if repositoryQuery.Status != "" {
+		repositoryQuery.Status = normalizeShopAuthorizationStatus(repositoryQuery.Status)
+	}
 	total, err := s.shopAuthorizationRepository.CountByQuery(repositoryQuery)
 	if err != nil {
 		return nil, err

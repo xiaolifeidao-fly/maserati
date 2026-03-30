@@ -1,0 +1,803 @@
+{
+    "skuInfo": {
+        "seller": {
+            "creditLevel": "7",
+            "creditLevelIcon": "//gw.alicdn.com/tfs/TB1TqTMiv6H8KJjy0FjXXaXepXa-132-24.png",
+            "evaluates": [
+                {
+                    "level": "1",
+                    "levelText": "高",
+                    "score": "4.9 ",
+                    "title": "宝贝描述",
+                    "type": "desc"
+                },
+                {
+                    "level": "1",
+                    "levelText": "高",
+                    "score": "4.9 ",
+                    "title": "卖家服务",
+                    "type": "serv"
+                },
+                {
+                    "level": "1",
+                    "levelText": "高",
+                    "score": "4.9 ",
+                    "title": "物流服务",
+                    "type": "post"
+                }
+            ],
+            "pcShopUrl": "//shop372661072.taobao.com",
+            "sellerId": "2219009961285",
+            "sellerNick": "zhoullllli",
+            "sellerType": "C",
+            "shopIcon": "https://img.alicdn.com/imgextra/i2/2219009961285/O1CN017c5VJs1LMZy1PFCL4_!!2219009961285.jpg",
+            "shopId": "372661072",
+            "shopName": "taotaoxinxin",
+            "userId": "2219009961285"
+        },
+        "item": {
+            "bottomIcons": [],
+            "images": [
+                "https://img.alicdn.com/imgextra/i4/2219009961285/O1CN01aHW4SA1LMZywxhfcB_!!2219009961285.webp"
+            ],
+            "itemId": "893932942112",
+            "pcADescUrl": "//market.m.taobao.com/app/detail-project/desc/index.html?id=893932942112&descVersion=7.0&type=1&f=desc/icoss25115805990da1d824eaa26bc3&sellerType=C",
+            "qrCode": "https://h5.m.taobao.com/awp/core/detail.htm?id=893932942112",
+            "spuId": "0",
+            "title": "装鸡蛋的盒子防摔厨房15格冰箱鸡蛋盒保鲜盒塑料食品收纳储物盒透",
+            "titleIcon": "https://img.alicdn.com/tfs/TB12Rdd1.z1gK0jSZLeXXb9kVXa-104-32.png",
+            "useWirelessDesc": "true",
+            "vagueSellCount": "0"
+        },
+        "feature": {
+            "pcResistDetail": "false",
+            "tmwOverseasScene": "false",
+            "pcIdentityRisk": "false"
+        },
+        "plusViewVO": {
+            "leftButtonStyleVO": {
+                "bizCode": "",
+                "ext": {
+                    "sizeChange": "true",
+                    "hasQuan": "false"
+                },
+                "hit": "true",
+                "logParams": {
+                    "catId": "122928002",
+                    "styleCode": "sizeOnly",
+                    "priceRange": "0-100"
+                }
+            },
+            "guessLikeVO": {
+                "bizCode": "",
+                "hit": "true"
+            },
+            "rankVO": {
+                "bizCode": "",
+                "hit": "true",
+                "spm": "aliabtest723647_830745"
+            },
+            "tabPlaceholderVO": {
+                "bizCode": "",
+                "hit": "true",
+                "spm": "aliabtest724339_834392"
+            },
+            "industryParamVO": {
+                "basicParamList": [
+                    {
+                        "propertyName": "风格",
+                        "valueName": "简约"
+                    },
+                    {
+                        "propertyName": "材质",
+                        "valueName": "塑料"
+                    },
+                    {
+                        "propertyName": "适用空间",
+                        "valueName": "餐厅"
+                    },
+                    {
+                        "propertyName": "颜色分类",
+                        "valueName": "蓝色,白色,绿色,粉色"
+                    }
+                ],
+                "bizCode": "",
+                "hit": "true"
+            },
+            "headAtmosphereBeltVO": {
+                "bizCode": "",
+                "hit": "true",
+                "valid": "false"
+            },
+            "commentListVO": {
+                "bizCode": "",
+                "ext": {
+                    "countShow": "\"false\""
+                },
+                "hit": "true"
+            },
+            "pcFrontSkuQuantityLimitVO": {
+                "bizCode": "",
+                "hit": "true"
+            },
+            "buyParamVO": {
+                "bizCode": "",
+                "ext": {
+                    "autoApplCoupSource": "pcDetailOrder",
+                    "needAutoApplCoup": "true"
+                },
+                "hit": "true",
+                "spm": "aliabtest582366_724531"
+            }
+        },
+        "skuCore": {
+            "sku2info": {
+                "0": {
+                    "logisticsTime": "预计今天发货｜承诺48小时内发货",
+                    "moreQuantity": "false",
+                    "price": {
+                        "priceColorNew": "#7A7A7A",
+                        "priceMoney": "1771",
+                        "priceText": "17.71",
+                        "priceTitle": "优惠前"
+                    },
+                    "quantity": "40",
+                    "quantityDisplayValue": "1",
+                    "quantityText": "有货",
+                    "subPrice": {
+                        "priceBgColor": "#FF5000",
+                        "priceColor": "#FFFFFF",
+                        "priceColorNew": "#FF5000",
+                        "priceMoney": "886",
+                        "priceText": "8.86",
+                        "priceTitle": "折后",
+                        "priceTitleColor": "#FFFFFF"
+                    }
+                },
+                "5911821323926": {
+                    "cartParam": {
+                        "addCartCheck": "true"
+                    },
+                    "logisticsTime": "预计今天发货｜承诺48小时内发货",
+                    "moreQuantity": "false",
+                    "price": {
+                        "priceColorNew": "#7A7A7A",
+                        "priceMoney": "1771",
+                        "priceText": "17.71",
+                        "priceTitle": "优惠前"
+                    },
+                    "quantity": "10",
+                    "quantityDisplayValue": "1",
+                    "quantityText": "即将售罄",
+                    "subPrice": {
+                        "priceBgColor": "#FF5000",
+                        "priceColor": "#FFFFFF",
+                        "priceColorNew": "#FF5000",
+                        "priceMoney": "886",
+                        "priceText": "8.86",
+                        "priceTitle": "折后",
+                        "priceTitleColor": "#FFFFFF"
+                    }
+                },
+                "5911821323927": {
+                    "cartParam": {
+                        "addCartCheck": "true"
+                    },
+                    "logisticsTime": "预计今天发货｜承诺48小时内发货",
+                    "moreQuantity": "false",
+                    "price": {
+                        "priceColorNew": "#7A7A7A",
+                        "priceMoney": "1771",
+                        "priceText": "17.71",
+                        "priceTitle": "优惠前"
+                    },
+                    "quantity": "10",
+                    "quantityDisplayValue": "1",
+                    "quantityText": "即将售罄",
+                    "subPrice": {
+                        "priceBgColor": "#FF5000",
+                        "priceColor": "#FFFFFF",
+                        "priceColorNew": "#FF5000",
+                        "priceMoney": "886",
+                        "priceText": "8.86",
+                        "priceTitle": "折后",
+                        "priceTitleColor": "#FFFFFF"
+                    }
+                },
+                "5911821323924": {
+                    "cartParam": {
+                        "addCartCheck": "true"
+                    },
+                    "logisticsTime": "预计今天发货｜承诺48小时内发货",
+                    "moreQuantity": "false",
+                    "price": {
+                        "priceColorNew": "#7A7A7A",
+                        "priceMoney": "1771",
+                        "priceText": "17.71",
+                        "priceTitle": "优惠前"
+                    },
+                    "quantity": "10",
+                    "quantityDisplayValue": "1",
+                    "quantityText": "即将售罄",
+                    "subPrice": {
+                        "priceBgColor": "#FF5000",
+                        "priceColor": "#FFFFFF",
+                        "priceColorNew": "#FF5000",
+                        "priceMoney": "886",
+                        "priceText": "8.86",
+                        "priceTitle": "折后",
+                        "priceTitleColor": "#FFFFFF"
+                    }
+                },
+                "5911821323925": {
+                    "cartParam": {
+                        "addCartCheck": "true"
+                    },
+                    "logisticsTime": "预计今天发货｜承诺48小时内发货",
+                    "moreQuantity": "false",
+                    "price": {
+                        "priceColorNew": "#7A7A7A",
+                        "priceMoney": "1771",
+                        "priceText": "17.71",
+                        "priceTitle": "优惠前"
+                    },
+                    "quantity": "10",
+                    "quantityDisplayValue": "1",
+                    "quantityText": "即将售罄",
+                    "subPrice": {
+                        "priceBgColor": "#FF5000",
+                        "priceColor": "#FFFFFF",
+                        "priceColorNew": "#FF5000",
+                        "priceMoney": "886",
+                        "priceText": "8.86",
+                        "priceTitle": "折后",
+                        "priceTitleColor": "#FFFFFF"
+                    }
+                }
+            },
+            "skuItem": {
+                "itemStatus": "0",
+                "renderSku": "true",
+                "unitBuy": "1"
+            }
+        },
+        "params": {
+            "aplusParams": "[]",
+            "trackParams": {
+                "detailabtestdetail": ""
+            },
+            "userAbtestDetail": "365560_447259"
+        },
+        "skuBase": {
+            "components": [],
+            "props": [
+                {
+                    "comboProperty": "false",
+                    "hasGroupTags": "false",
+                    "hasImage": "true",
+                    "name": "颜色分类",
+                    "nameDesc": "（4）",
+                    "packProp": "false",
+                    "pid": "1627207",
+                    "shouldGroup": "false",
+                    "values": [
+                        {
+                            "comboPropertyValue": "false",
+                            "image": "https://gw.alicdn.com/bao/uploaded/i2/2219009961285/O1CN013JR7qO1LMZyvqbXZX_!!2219009961285.webp",
+                            "name": "绿色",
+                            "sortOrder": "0",
+                            "vid": "28335"
+                        },
+                        {
+                            "comboPropertyValue": "false",
+                            "image": "https://gw.alicdn.com/bao/uploaded/i3/2219009961285/O1CN011XG4Rl1LMZyxb6Qnv_!!2219009961285.webp",
+                            "name": "蓝色",
+                            "sortOrder": "1",
+                            "vid": "28338"
+                        },
+                        {
+                            "comboPropertyValue": "false",
+                            "image": "https://gw.alicdn.com/bao/uploaded/i4/2219009961285/O1CN01mbuWZT1LMZyx6X9H5_!!2219009961285.webp",
+                            "name": "白色",
+                            "sortOrder": "2",
+                            "vid": "28320"
+                        },
+                        {
+                            "comboPropertyValue": "false",
+                            "image": "https://gw.alicdn.com/bao/uploaded/i2/2219009961285/O1CN01zQb0IK1LMZyw6bFsK_!!2219009961285.webp",
+                            "name": "粉色",
+                            "sortOrder": "3",
+                            "vid": "28323"
+                        }
+                    ]
+                }
+            ],
+            "skus": [
+                {
+                    "propPath": "1627207:28335",
+                    "skuId": "5911821323924"
+                },
+                {
+                    "propPath": "1627207:28338",
+                    "skuId": "5911821323925"
+                },
+                {
+                    "propPath": "1627207:28320",
+                    "skuId": "5911821323926"
+                },
+                {
+                    "propPath": "1627207:28323",
+                    "skuId": "5911821323927"
+                }
+            ]
+        },
+        "pcTrade": {
+            "bizDataBuyParams": {},
+            "buyNowUrl": "//buy.taobao.com/auction/buy_now.jhtml",
+            "pcBuyParams": {
+                "virtual": "false",
+                "buy_now": "17.71",
+                "auction_type": "b",
+                "x-uid": "",
+                "title": "装鸡蛋的盒子防摔厨房15格冰箱鸡蛋盒保鲜盒塑料食品收纳储物盒透",
+                "buyer_from": "ecity",
+                "page_from_type": "main_site_pc",
+                "detailIsLimit": "false",
+                "who_pay_ship": "卖家承担运费",
+                "rootCatId": "122928002",
+                "auto_post1": null,
+                "routeToNewPc": "1",
+                "auto_post": "false",
+                "seller_nickname": "taotaoxinxin",
+                "photo_url": "i4/2219009961285/O1CN01aHW4SA1LMZywxhfcB_!!2219009961285.webp",
+                "current_price": "17.71",
+                "region": "浙江金华",
+                "seller_id": "b4d25d1708257838badb910afe5e22dc",
+                "etm": ""
+            },
+            "pcCartParam": {
+                "areaId": "310110"
+            },
+            "tradeType": "1"
+        },
+        "componentsVO": {
+            "headerVO": {
+                "buttons": [
+                    {
+                        "background": {
+                            "alpha": "1.0",
+                            "disabledAlpha": "1.0"
+                        },
+                        "disabled": "false",
+                        "events": [
+                            {
+                                "fields": {
+                                    "url": "//s.taobao.com/search"
+                                },
+                                "type": "onClick"
+                            }
+                        ],
+                        "subTitle": {},
+                        "title": {
+                            "text": "搜索"
+                        },
+                        "type": "search_in_taobao"
+                    },
+                    {
+                        "background": {
+                            "alpha": "1.0",
+                            "disabledAlpha": "1.0"
+                        },
+                        "disabled": "false",
+                        "events": [
+                            {
+                                "fields": {
+                                    "url": "//shop372661072.taobao.com/search.htm"
+                                },
+                                "type": "onClick"
+                            }
+                        ],
+                        "subTitle": {},
+                        "title": {
+                            "text": "搜本店"
+                        },
+                        "type": "search_in_store"
+                    }
+                ],
+                "logoJumpUrl": "https://www.taobao.com",
+                "mallLogo": "https://gw.alicdn.com/imgextra/i1/O1CN01z163bz1lHF5yQ50CC_!!6000000004793-2-tps-172-108.png",
+                "searchText": "搜索宝贝"
+            },
+            "headImageVO": {
+                "images": [
+                    "https://img.alicdn.com/imgextra/i4/2219009961285/O1CN01aHW4SA1LMZywxhfcB_!!2219009961285.webp",
+                    "https://img.alicdn.com/imgextra/i2/2219009961285/O1CN01WKNVki1LMZyw5IgJW_!!2219009961285.webp",
+                    "https://img.alicdn.com/imgextra/i1/2219009961285/O1CN01C1RD5k1LMZyyW11OS_!!2219009961285.webp",
+                    "https://img.alicdn.com/imgextra/i4/2219009961285/O1CN01fdxXYi1LMZywxeJhs_!!2219009961285.webp",
+                    "https://img.alicdn.com/imgextra/i3/2219009961285/O1CN01Ar9UHt1LMZyxb3wvE_!!2219009961285.webp"
+                ],
+                "videos": []
+            },
+            "storeCardVO": {
+                "buttons": [
+                    {
+                        "disabled": "false",
+                        "image": {
+                            "gifAnimated": "false",
+                            "imageUrl": "https://img.alicdn.com/imgextra/i1/O1CN016DNujx1yMMj6NMXVv_!!6000000006564-55-tps-24-24.svg"
+                        },
+                        "title": {
+                            "text": "联系客服"
+                        },
+                        "type": "customer_service"
+                    },
+                    {
+                        "disabled": "false",
+                        "events": [
+                            {
+                                "fields": {
+                                    "url": "//shop372661072.taobao.com"
+                                },
+                                "type": "openUrl"
+                            }
+                        ],
+                        "image": {
+                            "gifAnimated": "false",
+                            "imageUrl": "https://img.alicdn.com/imgextra/i4/O1CN01jn67ow1ZhYeiTJlZn_!!6000000003226-55-tps-24-24.svg"
+                        },
+                        "title": {
+                            "text": "进入店铺"
+                        },
+                        "type": "enter_shop"
+                    }
+                ],
+                "creditLevel": "7",
+                "creditLevelIcon": "//gtms03.alicdn.com/tps/i3/TB1x6IXHpXXXXX8XpXXaYjxHXXX-51-24.png",
+                "evaluates": [
+                    {
+                        "score": "5.0",
+                        "title": "宝贝质量"
+                    },
+                    {
+                        "score": "5.0",
+                        "title": "服务保障"
+                    },
+                    {
+                        "score": "-",
+                        "title": "物流速度"
+                    }
+                ],
+                "labelList": [
+                    {
+                        "contentDesc": "平均21小时发货"
+                    },
+                    {
+                        "contentDesc": "客服平均25秒回复"
+                    },
+                    {
+                        "contentDesc": "服务体验优秀"
+                    }
+                ],
+                "overallScore": "5.0",
+                "sellerType": "C",
+                "shopIcon": "https://img.alicdn.com/imgextra/i2/2219009961285/O1CN017c5VJs1LMZy1PFCL4_!!2219009961285.jpg",
+                "shopName": "taotaoxinxin",
+                "shopUrl": "//shop372661072.taobao.com"
+            },
+            "titleVO": {
+                "salesDesc": "已售 0",
+                "subTitles": [],
+                "title": {
+                    "title": "装鸡蛋的盒子防摔厨房15格冰箱鸡蛋盒保鲜盒塑料食品收纳储物盒透"
+                }
+            },
+            "debugVO": {
+                "host": "taodetail033022150193.unsh.ea119@33.22.150.193",
+                "traceId": "2150465b17412864637083908e134d"
+            },
+            "umpPriceLogVO": {
+                "bcType": "c",
+                "bs": "businessScenario",
+                "dumpInvoke": "0",
+                "map": "{5911821323926:{\"channelKeyD\":\"empty\",\"fpChannelKeyD\":\"empty\",\"price1\":\"17.71\",\"price2\":\"8.86\",\"price3\":\"17.71\",\"sourceTypeKeyD\":\"4_null\",\"utcDNow\":\"15_885\",\"utcDPre\":\"noProm\"},5911821323927:{\"channelKeyD\":\"empty\",\"fpChannelKeyD\":\"empty\",\"price1\":\"17.71\",\"price2\":\"8.86\",\"price3\":\"17.71\",\"sourceTypeKeyD\":\"4_null\",\"utcDNow\":\"15_885\",\"utcDPre\":\"noProm\"},5911821323924:{\"channelKeyD\":\"empty\",\"fpChannelKeyD\":\"empty\",\"price1\":\"17.71\",\"price2\":\"8.86\",\"price3\":\"17.71\",\"sourceTypeKeyD\":\"4_null\",\"utcDNow\":\"15_885\",\"utcDPre\":\"noProm\"},5911821323925:{\"channelKeyD\":\"empty\",\"fpChannelKeyD\":\"empty\",\"price1\":\"17.71\",\"price2\":\"8.86\",\"price3\":\"17.71\",\"sourceTypeKeyD\":\"4_null\",\"utcDNow\":\"15_885\",\"utcDPre\":\"noProm\"}}",
+                "sellerId": "2219009961285",
+                "sid": "0",
+                "traceId": "2150465b17412864637083908e134d",
+                "type": "99",
+                "umpCreateTime": "2025-03-07 02:41:03",
+                "version": "2.1",
+                "xobjectId": "893932942112"
+            },
+            "deliveryVO": {
+                "agingDesc": "预计今天发货｜承诺48小时内发货",
+                "agingDescColor": "#00A67C",
+                "areaId": "310110",
+                "deliverToCity": "上海",
+                "deliveryFromAddr": "浙江金华",
+                "deliveryToAddr": "上海 杨浦 定海路",
+                "deliveryToDistrict": "杨浦",
+                "freight": "快递: 免运费"
+            },
+            "extensionInfoVO": {
+                "infos": [
+                    {
+                        "items": [
+                            {
+                                "text": [
+                                    "满1件5折"
+                                ]
+                            }
+                        ],
+                        "title": "优惠",
+                        "type": "DAILY_COUPON"
+                    },
+                    {
+                        "items": [
+                            {
+                                "text": [
+                                    "退货宝",
+                                    "7天无理由退货",
+                                    "极速退款"
+                                ]
+                            }
+                        ],
+                        "title": "保障",
+                        "type": "GUARANTEE"
+                    },
+                    {
+                        "items": [
+                            {
+                                "text": [
+                                    "简约"
+                                ],
+                                "title": "风格"
+                            },
+                            {
+                                "text": [
+                                    "塑料"
+                                ],
+                                "title": "材质"
+                            },
+                            {
+                                "text": [
+                                    "餐厅"
+                                ],
+                                "title": "适用空间"
+                            },
+                            {
+                                "text": [
+                                    "蓝色,白色,绿色,粉色"
+                                ],
+                                "title": "颜色分类"
+                            }
+                        ],
+                        "title": "参数",
+                        "type": "BASE_PROPS"
+                    },
+                    {
+                        "items": [
+                            {
+                                "icon": "https://gw.alicdn.com/imgextra/i3/O1CN01ywvaIw1Vf23dTriiP_!!6000000002679-2-tps-88-88.png",
+                                "text": [
+                                    "退货运费险保障：选择上门取件，自动减免首重运费；若选择自寄，参照首重标准补偿，具体以“订单详情-退货宝”为准"
+                                ],
+                                "title": "退货宝"
+                            },
+                            {
+                                "action": "查看",
+                                "actionLink": "https://meta.m.taobao.com/app/mtb/tb-service-v2/rule?wh_weex=false&weex_mode=dom&weex_cache_disabled=true&_wx_statusbar_hidden=true&wx_auto_back=true&disableNav=true&wx_navbar_hidden=true&serviceCode=PLAT-SEC-noReasonRefund&subDomainCode=taobao",
+                                "icon": "https://gw.alicdn.com/imgextra/i3/O1CN018OeEm11qBoiyKY6F6_!!6000000005458-2-tps-88-88.png",
+                                "text": [
+                                    "满足相应条件（剪标/使用/洗涤后不支持）时，消费者可申请 “7天无理由退货”"
+                                ],
+                                "title": "7天无理由退货"
+                            },
+                            {
+                                "icon": "https://gw.alicdn.com/imgextra/i3/O1CN017M9n9g24KtBtclhMh_!!6000000007373-2-tps-88-88.png",
+                                "text": [
+                                    "满足相应条件时，信誉良好的用户在退货寄出后，享受极速退款到账。"
+                                ],
+                                "title": "极速退款"
+                            }
+                        ],
+                        "title": "保障",
+                        "type": "GUARANTEE_NEW"
+                    }
+                ]
+            },
+            "priceVO": {
+                "extraPrice": {
+                    "hiddenPrice": "false",
+                    "priceBgColor": "#FF5000",
+                    "priceColor": "#FFFFFF",
+                    "priceColorNew": "#FF5000",
+                    "priceMoney": "886",
+                    "priceText": "8.86",
+                    "priceTitle": "折后",
+                    "priceTitleColor": "#FFFFFF",
+                    "priceUnit": "￥"
+                },
+                "isNewStyle": "true",
+                "price": {
+                    "hiddenPrice": "false",
+                    "priceColor": "#FF4F00",
+                    "priceColorNew": "#7A7A7A",
+                    "priceMoney": "1771",
+                    "priceText": "17.71",
+                    "priceTitle": "优惠前",
+                    "priceTitleColor": "#FF4F00",
+                    "priceUnit": "￥"
+                }
+            },
+            "webfontVO": {
+                "enableWebfont": "false"
+            },
+            "tabVO": {
+                "tabList": [
+                    {
+                        "icon": "https://img.alicdn.com/imgextra/i1/O1CN016DNujx1yMMj6NMXVv_!!6000000006564-55-tps-24-24.svg",
+                        "name": "comments",
+                        "sort": "1",
+                        "title": "用户评价"
+                    },
+                    {
+                        "icon": "https://img.alicdn.com/imgextra/i1/O1CN016DNujx1yMMj6NMXVv_!!6000000006564-55-tps-24-24.svg",
+                        "name": "base_drops",
+                        "sort": "2",
+                        "title": "参数信息"
+                    },
+                    {
+                        "icon": "https://img.alicdn.com/imgextra/i1/O1CN016DNujx1yMMj6NMXVv_!!6000000006564-55-tps-24-24.svg",
+                        "name": "desc",
+                        "sort": "3",
+                        "title": "图文详情"
+                    },
+                    {
+                        "icon": "https://img.alicdn.com/imgextra/i1/O1CN016DNujx1yMMj6NMXVv_!!6000000006564-55-tps-24-24.svg",
+                        "name": "recommends",
+                        "sort": "4",
+                        "title": "本店推荐"
+                    },
+                    {
+                        "name": "guessULike",
+                        "sort": "5",
+                        "title": "看了又看"
+                    }
+                ]
+            }
+        }
+    },
+    "skuDetail": {
+        "components": {
+            "layout": [
+                {
+                    "ID": "detail_pic_1740884437851_1_1",
+                    "key": "desc_single_image"
+                },
+                {
+                    "ID": "detail_pic_1740884437851_2_2",
+                    "key": "desc_single_image"
+                },
+                {
+                    "ID": "detail_pic_1740884437851_3_3",
+                    "key": "desc_single_image"
+                },
+                {
+                    "ID": "detail_pic_1740884437851_4_4",
+                    "key": "desc_single_image"
+                },
+                {
+                    "ID": "detail_pic_1740884437851_5_5",
+                    "key": "desc_single_image"
+                },
+                {
+                    "ID": "detail_pic_1740884437851_6_6",
+                    "key": "desc_single_image"
+                },
+                {
+                    "ID": "detail_pic_1740884437851_7_7",
+                    "key": "desc_single_image"
+                },
+                {
+                    "ID": "detail_pic_1740884437851_8_8",
+                    "key": "desc_single_image"
+                },
+                {
+                    "ID": "detail_pic_1740884437851_9_9",
+                    "key": "desc_single_image"
+                },
+                {
+                    "ID": "detail_pic_1740884437851_10_10",
+                    "key": "desc_single_image"
+                },
+                {
+                    "ID": "detail_pic_1740884437851_11_11",
+                    "key": "desc_single_image"
+                },
+                {
+                    "ID": "detail_pic_tmallPriceDesc_12",
+                    "key": "desc_single_image"
+                }
+            ],
+            "componentData": {
+                "detail_pic_1740884437851_11_11": {
+                    "children": [],
+                    "model": {
+                        "picUrl": "https://img.alicdn.com/imgextra/i3/2219009961285/O1CN01Uo6eWx1LMZyyVzDA4_!!2219009961285.webp",
+                        "itemId": "893932942112",
+                        "locateId": "1417033795",
+                        "sellerId": "2219009961285",
+                        "anchorPoints": []
+                    },
+                    "styles": {
+                        "size": {
+                            "width": "620",
+                            "height": "1616"
+                        }
+                    },
+                    "actions": [
+                        "utOpenBigPic"
+                    ]
+                },
+                "detail_pic_1740884437851_10_10": {
+                    "children": [],
+                    "model": {
+                        "picUrl": "https://img.alicdn.com/imgextra/i3/2219009961285/O1CN01l5P40E1LMZywxer07_!!2219009961285.webp",
+                        "itemId": "893932942112",
+                        "locateId": "1053578816",
+                        "sellerId": "2219009961285",
+                        "anchorPoints": []
+                    },
+                    "styles": {
+                        "size": {
+                            "width": "620",
+                            "height": "941"
+                        }
+                    },
+                    "actions": [
+                        "utOpenBigPic"
+                    ]
+                },
+                "division_blank_id": {
+                    "model": {
+                        "text": ""
+                    },
+                    "styles": {
+                        "topLine": "double",
+                        "bgcolor": "#eeeeee",
+                        "type": "blank"
+                    }
+                },
+                "detail_pic_tmallPriceDesc_12": {
+                    "children": [],
+                    "model": {
+                        "picUrl": "//img.alicdn.com/imgextra/i3/O1CN01MsWlBa29wVnysxUvn_!!6000000008132-2-tps-750-880.png",
+                        "itemId": "893932942112",
+                        "locateId": "1690748715",
+                        "sellerId": "2219009961285",
+                        "anchorPoints": []
+                    },
+                    "styles": {
+                        "size": {
+                            "width": "375",
+                            "height": "440"
+                        }
+                    },
+                    "actions": [
+                        "utOpenBigPic"
+                    ]
+                },
+                "division_id": {
+                    "model": {
+                        "text": "已经到最底了"
+                    },
+                    "styles": {
+                        "topLine": "double",
+                        "bgcolor": "#eeeeee",
+                        "type": "text"
+                    }
+                }
+            }
+        }
+    }
+}

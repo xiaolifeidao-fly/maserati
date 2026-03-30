@@ -15,7 +15,21 @@ func (r *ShopRepository) EnsureTable() error {
 	if r.Db == nil {
 		return fmt.Errorf("database is not initialized")
 	}
-	return r.Db.AutoMigrate(&Shop{})
+	if err := r.Db.AutoMigrate(&Shop{}); err != nil {
+		return err
+	}
+	migrator := r.Db.Migrator()
+	if migrator.HasColumn(&Shop{}, "sort_id") {
+		if err := migrator.DropColumn(&Shop{}, "sort_id"); err != nil {
+			return err
+		}
+	}
+	if migrator.HasColumn(&Shop{}, "approve_flag") {
+		if err := migrator.DropColumn(&Shop{}, "approve_flag"); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (r *ShopRepository) CountByQuery(query shopDTO.ShopQueryDTO) (int64, error) {
@@ -30,10 +44,13 @@ func (r *ShopRepository) CountByQuery(query shopDTO.ShopQueryDTO) (int64, error)
 		dbQuery = dbQuery.Where("code LIKE ?", "%"+value+"%")
 	}
 	if value := strings.TrimSpace(query.Name); value != "" {
-		dbQuery = dbQuery.Where("name LIKE ?", "%"+value+"%")
+		dbQuery = dbQuery.Where("(name LIKE ? OR remark LIKE ?)", "%"+value+"%", "%"+value+"%")
 	}
 	if value := strings.TrimSpace(query.Platform); value != "" {
 		dbQuery = dbQuery.Where("platform = ?", value)
+	}
+	if value := strings.TrimSpace(query.Remark); value != "" {
+		dbQuery = dbQuery.Where("remark LIKE ?", "%"+value+"%")
 	}
 	if value := strings.TrimSpace(query.BusinessID); value != "" {
 		dbQuery = dbQuery.Where("business_id LIKE ?", "%"+value+"%")
@@ -66,10 +83,13 @@ func (r *ShopRepository) ListByQuery(query shopDTO.ShopQueryDTO, pageIndex, page
 		dbQuery = dbQuery.Where("code LIKE ?", "%"+value+"%")
 	}
 	if value := strings.TrimSpace(query.Name); value != "" {
-		dbQuery = dbQuery.Where("name LIKE ?", "%"+value+"%")
+		dbQuery = dbQuery.Where("(name LIKE ? OR remark LIKE ?)", "%"+value+"%", "%"+value+"%")
 	}
 	if value := strings.TrimSpace(query.Platform); value != "" {
 		dbQuery = dbQuery.Where("platform = ?", value)
+	}
+	if value := strings.TrimSpace(query.Remark); value != "" {
+		dbQuery = dbQuery.Where("remark LIKE ?", "%"+value+"%")
 	}
 	if value := strings.TrimSpace(query.BusinessID); value != "" {
 		dbQuery = dbQuery.Where("business_id LIKE ?", "%"+value+"%")
