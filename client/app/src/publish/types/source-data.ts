@@ -1,76 +1,125 @@
-/**
- * source-data.ts
- * 各平台原始商品数据结构定义（Strategy 模式中的输入数据契约）
- */
+import { SourceType } from './publish-task';
 
-// ────────────────────────────────────────────────
-// 淘宝 (TB) 原始数据
-// ────────────────────────────────────────────────
+// ─── TB（淘宝）源数据结构 ──────────────────────────────────────────────────────
 
-export interface TBAttribute {
-  name:  string;
+export interface TbSourceData {
+  type: SourceType.TB;
+  title: string;
+  subTitle?: string;
+  outerItemId?: string;
+  mainImages: string[];
+  detailImages: string[];
+  props: TbRawProp[];
+  skuItems: TbRawSkuItem[];
+  logistics?: TbRawLogistics;
+}
+
+export interface TbRawProp {
+  name: string;
   value: string;
 }
 
-export interface TBSku {
-  skuId:  string;
-  price:  number;         // 分
-  stock:  number;
-  specs:  Record<string, string>; // { '颜色': '红色', '尺寸': 'XL' }
-  image?: string;         // sku 图
+export interface TbRawSkuItem {
+  attributes: TbRawSkuAttr[];
+  price: number;   // 元
+  stock: number;
+  skuCode?: string;
+  imageUrl?: string;
 }
 
-export interface TBSourceData {
-  itemId:       string;
-  title:        string;
-  mainImages:   string[];     // 主图 URL 列表
-  detailImages: string[];     // 详情图 URL 列表
-  price:        number;       // 最低价（分）
-  attributes:   TBAttribute[];
-  skuList:      TBSku[];
-  categoryPath: string[];     // ['服装', '上衣', 'T恤']
-  logistics: {
-    weight?: number;  // 克
-    volume?: number;  // 立方厘米
-  };
-  description?: string;
+export interface TbRawSkuAttr {
+  name: string;
+  value: string;
+  imageUrl?: string;
 }
 
-// ────────────────────────────────────────────────
-// 拼多多 / PXX 原始数据
-// ────────────────────────────────────────────────
-
-export interface PXXSpecGroup {
-  specName:   string;    // '颜色'
-  specValues: string[];  // ['红色', '蓝色']
+export interface TbRawLogistics {
+  weight?: number;       // kg
+  templateId?: string;
+  deliveryType?: string;
 }
 
-export interface PXXSku {
-  skuId:      string;
-  price:      number;    // 分
-  stock:      number;
-  specValues: string[];  // 按 specGroup 顺序排列, e.g. ['红色', 'XL']
-  image?:     string;
+// ─── PXX（拼多多等）源数据结构 ────────────────────────────────────────────────
+
+export interface PxxSourceData {
+  type: SourceType.PXX;
+  title: string;
+  subTitle?: string;
+  outerItemId?: string;
+  mainImages: string[];
+  detailImages: string[];
+  props: PxxRawProp[];
+  skuList: PxxRawSku[];
+  logistics?: PxxRawLogistics;
 }
 
-export interface PXXSourceData {
-  goodsId:        string;
-  goodsName:      string;
-  thumbUrl:       string;          // 第一张主图
-  bannerUrlList:  string[];        // 主图列表
-  detailGallery:  string[];        // 详情图列表
-  minPrice:       number;          // 分
-  maxPrice:       number;          // 分
-  goodsSpecs:     PXXSpecGroup[];  // 规格组
-  skuList:        PXXSku[];
-  catIds:         number[];        // 平台分类 id 链
-  attributes?:    Array<{ attrKey: string; attrValue: string }>;
-  logistics?: {
-    weight?: number; // 克
-  };
+export interface PxxRawProp {
+  key: string;
+  value: string;
 }
 
-// ────────────────────────────────────────────────
-// 联合类型
-// ────────────────────────────────────────────────
-export type RawSourceData = TBSourceData | PXXSourceData;
+export interface PxxRawSku {
+  skuSpecs: PxxRawSkuSpec[];
+  price: number;   // 分，需转换为元
+  stock: number;
+  skuCode?: string;
+  imageUrl?: string;
+}
+
+export interface PxxRawSkuSpec {
+  specKey: string;
+  specValue: string;
+  imageUrl?: string;
+}
+
+export interface PxxRawLogistics {
+  weight?: number;
+  freightTemplateId?: string;
+}
+
+export type RawSourceData = TbSourceData | PxxSourceData;
+
+// ─── 归一化商品（解析后的平台无关数据）────────────────────────────────────────
+
+export interface NormalizedProduct {
+  title: string;
+  subTitle?: string;
+  originalItemId?: string;
+  /** 主图本地路径或 URL */
+  mainImages: string[];
+  /** 详情图本地路径或 URL */
+  detailImages: string[];
+  props: NormalizedProp[];
+  skuList: NormalizedSku[];
+  logistics: NormalizedLogistics;
+}
+
+export interface NormalizedProp {
+  name: string;
+  value: string;
+  /** SearchCategory 步骤填充的淘宝属性 ID */
+  pid?: string;
+  /** 淘宝属性值 ID */
+  vid?: string;
+}
+
+export interface NormalizedSku {
+  attributes: NormalizedSkuAttr[];
+  /** 元（人民币） */
+  price: number;
+  stock: number;
+  skuCode?: string;
+  imageUrl?: string;
+}
+
+export interface NormalizedSkuAttr {
+  name: string;
+  value: string;
+  imageUrl?: string;
+}
+
+export interface NormalizedLogistics {
+  weight?: number;
+  templateId?: string;
+  deliveryType?: string;
+}

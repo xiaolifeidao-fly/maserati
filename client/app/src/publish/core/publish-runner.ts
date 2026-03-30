@@ -1,166 +1,193 @@
-/**
- * publish-runner.ts
- * 发布任务的顶层编排器
- *
- * PublishRunner 负责：
- *  1. 从 DB 加载/创建 PublishTask
- *  2. 组装 StepChain（策略模式：根据 sourceType 选解析器）
- *  3. 驱动 StepChain 执行
- *  4. 将每步进度持久化回 DB
- *  5. 提供取消接口
- *
- * 依赖注入（DI）设计：所有外部依赖（repository、steps）通过构造器注入，
- * 便于单元测试时 mock。
- */
-
-import { StepChain, type ChainOptions, type ProgressCallback } from './step-chain';
-import { StepContext }              from './step-context';
-import { PublishStep }              from './publish-step';
-import {
-  StepName,
-  StepStatus,
-  TaskStatus,
-  type PublishTask,
-  type StepRecord,
-  type StepProgressEvent,
+import { StepCode, StepStatus, TaskStatus } from '../types/publish-task';
+import type {
+  PublishProgressEvent,
+  PublishStepRecord,
+  PublishTaskRecord,
+  CreatePublishStepPayload,
+  UpdatePublishStepPayload,
+  UpdatePublishTaskPayload,
 } from '../types/publish-task';
-import type { IPublishTaskRepository } from '../db/publish-task.repository';
+import { StepContext } from './step-context';
+import { StepChain } from './step-chain';
+import { ParseSourceStep } from '../steps/parse-source.step';
+import { UploadImagesStep } from '../steps/upload-images.step';
+import { SearchCategoryStep } from '../steps/search-category.step';
+import { FillDraftStep } from '../steps/fill-draft.step';
+import { EditDraftStep } from '../steps/edit-draft.step';
+import { PublishFinalStep } from '../steps/publish.step';
+import { CaptchaRequiredError } from './errors';
 
-// ────────────────────────────────────────────────
-// 配置
-// ────────────────────────────────────────────────
-
-export interface PublishRunnerConfig {
-  /** 按顺序排列的主步骤 */
-  steps:       PublishStep[];
-  /** 公共验证码步骤（不在主链中，由链内部调度） */
-  captchaStep: PublishStep;
-  /** 任务持久化层 */
-  repository:  IPublishTaskRepository;
+/**
+ * IPublishPersister — 发布状态持久化接口
+ * 由 PublishImpl 提供具体实现（调用服务端 HTTP 接口）
+ */
+export interface IPublishPersister {
+  getTask(taskId: number): Promise<PublishTaskRecord>;
+  updateTask(taskId: number, payload: UpdatePublishTaskPayload): Promise<PublishTaskRecord>;
+  listSteps(taskId: number): Promise<PublishStepRecord[]>;
+  createStep(taskId: number, payload: CreatePublishStepPayload): Promise<PublishStepRecord>;
+  updateStep(taskId: number, stepId: number, payload: UpdatePublishStepPayload): Promise<PublishStepRecord>;
 }
 
-// ────────────────────────────────────────────────
-// PublishRunner
-// ────────────────────────────────────────────────
+export type ProgressCallback = (event: PublishProgressEvent) => void;
 
+/**
+ * PublishRunner — 发布流程顶层调度器
+ *
+ * 职责：
+ *  1. 从服务端加载任务，恢复 StepContext 快照
+ *  2. 构建 StepChain，注入步骤列表和持久化器
+ *  3. 执行链条，处理任务级别的状态流转
+ *  4. 捕获验证码中断，暂停任务并推送进度事件
+ *
+ * 扩展建议：
+ *  - 新增步骤时只需在 buildChain() 中追加
+ *  - 需要注入依赖（如浏览器引擎）的步骤通过构造器参数传入
+ */
 export class PublishRunner {
-  private readonly chain:      StepChain;
-  private readonly repository: IPublishTaskRepository;
+  private readonly persister: IPublishPersister;
+  private progressListeners: ProgressCallback[] = [];
 
-  /** 活跃任务的 AbortController 映射，支持多任务并发 */
-  private readonly controllers = new Map<string, AbortController>();
-
-  constructor(config: PublishRunnerConfig) {
-    this.chain      = new StepChain(config.steps, config.captchaStep);
-    this.repository = config.repository;
+  constructor(persister: IPublishPersister) {
+    this.persister = persister;
   }
 
-  // ────────────────────────────────────────────────
-  // 公共 API
-  // ────────────────────────────────────────────────
+  onProgress(cb: ProgressCallback): this {
+    this.progressListeners.push(cb);
+    return this;
+  }
+
+  private emit(event: PublishProgressEvent): void {
+    for (const cb of this.progressListeners) {
+      try { cb(event); } catch { /* ignore */ }
+    }
+  }
+
+  /** 构建步骤链 */
+  private buildChain(): StepChain {
+    const chain = new StepChain([
+      new ParseSourceStep(),
+      new UploadImagesStep(),
+      new SearchCategoryStep(),
+      new FillDraftStep(),
+      new EditDraftStep(),
+      new PublishFinalStep(),
+    ])
+      .withPersister(this.persister)
+      .onProgress(event => this.emit(event));
+    return chain;
+  }
 
   /**
-   * 启动新任务
-   * @param task 已从 DB 读取的任务实体（状态应为 pending）
-   * @param onProgress 进度事件回调（可选，用于推送 WebSocket / IPC 消息）
+   * 执行发布流程
+   * @param taskId  服务端任务 ID
    */
-  async run(
-    task:        PublishTask,
-    onProgress?: (event: StepProgressEvent) => void,
-  ): Promise<void> {
-    const controller = new AbortController();
-    this.controllers.set(task.taskId, controller);
+  async run(taskId: number): Promise<void> {
+    const task = await this.persister.getTask(taskId);
+    const ctx = new StepContext(taskId, task.shopId);
 
-    const context = new StepContext({
-      taskId:     task.taskId,
-      sourceType: task.sourceType,
-      platform:   task.platform,
-      signal:     controller.signal,
+    // 恢复上下文（将已完成步骤的 outputData 反序列化注入 ctx）
+    await this.restoreContext(ctx, task);
+
+    // 标记任务为运行中
+    await this.persister.updateTask(taskId, {
+      status: TaskStatus.RUNNING,
+      errorMessage: '',
     });
 
-    // 写入原始数据到 context
+    // 确定断点续跑位置
+    const fromStep = task.currentStepCode ?? undefined;
+
+    const chain = this.buildChain();
     try {
-      context.rawSourceData = JSON.parse(task.sourceData);
-    } catch {
-      throw new Error(`Invalid sourceData JSON for task ${task.taskId}`);
-    }
+      await chain.run(ctx, fromStep as StepCode | undefined);
 
-    // 更新任务状态 → running
-    await this.repository.updateStatus(task.taskId, TaskStatus.RUNNING);
+      // 全部步骤完成
+      await this.persister.updateTask(taskId, {
+        status: TaskStatus.SUCCESS,
+        outerItemId: ctx.get('publishedItemId'),
+        currentStepCode: StepCode.PUBLISH,
+      });
 
-    const progressCallback: ProgressCallback = async (stepName, status, error) => {
-      // 更新 DB
-      await this.repository.updateStep(task.taskId, stepName, status, error?.message);
-      if (status === StepStatus.RUNNING) {
-        await this.repository.updateCurrentStep(task.taskId, stepName);
-      }
-      // 回调外部
-      onProgress?.({ taskId: task.taskId, stepName, status, error: error?.message });
-    };
+      this.emit({
+        taskId,
+        stepCode: StepCode.PUBLISH,
+        status: StepStatus.SUCCESS,
+        message: '商品发布成功',
+      });
 
-    const options: ChainOptions = {
-      onProgress:     progressCallback,
-      resumeFromStep: this.getResumeStep(task),
-    };
-
-    try {
-      const result = await this.chain.execute(context, options);
-
-      if (result.success) {
-        // 保存发布结果
-        await this.repository.complete(task.taskId, context.publishResult);
-      } else {
-        await this.repository.fail(
-          task.taskId,
-          result.failedStep,
-          result.error?.message,
-        );
-      }
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      await this.repository.fail(task.taskId, undefined, msg);
-    } finally {
-      this.controllers.delete(task.taskId);
+      if (err instanceof CaptchaRequiredError) {
+        // 验证码暂停：不算失败，等待用户操作后调用 resumeAfterCaptcha()
+        await this.persister.updateTask(taskId, {
+          status: TaskStatus.PENDING,
+          currentStepCode: err.stepCode as StepCode,
+          errorMessage: '等待验证码',
+        });
+        return;
+      }
+      const message = err instanceof Error ? err.message : String(err);
+      await this.persister.updateTask(taskId, {
+        status: TaskStatus.FAILED,
+        errorMessage: message,
+      });
+      throw err;
     }
   }
 
   /**
-   * 取消正在运行的任务
+   * 验证码通过后继续执行
+   * @param taskId   任务 ID
    */
-  cancel(taskId: string): void {
-    const controller = this.controllers.get(taskId);
-    if (controller) {
-      controller.abort();
-      this.controllers.delete(taskId);
-    }
+  async resumeAfterCaptcha(taskId: number): Promise<void> {
+    return this.run(taskId);
   }
 
-  // ────────────────────────────────────────────────
-  // 私有方法
-  // ────────────────────────────────────────────────
+  /** 从已完成步骤的 outputData 中恢复 StepContext 快照 */
+  private async restoreContext(ctx: StepContext, task: PublishTaskRecord): Promise<void> {
+    try {
+      const steps = await this.persister.listSteps(task.id);
+      // 将源数据注入 ctx（任务创建时已存库）
+      if (task.sourceData) {
+        try {
+          ctx.set('rawSource', JSON.parse(task.sourceData));
+        } catch { /* ignore parse error */ }
+      }
+      for (const step of steps) {
+        if (step.status !== 'SUCCESS' || !step.outputData) continue;
+        try {
+          const output = JSON.parse(step.outputData) as Record<string, unknown>;
+          this.mergeOutputToContext(ctx, step.stepCode as StepCode, output);
+        } catch { /* ignore */ }
+      }
+    } catch { /* ignore restore errors, start fresh */ }
+  }
 
-  /**
-   * 根据 task.steps 找到应该续跑的步骤（最后一个非完成步骤）
-   */
-  private getResumeStep(task: PublishTask): StepName | undefined {
-    if (!task.steps || task.steps.length === 0) return undefined;
-
-    const lastCompleted = [...task.steps]
-      .reverse()
-      .find(s => s.status === StepStatus.COMPLETED);
-
-    if (!lastCompleted) return undefined;
-
-    // 找 lastCompleted 的下一个步骤名
-    const ORDER: StepName[] = [
-      StepName.PARSE_SOURCE,
-      StepName.UPLOAD_IMAGES,
-      StepName.SEARCH_CATEGORY,
-      StepName.FILL_DRAFT,
-      StepName.EDIT_DRAFT,
-      StepName.PUBLISH,
-    ];
-    const idx = ORDER.indexOf(lastCompleted.stepName);
-    return idx >= 0 && idx + 1 < ORDER.length ? ORDER[idx + 1] : undefined;
+  private mergeOutputToContext(
+    ctx: StepContext,
+    stepCode: StepCode,
+    output: Record<string, unknown>,
+  ): void {
+    switch (stepCode) {
+      case StepCode.PARSE_SOURCE:
+        if (output.product) ctx.set('product', output.product as any);
+        break;
+      case StepCode.UPLOAD_IMAGES:
+        if (output.uploadedMainImages)   ctx.set('uploadedMainImages', output.uploadedMainImages as any);
+        if (output.uploadedDetailImages) ctx.set('uploadedDetailImages', output.uploadedDetailImages as any);
+        if (output.imageUrlMap)          ctx.set('imageUrlMap', output.imageUrlMap as any);
+        break;
+      case StepCode.SEARCH_CATEGORY:
+        if (output.categoryId)   ctx.set('categoryId', output.categoryId as string);
+        if (output.categoryInfo) ctx.set('categoryInfo', output.categoryInfo as any);
+        break;
+      case StepCode.FILL_DRAFT:
+      case StepCode.EDIT_DRAFT:
+        if (output.draftContext) ctx.set('draftContext', output.draftContext as any);
+        break;
+      case StepCode.PUBLISH:
+        if (output.publishedItemId) ctx.set('publishedItemId', output.publishedItemId as string);
+        break;
+    }
   }
 }

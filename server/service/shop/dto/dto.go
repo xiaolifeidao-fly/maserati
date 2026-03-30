@@ -48,6 +48,7 @@ type ShopQueryDTO struct {
 }
 
 type ShopLoginDTO struct {
+	ShopID         uint64 `json:"shopId"`
 	AppUserID      uint64 `json:"appUserId"`
 	Name           string `json:"name"`
 	Code           string `json:"code"`

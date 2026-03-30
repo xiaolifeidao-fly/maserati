@@ -1,114 +1,122 @@
+import { StepCode, StepStatus, STEP_ORDER } from '../types/publish-task';
+import type { StepResult } from '../core/publish-step';
+import { PublishStep } from '../core/publish-step';
+import type { StepContext } from '../core/step-context';
+import { PublishError } from '../core/errors';
+import { CaptchaChecker } from './captcha.step';
+import { requestBackend } from '@src/impl/shared/backend';
+
 /**
- * edit-draft.step.ts
- * Step 5: 二次编辑草稿（浏览器自动化层）
+ * EditDraftStep — 二次编辑草稿（Step 5）
  *
- * 将 context.draft 的内容通过浏览器自动化（pageDriver）填入目标平台的草稿编辑页，
- * 并将各 Filler 对应的 UI 操作也模块化为 IDraftFiller 的浏览器版本（UIFiller）。
+ * 职责：
+ *  - 在 FillDraft 基础上进行二次修正
+ *  - 重新加载草稿页面，获取平台最新的字段状态
+ *  - 修正首次填充中遗漏或不符合平台规则的字段
+ *    （例如：品牌校验、属性值精确匹配、必填项补全）
+ *  - 二次提交草稿
  *
- * 注意：此步骤可能触发验证码（平台在编辑时做人机检测），
- * 通过在 IUIFiller.fill 中抛出 CaptchaRequiredError 来触发。
+ * 输出到 ctx：
+ *  - draftContext（更新 draftId / itemId）
  *
- * 设计：
- *  - UIFillerRegistry（与数据层 FillerRegistry 分离，复用相同接口但操作 DOM）
- *  - 每个 UIFiller 负责一个 UI 区块的填充（主图/标题、属性、SKU、物流、详情）
+ * 扩展建议：
+ *  - 如果需要 AI 补全属性，在此步骤中调用 AI 接口
  */
-
-import { PublishStep, type StepResult } from '../core/publish-step';
-import { StepContext }                   from '../core/step-context';
-import { StepPreconditionError }         from '../core/errors';
-import { StepName }                      from '../types/publish-task';
-
-// ────────────────────────────────────────────────
-// UI 填充器接口
-// ────────────────────────────────────────────────
-
-export interface IUIFiller {
-  /** 填充器名称（用于日志） */
-  readonly name: string;
-
-  /**
-   * 在目标平台页面（pageDriver）中填充对应 UI 区块
-   * @throws CaptchaRequiredError 若过程中遇到验证码
-   */
-  fill(context: StepContext): Promise<void>;
-}
-
-// ────────────────────────────────────────────────
-// UI 填充器注册表
-// ────────────────────────────────────────────────
-
-export class UIFillerRegistry {
-  private readonly fillers: IUIFiller[] = [];
-
-  register(...fillers: IUIFiller[]): this {
-    this.fillers.push(...fillers);
-    return this;
-  }
-
-  getAll(): IUIFiller[] {
-    return [...this.fillers];
-  }
-}
-
-// ────────────────────────────────────────────────
-// EditDraftStep
-// ────────────────────────────────────────────────
-
-export interface IEditDraftDriver {
-  /**
-   * 打开草稿编辑页
-   * @param draftId 草稿 ID（无 draftId 则打开新建页）
-   */
-  openEditPage(draftId: string | undefined, context: StepContext): Promise<void>;
-
-  /**
-   * 保存草稿（点击"保存"按钮等操作）
-   * @returns 保存后的草稿 ID
-   */
-  saveDraft(context: StepContext): Promise<string>;
-}
-
-export interface EditDraftStepOptions {
-  driver:           IEditDraftDriver;
-  uiFillerRegistry: UIFillerRegistry;
-}
-
 export class EditDraftStep extends PublishStep {
-  readonly name = StepName.EDIT_DRAFT;
+  readonly stepCode = StepCode.EDIT_DRAFT;
+  readonly stepName = '二次编辑草稿';
+  readonly stepOrder = STEP_ORDER[StepCode.EDIT_DRAFT];
 
-  private readonly driver:           IEditDraftDriver;
-  private readonly uiFillerRegistry: UIFillerRegistry;
+  protected async doExecute(ctx: StepContext): Promise<StepResult> {
+    const draftCtx = ctx.get('draftContext');
+    const product = ctx.get('product');
+    const categoryInfo = ctx.get('categoryInfo');
 
-  constructor(options: EditDraftStepOptions) {
-    super({ maxRetries: 2, resumable: false }); // 浏览器操作不适合跳过
-    this.driver           = options.driver;
-    this.uiFillerRegistry = options.uiFillerRegistry;
-  }
-
-  protected async beforeExecute(context: StepContext): Promise<void> {
-    if (!context.draft) {
-      throw new StepPreconditionError(this.name, 'draft is required (run FillDraftStep first)');
+    if (!draftCtx?.startTraceId) {
+      throw new PublishError(this.stepCode, '草稿上下文为空，请先执行草稿填充步骤');
     }
-  }
-
-  protected async doExecute(context: StepContext): Promise<StepResult> {
-    // ── 打开编辑页 ────────────────────────────────────────────────
-    await this.driver.openEditPage(context.draftId, context);
-
-    // ── 逐个 UIFiller 操作 UI ─────────────────────────────────────
-    const fillers = this.uiFillerRegistry.getAll();
-    for (const filler of fillers) {
-      console.log(`[EditDraftStep] Filling UI section: ${filler.name}`);
-      // CaptchaRequiredError 自然冒泡 → StepChain 捕获
-      await filler.fill(context);
+    if (!product || !categoryInfo) {
+      throw new PublishError(this.stepCode, '产品或类目数据为空');
     }
 
-    // ── 保存草稿 ─────────────────────────────────────────────────
-    const savedDraftId = await this.driver.saveDraft(context);
-    context.draftId    = savedDraftId;
+    // 重新加载草稿页获取最新状态（用于修正平台对字段的处理结果）
+    const refreshed = await this.refreshDraftState(ctx.taskId, draftCtx);
+    CaptchaChecker.check(this.stepCode, refreshed as unknown as Record<string, unknown>);
 
-    console.log(`[EditDraftStep] Draft saved, draftId=${savedDraftId}`);
+    // 执行二次修正逻辑（品牌、属性值等）
+    const corrections = await this.computeCorrections(ctx, refreshed);
 
-    return { success: true };
+    if (Object.keys(corrections).length === 0) {
+      return {
+        status: StepStatus.SUCCESS,
+        message: '草稿状态良好，无需二次修正',
+        outputData: { draftContext: draftCtx },
+      };
+    }
+
+    // 提交修正数据
+    const response = await requestBackend<Record<string, unknown>>(
+      'POST',
+      '/publish-tasks/submit-draft',
+      {
+        data: {
+          taskId: ctx.taskId,
+          draftContext: draftCtx,
+          payload: {
+            catId: draftCtx.catId,
+            startTraceId: draftCtx.startTraceId,
+            ...corrections,
+          },
+        },
+      },
+    );
+    CaptchaChecker.check(this.stepCode, response);
+
+    if (response.draftId) draftCtx.draftId = response.draftId as string;
+    if (response.itemId) draftCtx.itemId = response.itemId as string;
+    ctx.set('draftContext', draftCtx);
+
+    return {
+      status: StepStatus.SUCCESS,
+      message: `草稿二次修正完成，修正字段数: ${Object.keys(corrections).length}`,
+      outputData: { draftContext: draftCtx },
+    };
+  }
+
+  private async refreshDraftState(
+    taskId: number,
+    draftCtx: { draftId?: string; catId: string; startTraceId: string },
+  ): Promise<Record<string, unknown>> {
+    return requestBackend<Record<string, unknown>>(
+      'POST',
+      '/publish-tasks/refresh-draft',
+      { data: { taskId, draftContext: draftCtx } },
+    );
+  }
+
+  /**
+   * 根据刷新后的草稿状态计算需要修正的字段
+   * 实际逻辑依赖平台返回的错误/警告信息
+   */
+  private async computeCorrections(
+    ctx: StepContext,
+    refreshedState: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    const errors = (refreshedState.errors as Array<{ field: string; msg: string }>) ?? [];
+    if (!errors.length) return {};
+
+    // 通过服务端接口计算修正方案（可接入 AI 辅助）
+    return requestBackend<Record<string, unknown>>(
+      'POST',
+      '/publish-tasks/compute-corrections',
+      {
+        data: {
+          taskId: ctx.taskId,
+          product: ctx.get('product'),
+          categoryInfo: ctx.get('categoryInfo'),
+          errors,
+        },
+      },
+    );
   }
 }

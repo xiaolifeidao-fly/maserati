@@ -1,130 +1,84 @@
+import { StepCode, StepStatus, STEP_ORDER } from '../types/publish-task';
+import type { StepResult } from '../core/publish-step';
+import { PublishStep } from '../core/publish-step';
+import type { StepContext } from '../core/step-context';
+import { PublishError, StepSkippedError } from '../core/errors';
+import { requestBackend } from '@src/impl/shared/backend';
+
 /**
- * upload-images.step.ts
- * Step 2: 上传商品图片（主图 + 详情图 + SKU图）
+ * UploadImagesStep — 上传商品图片（Step 2）
  *
  * 职责：
- *  - 将 parsedData 中的原始图片 URL 下载并上传至目标平台 CDN
- *  - 并发上传，带并发限制防止触发平台限流
- *  - 单图上传失败可重试，超出次数则整步失败
- *  - 上传结果写入 context.uploadedImages
+ *  - 上传主图和详情图至淘宝图片空间（通过服务端代理）
+ *  - 缓存 local/URL → 云端 URL 映射，避免重复上传
+ *  - 将上传结果写回 ctx
  *
- * IImageUploader 通过构造器注入，与具体平台解耦。
+ * 输出到 ctx：
+ *  - uploadedMainImages: string[]
+ *  - uploadedDetailImages: string[]
+ *  - imageUrlMap: Record<string, string>
+ *
+ * 注意：实际的淘宝图片上传需要通过浏览器 session 携带 cookie，
+ * 此处调用服务端接口由服务端负责代理上传。
  */
-
-import { PublishStep, type StepResult } from '../core/publish-step';
-import { StepContext }                   from '../core/step-context';
-import { StepPreconditionError, CaptchaRequiredError } from '../core/errors';
-import { StepName }                      from '../types/publish-task';
-import type { UploadedImages }           from '../types/draft';
-
-// ────────────────────────────────────────────────
-// 图片上传器接口
-// ────────────────────────────────────────────────
-
-export interface IImageUploader {
-  /**
-   * 上传单张图片（URL → CDN URL）
-   * @throws CaptchaRequiredError 若平台要求验证码
-   */
-  upload(imageUrl: string, signal: AbortSignal): Promise<string>;
-}
-
-// ────────────────────────────────────────────────
-// Step 配置
-// ────────────────────────────────────────────────
-
-export interface UploadImagesStepOptions {
-  uploader:      IImageUploader;
-  /** 并发上传数，默认 3 */
-  concurrency?:  number;
-}
-
-// ────────────────────────────────────────────────
-// UploadImagesStep
-// ────────────────────────────────────────────────
-
 export class UploadImagesStep extends PublishStep {
-  readonly name = StepName.UPLOAD_IMAGES;
+  readonly stepCode = StepCode.UPLOAD_IMAGES;
+  readonly stepName = '上传商品图片';
+  readonly stepOrder = STEP_ORDER[StepCode.UPLOAD_IMAGES];
 
-  private readonly uploader:    IImageUploader;
-  private readonly concurrency: number;
-
-  constructor(options: UploadImagesStepOptions) {
-    super({ maxRetries: 2, resumable: true });
-    this.uploader    = options.uploader;
-    this.concurrency = options.concurrency ?? 3;
-  }
-
-  protected async beforeExecute(context: StepContext): Promise<void> {
-    if (!context.parsedData) {
-      throw new StepPreconditionError(this.name, 'parsedData is required');
+  protected async doExecute(ctx: StepContext): Promise<StepResult> {
+    const product = ctx.get('product');
+    if (!product) {
+      throw new PublishError(this.stepCode, '产品数据为空，请先执行解析步骤');
     }
-  }
 
-  protected async doExecute(context: StepContext): Promise<StepResult> {
-    const { parsedData, signal } = context;
-    const data = parsedData!;
+    // 若上下文中已有上传结果（断点续跑场景），跳过
+    const existingMap = ctx.get('imageUrlMap') ?? {};
+    const mainImages = product.mainImages;
+    const detailImages = product.detailImages;
 
-    // ── 并发上传主图 ────────────────────────────────────────────
-    const mainImages = await this.uploadBatch(data.mainImages, signal);
+    const allImages = [...new Set([...mainImages, ...detailImages])];
+    const toUpload = allImages.filter(img => !existingMap[img]);
 
-    // ── 并发上传详情图 ──────────────────────────────────────────
-    const detailImages = await this.uploadBatch(data.detailImages, signal);
+    if (toUpload.length === 0) {
+      throw new StepSkippedError(this.stepCode, '图片已全部上传，跳过');
+    }
 
-    // ── 上传 SKU 图 ──────────────────────────────────────────────
-    const skuImages: Record<string, string> = {};
-    const skuImageEntries = data.skuList
-      .filter(sku => sku.image && sku.skuId)
-      .map(sku => ({ skuId: sku.skuId!, url: sku.image! }));
+    const imageUrlMap: Record<string, string> = { ...existingMap };
 
-    const uploadedSkuUrls = await this.uploadBatch(
-      skuImageEntries.map(e => e.url),
-      signal,
-    );
-    skuImageEntries.forEach((entry, idx) => {
-      if (uploadedSkuUrls[idx]) {
-        skuImages[entry.skuId] = uploadedSkuUrls[idx];
-      }
-    });
-
-    const uploaded: UploadedImages = { mainImages, detailImages, skuImages };
-    context.uploadedImages = uploaded;
-
-    console.log(
-      `[UploadImagesStep] Uploaded: ` +
-      `${mainImages.length} main, ${detailImages.length} detail, ${Object.keys(skuImages).length} sku`,
-    );
-
-    return { success: true };
-  }
-
-  // ────────────────────────────────────────────────
-  // 私有方法
-  // ────────────────────────────────────────────────
-
-  /**
-   * 并发限制上传一批图片
-   * 若任一图片触发验证码，透传 CaptchaRequiredError
-   */
-  private async uploadBatch(urls: string[], signal: AbortSignal): Promise<string[]> {
-    const results: string[] = new Array(urls.length).fill('');
-
-    // 分片并发
-    for (let i = 0; i < urls.length; i += this.concurrency) {
-      const batch  = urls.slice(i, i + this.concurrency);
-      const chunk  = await Promise.all(
-        batch.map(async (url, batchIdx) => {
-          if (!url) return { idx: i + batchIdx, cdnUrl: '' };
-          // CaptchaRequiredError 会自然冒泡
-          const cdnUrl = await this.uploader.upload(url, signal);
-          return { idx: i + batchIdx, cdnUrl };
-        }),
-      );
-      for (const { idx, cdnUrl } of chunk) {
-        results[idx] = cdnUrl;
+    // 批量上传（每批最多 5 张，避免超时）
+    const BATCH_SIZE = 5;
+    for (let i = 0; i < toUpload.length; i += BATCH_SIZE) {
+      const batch = toUpload.slice(i, i + BATCH_SIZE);
+      const results = await this.uploadBatch(ctx.taskId, batch);
+      for (const [original, cloudUrl] of Object.entries(results)) {
+        imageUrlMap[original] = cloudUrl;
       }
     }
 
-    return results;
+    // 构建上传后的图片列表
+    const uploadedMainImages = mainImages.map(img => imageUrlMap[img] ?? img);
+    const uploadedDetailImages = detailImages.map(img => imageUrlMap[img] ?? img);
+
+    ctx.set('uploadedMainImages', uploadedMainImages);
+    ctx.set('uploadedDetailImages', uploadedDetailImages);
+    ctx.set('imageUrlMap', imageUrlMap);
+
+    return {
+      status: StepStatus.SUCCESS,
+      message: `图片上传完成，主图 ${uploadedMainImages.length} 张，详情图 ${uploadedDetailImages.length} 张`,
+      outputData: { uploadedMainImages, uploadedDetailImages, imageUrlMap },
+    };
+  }
+
+  private async uploadBatch(
+    taskId: number,
+    imageUrls: string[],
+  ): Promise<Record<string, string>> {
+    return requestBackend<Record<string, string>>(
+      'POST',
+      '/publish-tasks/upload-images',
+      { data: { taskId, imageUrls } },
+    );
   }
 }

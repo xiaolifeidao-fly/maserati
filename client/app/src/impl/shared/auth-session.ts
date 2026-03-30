@@ -1,21 +1,30 @@
 import { type AuthSession } from "@eleapi/auth/auth.api";
+import { getGlobal, removeGlobal, setGlobal } from "@utils/store/electron";
 
-let currentSession: AuthSession = { authenticated: false };
+const AUTH_SESSION_STORE_KEY = "auth_session";
 
 function normalizeValue(value?: string): string {
   return String(value ?? "").trim();
 }
 
-export function readAuthSession(): AuthSession {
-  if (!currentSession.token) {
+function buildStoredSession(value: unknown): AuthSession {
+  const raw = (value && typeof value === "object" ? value : {}) as Partial<AuthSession>;
+  const token = normalizeValue(raw.token) || undefined;
+
+  if (!token) {
     return { authenticated: false };
   }
+
   return {
     authenticated: true,
-    username: currentSession.username,
-    displayName: currentSession.displayName,
-    token: currentSession.token,
+    username: normalizeValue(raw.username) || undefined,
+    displayName: normalizeValue(raw.displayName) || undefined,
+    token,
   };
+}
+
+export function readAuthSession(): AuthSession {
+  return buildStoredSession(getGlobal(AUTH_SESSION_STORE_KEY));
 }
 
 export function saveAuthSession(session: AuthSession): AuthSession {
@@ -27,14 +36,14 @@ export function saveAuthSession(session: AuthSession): AuthSession {
   };
 
   if (!normalizedSession.token) {
-    currentSession = { authenticated: false };
+    removeGlobal(AUTH_SESSION_STORE_KEY);
     return { authenticated: false };
   }
 
-  currentSession = normalizedSession;
+  setGlobal(AUTH_SESSION_STORE_KEY, normalizedSession);
   return normalizedSession;
 }
 
 export function clearAuthSession() {
-  currentSession = { authenticated: false };
+  removeGlobal(AUTH_SESSION_STORE_KEY);
 }

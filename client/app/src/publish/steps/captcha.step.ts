@@ -1,104 +1,61 @@
+import { CaptchaRequiredError } from '../core/errors';
+import type { StepCode } from '../types/publish-task';
+
 /**
- * captcha.step.ts
- * 公共验证码处理步骤
+ * CaptchaChecker — 验证码公共检测工具（非独立步骤）
  *
- * 不在主链中排列，而是由 StepChain 在检测到 CaptchaRequiredError 时内部调度。
+ * 各步骤在执行过程中，检测到响应中包含验证码特征时，
+ * 调用 CaptchaChecker.check() 抛出 CaptchaRequiredError，
+ * 由 StepChain 统一捕获并暂停流程。
  *
- * 职责：
- *  1. 从 context.pendingCaptcha 读取验证码信息
- *  2. 通过注入的 CaptchaResolver 向用户展示并等待输入
- *  3. 将解决方案写入 context.captchaSolution
+ * 使用示例（在任意步骤的 doExecute 中）：
  *
- * 设计原则：
- *  - CaptchaResolver 通过构造器注入，与具体 UI 框架解耦
- *  - 超时机制防止无限等待
+ *   const response = await someRequest();
+ *   CaptchaChecker.check(this.stepCode, response);
  */
-
-import { PublishStep, type StepResult } from '../core/publish-step';
-import { StepContext, type CaptchaSolution } from '../core/step-context';
-import { StepName }                     from '../types/publish-task';
-
-// ────────────────────────────────────────────────
-// 验证码解决器接口（由外部实现，如 IPC/WebSocket/AI OCR）
-// ────────────────────────────────────────────────
-
-export interface ICaptchaResolver {
+export class CaptchaChecker {
   /**
-   * 展示验证码并等待用户/自动化解答
-   * @returns 解决方案，null 表示用户放弃
+   * 检查 HTTP 响应体是否包含验证码特征
+   * 若需要验证码则抛出 CaptchaRequiredError
    */
-  resolve(
-    captchaData: NonNullable<StepContext['pendingCaptcha']>,
-    signal:      AbortSignal,
-  ): Promise<CaptchaSolution | null>;
-}
+  static check(
+    stepCode: StepCode,
+    responseBody: string | Record<string, unknown>,
+  ): void {
+    const body = typeof responseBody === 'string' ? responseBody : JSON.stringify(responseBody);
 
-// ────────────────────────────────────────────────
-// CaptchaStep
-// ────────────────────────────────────────────────
-
-export interface CaptchaStepOptions {
-  resolver:      ICaptchaResolver;
-  /** 等待用户操作的超时时间（ms），默认 3 分钟 */
-  timeoutMs?:    number;
-}
-
-export class CaptchaStep extends PublishStep {
-  readonly name = StepName.CAPTCHA;
-
-  private readonly resolver:   ICaptchaResolver;
-  private readonly timeoutMs:  number;
-
-  constructor(options: CaptchaStepOptions) {
-    super({ maxRetries: 0, resumable: false }); // 验证码不自动重试
-    this.resolver  = options.resolver;
-    this.timeoutMs = options.timeoutMs ?? 3 * 60 * 1000;
+    // 淘宝验证码特征检测
+    const captchaUrl = CaptchaChecker.extractCaptchaUrl(body);
+    if (captchaUrl) {
+      const validateUrl = CaptchaChecker.extractValidateUrl(body);
+      throw new CaptchaRequiredError(stepCode, captchaUrl, validateUrl);
+    }
   }
 
-  protected async doExecute(context: StepContext): Promise<StepResult> {
-    if (!context.pendingCaptcha) {
-      return { success: true }; // 无验证码，跳过
-    }
-
-    // 创建超时竞争
-    const timeoutSignal = AbortSignal.timeout(this.timeoutMs);
-    const combinedAbort = combineAbortSignals(context.signal, timeoutSignal);
-
-    let solution: CaptchaSolution | null;
-    try {
-      solution = await this.resolver.resolve(context.pendingCaptcha, combinedAbort);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      return {
-        success: false,
-        error:   new Error(`Captcha resolver error: ${msg}`),
-      };
-    }
-
-    if (!solution) {
-      return {
-        success: false,
-        error:   new Error('Captcha was not resolved (user cancelled or timeout)'),
-      };
-    }
-
-    context.captchaSolution = solution;
-    return { success: true };
+  /**
+   * 直接抛出验证码错误（已明确有验证码时使用）
+   */
+  static require(stepCode: StepCode, captchaUrl: string, validateUrl?: string): never {
+    throw new CaptchaRequiredError(stepCode, captchaUrl, validateUrl);
   }
-}
 
-// ────────────────────────────────────────────────
-// 工具函数
-// ────────────────────────────────────────────────
-
-function combineAbortSignals(...signals: AbortSignal[]): AbortSignal {
-  const controller = new AbortController();
-  for (const signal of signals) {
-    if (signal.aborted) {
-      controller.abort(signal.reason);
-      return controller.signal;
+  private static extractCaptchaUrl(body: string): string | null {
+    // 淘宝返回的验证码图片 URL 特征
+    const patterns = [
+      /captcha[?&][^"'\s]*/i,
+      /checkcode[?&][^"'\s]*/i,
+      /"captchaUrl"\s*:\s*"([^"]+)"/,
+      /"img"\s*:\s*"(https?:\/\/[^"]*captcha[^"]*)"/i,
+    ];
+    for (const pattern of patterns) {
+      const match = body.match(pattern);
+      if (match) return match[1] ?? match[0];
     }
-    signal.addEventListener('abort', () => controller.abort(signal.reason), { once: true });
+    return null;
   }
-  return controller.signal;
+
+  private static extractValidateUrl(body: string): string | undefined {
+    const match = body.match(/"validateUrl"\s*:\s*"([^"]+)"/);
+    return match?.[1];
+  }
 }

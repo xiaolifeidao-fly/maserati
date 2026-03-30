@@ -386,11 +386,51 @@ func (s *ShopService) LoginShop(req *shopDTO.ShopLoginDTO) (*shopDTO.ShopDTO, er
 	if err := ensureShopAppUserExists(s.appUserRepository, req.AppUserID); err != nil {
 		return nil, err
 	}
-	if name == "" || platform == "" || platformShopID == "" || businessID == "" {
-		return nil, fmt.Errorf("appUserId, name, platform, platformShopId and businessId are required")
+	if name == "" || platform == "" {
+		return nil, fmt.Errorf("appUserId, name and platform are required")
 	}
 
 	now := time.Now()
+	if req.ShopID > 0 {
+		entity, findErr := s.shopRepository.FindById(uint(req.ShopID))
+		if findErr != nil {
+			return nil, findErr
+		}
+		if entity.Active == 0 {
+			return nil, gorm.ErrRecordNotFound
+		}
+
+		entity.Active = 1
+		entity.AppUserID = req.AppUserID
+		entity.Name = name
+		entity.Platform = platform
+		if platformShopID != "" {
+			entity.PlatformShopID = platformShopID
+		}
+		if businessID != "" {
+			entity.BusinessID = businessID
+		}
+		entity.LoginStatus = "LOGGED_IN"
+		entity.LastLoginAt = &now
+		if code := strings.TrimSpace(req.Code); code != "" {
+			entity.Code = code
+		} else if strings.TrimSpace(entity.Code) == "" {
+			entity.Code = defaultShopCode(platform, entity.PlatformShopID, entity.BusinessID)
+		}
+		if refreshErr := s.refreshShopAuthorizationState(entity); refreshErr != nil {
+			return nil, refreshErr
+		}
+		saved, saveErr := s.shopRepository.SaveOrUpdate(entity)
+		if saveErr != nil {
+			return nil, saveErr
+		}
+		return toShopDTO(saved), nil
+	}
+
+	if platformShopID == "" || businessID == "" {
+		return nil, fmt.Errorf("platformShopId and businessId are required when shopId is absent")
+	}
+
 	entity, err := s.shopRepository.FindLatestByBusinessOrPlatform(req.AppUserID, businessID, platform, platformShopID)
 	if err != nil && err != gorm.ErrRecordNotFound {
 		return nil, err

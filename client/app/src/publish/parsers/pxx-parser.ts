@@ -1,86 +1,67 @@
+import { SourceType } from '../types/publish-task';
+import type {
+  RawSourceData,
+  PxxSourceData,
+  NormalizedProduct,
+  NormalizedProp,
+  NormalizedSku,
+  NormalizedLogistics,
+} from '../types/source-data';
+import type { ISourceParser } from './parser.interface';
+
 /**
- * pxx-parser.ts
- * 拼多多 (PXX) 数据解析策略
+ * PxxSourceParser — 拼多多（PXX）源数据解析器
+ *
+ * 数据转换要点：
+ *  - PXX 的 props 用 key/value，归一化为 name/value
+ *  - PXX 的 SKU price 单位为"分"，需除以 100 转换为"元"
+ *  - PXX 的 skuSpecs 映射为 NormalizedSkuAttr（specKey → name, specValue → value）
  */
-
-import type { ISourceParser }       from './parser.interface';
-import type { RawSourceData, PXXSourceData, PXXSpecGroup } from '../types/source-data';
-import type { ParsedProductData, SKUSpec } from '../types/draft';
-import { SourceType }               from '../types/publish-task';
-import { ParseError }               from '../core/errors';
-
-export class PXXParser implements ISourceParser {
+export class PxxSourceParser implements ISourceParser {
   readonly sourceType = SourceType.PXX;
 
-  validate(rawData: unknown): boolean {
-    if (!rawData || typeof rawData !== 'object') return false;
-    const d = rawData as Record<string, unknown>;
-    return (
-      typeof d['goodsId']   === 'string' &&
-      typeof d['goodsName'] === 'string' &&
-      Array.isArray(d['bannerUrlList'])
-    );
-  }
+  parse(raw: RawSourceData): NormalizedProduct {
+    if (raw.type !== SourceType.PXX) {
+      throw new Error(`PxxSourceParser: 不支持的源类型 ${raw.type}`);
+    }
+    const src = raw as PxxSourceData;
 
-  async parse(rawData: RawSourceData): Promise<ParsedProductData> {
-    if (!this.validate(rawData)) {
-      throw new ParseError(this.sourceType, 'Invalid PXX source data structure');
+    if (!src.title?.trim()) {
+      throw new Error('PXX 源数据缺少必填字段: title');
     }
 
-    const d = rawData as PXXSourceData;
+    const props: NormalizedProp[] = (src.props ?? []).map(p => ({
+      name: p.key?.trim() ?? '',
+      value: p.value?.trim() ?? '',
+    })).filter(p => p.name && p.value);
 
-    // ── 规格还原 ──────────────────────────────────────────────────
-    // PXX SKU 的 specValues 是字符串数组，需结合 goodsSpecs 还原为 SKUSpec[]
-    const skuList = (d.skuList ?? []).map(sku => ({
-      skuId: sku.skuId,
-      price: sku.price,
-      stock: sku.stock,
-      image: sku.image,
-      specs: this.resolveSpecs(sku.specValues, d.goodsSpecs ?? []),
+    const skuList: NormalizedSku[] = (src.skuList ?? []).map(sku => ({
+      attributes: (sku.skuSpecs ?? []).map(spec => ({
+        name: spec.specKey?.trim() ?? '',
+        value: spec.specValue?.trim() ?? '',
+        imageUrl: spec.imageUrl,
+      })),
+      // PXX 价格单位为分，转换为元，保留两位小数
+      price: Math.round((Number(sku.price) || 0) / 100 * 100) / 100,
+      stock: Math.max(0, Number(sku.stock) || 0),
+      skuCode: sku.skuCode,
+      imageUrl: sku.imageUrl,
     }));
 
-    // ── 属性归一化 ────────────────────────────────────────────────
-    const attributes = (d.attributes ?? []).map(attr => ({
-      name:  attr.attrKey,
-      value: attr.attrValue,
-    }));
-
-    // ── 主图：优先 bannerUrlList，兜底 thumbUrl ───────────────────
-    const mainImages = d.bannerUrlList?.length
-      ? d.bannerUrlList
-      : [d.thumbUrl].filter(Boolean);
+    const logistics: NormalizedLogistics = {
+      weight: src.logistics?.weight,
+      templateId: src.logistics?.freightTemplateId,
+    };
 
     return {
-      title:        this.cleanTitle(d.goodsName),
-      mainImages,
-      detailImages: d.detailGallery ?? [],
-      attributes,
+      title: src.title.trim(),
+      subTitle: src.subTitle?.trim(),
+      originalItemId: src.outerItemId,
+      mainImages: (src.mainImages ?? []).filter(Boolean),
+      detailImages: (src.detailImages ?? []).filter(Boolean),
+      props,
       skuList,
-      // PXX 的 catIds 只有 id，无路径文字，categoryHint 设为空
-      // 搜索分类时 SearchCategoryStep 会用 title 兜底搜索
-      categoryHint: [],
-      logistics: {
-        weight: d.logistics?.weight,
-      },
+      logistics,
     };
-  }
-
-  // ────────────────────────────────────────────────
-  // 私有工具
-  // ────────────────────────────────────────────────
-
-  /**
-   * 将 PXX SKU 的 specValues 数组（按 specGroup 顺序）
-   * 还原为 [{ specName, specValue }] 格式
-   */
-  private resolveSpecs(specValues: string[], specGroups: PXXSpecGroup[]): SKUSpec[] {
-    return specValues.map((value, idx) => ({
-      specName:  specGroups[idx]?.specName ?? `规格${idx + 1}`,
-      specValue: value,
-    }));
-  }
-
-  private cleanTitle(title: string): string {
-    return title.trim().slice(0, 60);
   }
 }

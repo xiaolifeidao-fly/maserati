@@ -9,6 +9,7 @@ import (
 	"web-api/pkg/notice"
 	"web-api/pkg/platform"
 	"web-api/pkg/product"
+	publishTask "web-api/pkg/publish_task"
 	"web-api/pkg/shop"
 )
 
@@ -21,6 +22,7 @@ func registerHandler() []routers.Handler {
 		notice.NewNoticeHandler(),
 		platform.NewPlatformHandler(),
 		product.NewProductHandler(),
+		publishTask.NewPublishTaskHandler(),
 		shop.NewShopHandler(),
 	}
 }

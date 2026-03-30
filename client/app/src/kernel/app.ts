@@ -11,6 +11,8 @@ import log from 'electron-log';
 import { registerRpc } from './register/rpc';
 import { init } from './store';
 import Store from 'electron-store';
+import { Browser, chromium } from 'playwright';
+import { getPlatform, initPlatform, setPlatform } from '@src/browser/engine';
 
 // ==================== 日志配置：按日期文件夹存储，5M轮转，保留7天 ====================
 (function configureLogging() {
@@ -295,6 +297,7 @@ export const start = () => {
     // 应用退出前保存未写入的数据
     app.on('before-quit', async () => {
       try {
+        initPlatform();
       } catch (e) {
         log.error('Error flushing pending writes on quit:', e);
       }
@@ -342,3 +345,5 @@ export const start = () => {
     });
 
 }
+
+

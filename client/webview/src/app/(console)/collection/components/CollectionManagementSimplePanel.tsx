@@ -14,6 +14,7 @@ import {
 import { Button, Form, Input, Modal, Popconfirm, Select, Space, Table, Tag, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { type CollectBatchRecord } from "../api/collection.api";
+import { startPxxCollection } from "../api/collection.api";
 import { useCollectionManagement } from "../hooks/useCollectionManagement";
 import { ProductPublishModal } from "../../product/components/ProductPublishModal";
 import { formatDateTime } from "@/utils/format";
@@ -42,6 +43,7 @@ export function CollectionManagementSimplePanel() {
   const [publishModalOpen, setPublishModalOpen] = useState(false);
   const [selectedPublishBatchId, setSelectedPublishBatchId] = useState(0);
   const [editingRecord, setEditingRecord] = useState<CollectBatchRecord | null>(null);
+  const [startingBatchId, setStartingBatchId] = useState(0);
   const shopMap = useMemo(() => new Map(shops.map((item) => [item.id, item])), [shops]);
 
   useEffect(() => {
@@ -93,7 +95,15 @@ export function CollectionManagementSimplePanel() {
   };
 
   const startCollection = async (record: CollectBatchRecord) => {
-    message.info(`TODO: 批次「${record.name}」后续需要在这里打开外部采集界面`);
+    setStartingBatchId(record.id);
+    try {
+      const result = await startPxxCollection(record.id);
+      message.success(result.message || `批次「${record.name}」采集工作台已打开`);
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "打开采集工作台失败");
+    } finally {
+      setStartingBatchId(0);
+    }
   };
 
   const openPublishModal = (record: CollectBatchRecord) => {
@@ -151,7 +161,12 @@ export function CollectionManagementSimplePanel() {
       width: 260,
       render: (_, record) => (
         <Space size={4} wrap>
-          <Button type="text" icon={<PlayCircleOutlined />} onClick={() => void startCollection(record)}>
+          <Button
+            type="text"
+            icon={<PlayCircleOutlined />}
+            loading={startingBatchId === record.id}
+            onClick={() => void startCollection(record)}
+          >
             开始采集
           </Button>
           <Button type="text" icon={<ArrowRightOutlined />} onClick={() => openPublishModal(record)}>

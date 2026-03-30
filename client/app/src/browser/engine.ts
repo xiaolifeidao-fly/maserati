@@ -211,7 +211,7 @@ export abstract class DoorEngine<T = any> {
         '--disable-features=TranslateUI' // 禁用翻译UI
       ];
 
-    constructor(resourceId : string, headless: boolean = true, chromePath: string = "", usePersistentContext : boolean = false, browserArgs : string[]|undefined = undefined){
+    constructor(resourceId : string, headless: boolean = true, chromePath: string = "", usePersistentContext : boolean = true, browserArgs : string[]|undefined = undefined){
         this.resourceId = resourceId;
         this.usePersistentContext = usePersistentContext;
         if(chromePath){
@@ -261,6 +261,7 @@ export abstract class DoorEngine<T = any> {
     }
 
     public async init(url : string|undefined = undefined) : Promise<Page | undefined> {
+        log.info("init usePersistentContext is ", this.usePersistentContext);
         if(this.usePersistentContext){
             return await this.initByPersistentContext(url);
         }
@@ -323,7 +324,7 @@ export abstract class DoorEngine<T = any> {
             return contextMap.get(key) as BrowserContext;
         }
         const userDataDir = this.getUserDataDir();
-        const platform = await getPlatform();
+        const platform = await ensurePlatform();
         
         const contextConfig: any = {
             headless: this.headless,
@@ -357,7 +358,7 @@ export abstract class DoorEngine<T = any> {
             extraHTTPHeaders: {
                 'sec-ch-ua': getSecChUa(platform),
                 'sec-ch-ua-mobile': '?0', // 设置为移动设备
-                'sec-ch-ua-platform': `"${platform.userAgentData.platform}"`,
+                'sec-ch-ua-platform': `"${getSecChUaPlatform(platform)}"`,
             },
             userAgent: platform.userAgent,
 
@@ -811,7 +812,7 @@ export abstract class DoorEngine<T = any> {
         }
         
         const storeBrowserPath = await this.getRealChromePath();
-        const platform = await getPlatform();
+        const platform = await ensurePlatform();
         // let context;
         const contextConfig : any = {
             bypassCSP : true,
@@ -845,7 +846,7 @@ export abstract class DoorEngine<T = any> {
             extraHTTPHeaders: {
                 'sec-ch-ua': getSecChUa(platform),
                 'sec-ch-ua-mobile': '?0', // 设置为移动设备
-                'sec-ch-ua-platform': `"${platform.userAgentData.platform}"`,
+                'sec-ch-ua-platform': `"${getSecChUaPlatform(platform)}"`,
             }
         }
         if(storeBrowserPath){
@@ -865,7 +866,7 @@ export abstract class DoorEngine<T = any> {
                 'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8,zh-TW;q=0.7',
                 'sec-ch-ua': getSecChUa(platform),
                 'sec-ch-ua-mobile': '?0', // 设置为移动设备
-                'sec-ch-ua-platform': `"${platform.userAgentData.platform}"`,
+                'sec-ch-ua-platform': `"${getSecChUaPlatform(platform)}"`,
             };
         }
         const context = await this.browser?.newContext(contextConfig);
@@ -1500,12 +1501,48 @@ export function getSecChUa(platform : any){
     if(!platform){
         return "";
     }
-    const brands = platform.userAgentData.brands;
+    const brands = Array.isArray(platform.userAgentData?.brands) ? platform.userAgentData.brands : [];
     const result = [];
     for(const brand of brands){
         result.push(`"${brand.brand}";v="${brand.version}"`);
     }
     return result.join(", ");
+}
+
+export function getSecChUaPlatform(platform: any){
+    const uaPlatform = platform?.userAgentData?.platform;
+    if(uaPlatform){
+        return uaPlatform;
+    }
+    const navigatorPlatform = platform?.platform;
+    if(typeof navigatorPlatform !== 'string' || navigatorPlatform.length === 0){
+        return "";
+    }
+    if(navigatorPlatform.startsWith('Mac')){
+        return 'macOS';
+    }
+    if(navigatorPlatform.startsWith('Win')){
+        return 'Windows';
+    }
+    if(navigatorPlatform.includes('Linux')){
+        return 'Linux';
+    }
+    return navigatorPlatform;
+}
+
+export function normalizePlatform(platform : any){
+    if(!platform){
+        return platform;
+    }
+    const userAgentData = platform.userAgentData || {};
+    return {
+        ...platform,
+        userAgentData: {
+            brands: Array.isArray(userAgentData.brands) ? userAgentData.brands : [],
+            mobile: typeof userAgentData.mobile === 'boolean' ? userAgentData.mobile : false,
+            platform: userAgentData.platform || getSecChUaPlatform(platform),
+        }
+    };
 }
 
 export async function initPlatform(){
@@ -1549,17 +1586,60 @@ export async function setPlatform(page : Page){
         for(let key in navigatorObj){
             result[key] = navigatorObj[key];
         }
+        result.userAgent = navigator.userAgent;
+        result.platform = navigator.platform;
+        result.language = navigator.language;
+        result.languages = navigator.languages;
+        result.userAgentData = {
+            brands: Array.isArray(navigator.userAgentData?.brands) ? navigator.userAgentData.brands : [],
+            mobile: typeof navigator.userAgentData?.mobile === 'boolean' ? navigator.userAgentData.mobile : false,
+            platform: navigator.userAgentData?.platform || navigator.platform || '',
+        };
         return result;
     });
-    setGlobal("browserPlatform_" + (process.env.CHROME_VERSION || '1169'), JSON.stringify(platform));
-    return platform;
+    const normalizedPlatform = normalizePlatform(platform);
+    setGlobal("tbk_browserPlatform_" + (process.env.CHROME_VERSION || '1169'), JSON.stringify(normalizedPlatform));
+    return normalizedPlatform;
 }
 
 export async function getPlatform(){
     const chromeVersion = process.env.CHROME_VERSION || '1169';
-    const browserPlatform = await getGlobal("browserPlatform_" + chromeVersion);
+    const browserPlatform = await getGlobal("tbk_browserPlatform_" + chromeVersion);
     if(browserPlatform){
-        return JSON.parse(browserPlatform);
+        return normalizePlatform(JSON.parse(browserPlatform));
     }
     return undefined;
+}
+
+async function ensurePlatform(){
+    const currentPlatform = await getPlatform();
+    if(currentPlatform){
+        return currentPlatform;
+    }
+
+    const initializedPlatform = await initPlatform();
+    if(initializedPlatform){
+        return normalizePlatform(initializedPlatform);
+    }
+
+    return getDefaultPlatform();
+}
+
+function getDefaultPlatform(){
+    return normalizePlatform({
+        userAgent:
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
+        platform: "MacIntel",
+        language: "zh-CN",
+        languages: ["zh-CN", "zh", "en-US", "en"],
+        userAgentData: {
+            brands: [
+                { brand: "Chromium", version: "136" },
+                { brand: "Google Chrome", version: "136" },
+                { brand: "Not.A/Brand", version: "24" },
+            ],
+            mobile: false,
+            platform: "macOS",
+        },
+    });
 }

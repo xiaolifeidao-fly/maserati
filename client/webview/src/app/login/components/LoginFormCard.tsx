@@ -18,6 +18,20 @@ interface AuthFormValues {
   confirmPassword?: string;
 }
 
+function buildAuthFailureMessage(mode: AuthMode) {
+  if (mode === "login") {
+    return {
+      title: "登录没有成功",
+      description: "请检查账号和密码后再试一次，或稍后重新尝试。",
+    };
+  }
+
+  return {
+    title: "注册暂时没有完成",
+    description: "请确认填写信息是否完整，稍后再试一次。",
+  };
+}
+
 export function LoginFormCard() {
   const router = useRouter();
   const [messageApi, contextHolder] = message.useMessage();
@@ -53,9 +67,18 @@ export function LoginFormCard() {
       }
       messageApi.success(mode === "login" ? "登录成功，正在进入后台" : "注册成功，正在进入后台");
       router.replace("/workspace");
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : mode === "login" ? "请输入登录信息" : "请输入注册信息";
-      messageApi.error(errorMessage);
+    } catch {
+      const friendlyMessage = buildAuthFailureMessage(mode);
+      messageApi.open({
+        type: "error",
+        duration: 3.5,
+        content: (
+          <div style={{ lineHeight: 1.45 }}>
+            <div style={{ fontWeight: 700 }}>{friendlyMessage.title}</div>
+            <div style={{ fontSize: 13, opacity: 0.88 }}>{friendlyMessage.description}</div>
+          </div>
+        ),
+      });
     } finally {
       setSubmitting(false);
     }
@@ -162,7 +185,7 @@ export function LoginFormCard() {
           ) : (
             <div style={{ marginBottom: 24 }}>
               <Text style={{ color: "var(--manager-text-soft)" }}>
-                登录状态仅保存在 Electron 主进程内存中，关闭客户端后需要重新登录。
+                登录状态会保存在 Electron store 中，客户端重启后会自动恢复登录态。
               </Text>
             </div>
           )}

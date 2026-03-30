@@ -45,8 +45,10 @@ type CollectRecordDTO struct {
 	AppUserID         uint64 `json:"appUserId"`
 	CollectBatchID    uint64 `json:"collectBatchId"`
 	ProductID         uint64 `json:"productId"`
+	ProductName       string `json:"productName"`
 	SourceProductID   string `json:"sourceProductId"`
 	SourceSnapshotURL string `json:"sourceSnapshotUrl"`
+	IsFavorite        bool   `json:"isFavorite"`
 	Status            string `json:"status"`
 }
 
@@ -54,8 +56,10 @@ type CreateCollectRecordDTO struct {
 	AppUserID         uint64 `json:"appUserId"`
 	CollectBatchID    uint64 `json:"collectBatchId"`
 	ProductID         uint64 `json:"productId"`
+	ProductName       string `json:"productName"`
 	SourceProductID   string `json:"sourceProductId"`
 	SourceSnapshotURL string `json:"sourceSnapshotUrl"`
+	IsFavorite        bool   `json:"isFavorite"`
 	Status            string `json:"status"`
 }
 
@@ -63,8 +67,10 @@ type UpdateCollectRecordDTO struct {
 	AppUserID         *uint64 `json:"appUserId,omitempty"`
 	CollectBatchID    *uint64 `json:"collectBatchId,omitempty"`
 	ProductID         *uint64 `json:"productId,omitempty"`
+	ProductName       *string `json:"productName,omitempty"`
 	SourceProductID   *string `json:"sourceProductId,omitempty"`
 	SourceSnapshotURL *string `json:"sourceSnapshotUrl,omitempty"`
+	IsFavorite        *bool   `json:"isFavorite,omitempty"`
 	Status            *string `json:"status,omitempty"`
 }
 
@@ -75,5 +81,6 @@ type CollectRecordQueryDTO struct {
 	AppUserID      uint64 `form:"appUserId"`
 	CollectBatchID uint64 `form:"collectBatchId"`
 	ProductID      uint64 `form:"productId"`
+	ProductName    string `form:"productName"`
 	Status         string `form:"status"`
 }

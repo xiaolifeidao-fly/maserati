@@ -1,74 +1,68 @@
+import { SourceType } from '../types/publish-task';
+import type {
+  RawSourceData,
+  TbSourceData,
+  NormalizedProduct,
+  NormalizedProp,
+  NormalizedSku,
+  NormalizedLogistics,
+} from '../types/source-data';
+import type { ISourceParser } from './parser.interface';
+
 /**
- * tb-parser.ts
- * 淘宝 (Taobao) 数据解析策略
+ * TbSourceParser — 淘宝源数据解析器
+ *
+ * 将淘宝平台原始数据格式转换为归一化商品格式。
+ * 解析逻辑：
+ *  - props 直接映射，name/value 保持原样（等待 SearchCategory 步骤填充 pid/vid）
+ *  - SKU 价格已是元，直接透传
+ *  - 图片 URL 保持原样（等待 UploadImages 步骤上传至云端）
  */
-
-import type { ISourceParser }      from './parser.interface';
-import type { RawSourceData, TBSourceData } from '../types/source-data';
-import type { ParsedProductData }  from '../types/draft';
-import { SourceType }              from '../types/publish-task';
-import { ParseError }              from '../core/errors';
-
-export class TBParser implements ISourceParser {
+export class TbSourceParser implements ISourceParser {
   readonly sourceType = SourceType.TB;
 
-  validate(rawData: unknown): boolean {
-    if (!rawData || typeof rawData !== 'object') return false;
-    const d = rawData as Record<string, unknown>;
-    return (
-      typeof d['itemId']  === 'string' &&
-      typeof d['title']   === 'string' &&
-      Array.isArray(d['mainImages'])
-    );
-  }
+  parse(raw: RawSourceData): NormalizedProduct {
+    if (raw.type !== SourceType.TB) {
+      throw new Error(`TbSourceParser: 不支持的源类型 ${raw.type}`);
+    }
+    const src = raw as TbSourceData;
 
-  async parse(rawData: RawSourceData): Promise<ParsedProductData> {
-    if (!this.validate(rawData)) {
-      throw new ParseError(this.sourceType, 'Invalid TB source data structure');
+    if (!src.title?.trim()) {
+      throw new Error('TB 源数据缺少必填字段: title');
     }
 
-    const d = rawData as TBSourceData;
+    const props: NormalizedProp[] = (src.props ?? []).map(p => ({
+      name: p.name?.trim() ?? '',
+      value: p.value?.trim() ?? '',
+    })).filter(p => p.name && p.value);
 
-    // ── 规格归一化 ────────────────────────────────────────────────
-    // TB SKU 的 specs 是 Record<string,string>，转为 SKUSpec[]
-    const skuList = (d.skuList ?? []).map(sku => ({
-      skuId: sku.skuId,
-      price: sku.price,
-      stock: sku.stock,
-      image: sku.image,
-      specs: Object.entries(sku.specs ?? {}).map(([specName, specValue]) => ({
-        specName,
-        specValue,
+    const skuList: NormalizedSku[] = (src.skuItems ?? []).map(item => ({
+      attributes: (item.attributes ?? []).map(attr => ({
+        name: attr.name?.trim() ?? '',
+        value: attr.value?.trim() ?? '',
+        imageUrl: attr.imageUrl,
       })),
+      price: Math.max(0, Number(item.price) || 0),
+      stock: Math.max(0, Number(item.stock) || 0),
+      skuCode: item.skuCode,
+      imageUrl: item.imageUrl,
     }));
 
-    // ── 属性归一化 ────────────────────────────────────────────────
-    const attributes = (d.attributes ?? []).map(attr => ({
-      name:  attr.name,
-      value: attr.value,
-    }));
+    const logistics: NormalizedLogistics = {
+      weight: src.logistics?.weight,
+      templateId: src.logistics?.templateId,
+      deliveryType: src.logistics?.deliveryType,
+    };
 
     return {
-      title:        this.cleanTitle(d.title),
-      mainImages:   d.mainImages   ?? [],
-      detailImages: d.detailImages ?? [],
-      attributes,
+      title: src.title.trim(),
+      subTitle: src.subTitle?.trim(),
+      originalItemId: src.outerItemId,
+      mainImages: (src.mainImages ?? []).filter(Boolean),
+      detailImages: (src.detailImages ?? []).filter(Boolean),
+      props,
       skuList,
-      categoryHint: d.categoryPath ?? [],
-      logistics: {
-        weight: d.logistics?.weight,
-        volume: d.logistics?.volume,
-      },
-      description: d.description,
+      logistics,
     };
-  }
-
-  // ────────────────────────────────────────────────
-  // 私有工具
-  // ────────────────────────────────────────────────
-
-  private cleanTitle(title: string): string {
-    // 去掉淘宝标题中常见的噪声字符
-    return title.replace(/[【】\[\]]/g, '').trim().slice(0, 60);
   }
 }

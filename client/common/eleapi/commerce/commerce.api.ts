@@ -93,12 +93,20 @@ export interface ShopAuthorizePayload {
 }
 
 export interface ShopLoginPayload {
+  shopId?: number;
   appUserId?: number;
   name: string;
   code: string;
   platform: string;
   platformShopId: string;
   businessId: string;
+}
+
+export class ShopLoginStartResult {
+  success = false;
+  shopId = 0;
+  platform = "";
+  message = "";
 }
 
 export class ProductRecord {
@@ -199,6 +207,11 @@ export class CommerceApi extends ElectronApi {
   @InvokeType(Protocols.INVOKE)
   async loginShop(payload: ShopLoginPayload): Promise<ShopRecord> {
     return this.invokeApi("loginShop", payload);
+  }
+
+  @InvokeType(Protocols.INVOKE)
+  async startShopLogin(shopId: number): Promise<ShopLoginStartResult> {
+    return this.invokeApi("startShopLogin", shopId);
   }
 
   @InvokeType(Protocols.INVOKE)

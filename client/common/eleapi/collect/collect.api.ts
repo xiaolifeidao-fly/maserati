@@ -36,6 +36,30 @@ export interface CollectBatchPayload {
   collectedCount: number;
 }
 
+export class CollectRecordPreview {
+  id = 0;
+  appUserId = 0;
+  collectBatchId = 0;
+  productId = 0;
+  productName = "";
+  sourceProductId = "";
+  sourceSnapshotUrl = "";
+  isFavorite = false;
+  status = "";
+  active = 1;
+  createdTime?: string;
+  updatedTime?: string;
+}
+
+export class PxxCollectStartResult {
+  success = false;
+  batchId = 0;
+  pageUrl = "";
+  message = "";
+}
+
+export type CollectionWorkspaceNavigationAction = "back" | "forward" | "home";
+
 export class CollectApi extends ElectronApi {
   getApiName(): string {
     return "collect";
@@ -59,5 +83,15 @@ export class CollectApi extends ElectronApi {
   @InvokeType(Protocols.INVOKE)
   async deleteCollectBatch(id: number): Promise<{ deleted: boolean }> {
     return this.invokeApi("deleteCollectBatch", id);
+  }
+
+  @InvokeType(Protocols.INVOKE)
+  async startPxxCollection(batchId: number): Promise<PxxCollectStartResult> {
+    return this.invokeApi("startPxxCollection", batchId);
+  }
+
+  @InvokeType(Protocols.INVOKE)
+  async navigateCollectionWorkspace(action: CollectionWorkspaceNavigationAction): Promise<{ success: boolean; url: string }> {
+    return this.invokeApi("navigateCollectionWorkspace", action);
   }
 }

@@ -43,8 +43,27 @@ interface SystemApi {
 }
 
 declare global {
+    interface CollectTestingInjectedItem {
+        id?: number;
+        appUserId?: number;
+        collectBatchId?: number;
+        productId?: number;
+        productName?: string;
+        sourceProductId?: string;
+        sourceSnapshotUrl?: string;
+        isFavorite?: boolean;
+        status?: string;
+    }
+
+    interface CollectTestingBridge {
+        prependCollectBatchItems(items: CollectTestingInjectedItem[]): void;
+        replaceCollectBatchItems(items: CollectTestingInjectedItem[]): void;
+        clearCollectBatchItems(): void;
+    }
+
     interface Window {
         user?: UserApi;
         system?: SystemApi;
+        collectTestingBridge?: CollectTestingBridge;
     }
 }

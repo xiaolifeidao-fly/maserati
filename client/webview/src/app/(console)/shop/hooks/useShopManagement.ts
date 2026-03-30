@@ -6,7 +6,9 @@ import {
   createShop,
   deleteShop,
   fetchShops,
+  startShopLogin,
   updateShop,
+  type ShopLoginStartResult,
   type ShopAuthorizePayload,
   type ShopListQuery,
   type ShopPayload,
@@ -81,6 +83,17 @@ export function useShopManagement() {
     }
   };
 
+  const openShopLogin = async (id: number): Promise<ShopLoginStartResult> => {
+    setSubmitting(true);
+    try {
+      const result = await startShopLogin(id);
+      await refresh();
+      return result;
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   useEffect(() => {
     void refresh();
   }, []);
@@ -94,6 +107,7 @@ export function useShopManagement() {
     refresh,
     saveShop,
     bindActivationCode,
+    openShopLogin,
     removeShop,
   };
 }

@@ -1,28 +1,19 @@
+import type { RawSourceData, NormalizedProduct } from '../types/source-data';
+import type { SourceType } from '../types/publish-task';
+
 /**
- * parser.interface.ts
- * 源数据解析器接口（Strategy Pattern 的策略接口）
+ * ISourceParser — 源数据解析器接口（策略模式）
  *
- * 不同来源平台（TB/PXX）各自实现此接口，
- * 对外暴露统一的 ParsedProductData 格式。
+ * 每种平台源数据（TB / PXX / 未来可扩展）实现此接口，
+ * 将平台私有格式统一转换为 NormalizedProduct。
  */
-
-import type { RawSourceData }      from '../types/source-data';
-import type { ParsedProductData }  from '../types/draft';
-import type { SourceType }         from '../types/publish-task';
-
 export interface ISourceParser {
-  /** 解析器支持的来源类型 */
+  /** 声明此解析器支持的源数据类型 */
   readonly sourceType: SourceType;
 
   /**
-   * 将平台原始数据解析为规范化的 ParsedProductData
-   * @throws ParseError 当数据格式不合法时
+   * 将原始源数据解析为归一化商品数据
+   * @throws Error 若数据格式不合法
    */
-  parse(rawData: RawSourceData): Promise<ParsedProductData>;
-
-  /**
-   * 校验原始数据格式是否符合当前解析器的预期
-   * 可在 parse 前调用，提前发现数据问题
-   */
-  validate(rawData: unknown): boolean;
+  parse(raw: RawSourceData): NormalizedProduct;
 }

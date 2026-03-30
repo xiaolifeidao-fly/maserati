@@ -1,47 +1,35 @@
-/**
- * parser-factory.ts
- * 解析器工厂（Factory Pattern + 策略注册）
- *
- * 使用注册表模式（registry）管理解析器，方便后续新增平台时只需注册，
- * 无需修改工厂逻辑（开闭原则）。
- */
+import { SourceType } from '../types/publish-task';
+import type { ISourceParser } from './parser.interface';
+import { TbSourceParser } from './tb-parser';
+import { PxxSourceParser } from './pxx-parser';
 
-import type { ISourceParser }  from './parser.interface';
-import { TBParser }            from './tb-parser';
-import { PXXParser }           from './pxx-parser';
-import { SourceType }          from '../types/publish-task';
+/**
+ * ParserFactory — 解析器工厂
+ *
+ * 根据源数据类型返回对应的解析策略。
+ * 扩展新平台时只需：
+ *  1. 实现 ISourceParser
+ *  2. 在 PARSER_REGISTRY 中注册
+ */
+const PARSER_REGISTRY = new Map<SourceType, ISourceParser>([
+  [SourceType.TB,  new TbSourceParser()],
+  [SourceType.PXX, new PxxSourceParser()],
+]);
 
 export class ParserFactory {
-  private static readonly registry = new Map<SourceType, ISourceParser>([
-    [SourceType.TB,  new TBParser()],
-    [SourceType.PXX, new PXXParser()],
-  ]);
-
   /**
-   * 获取指定来源类型的解析器
-   * @throws Error 当未找到对应解析器时（通常是新平台未注册）
+   * 获取指定类型的解析器
+   * @throws Error 若类型不支持
    */
   static getParser(sourceType: SourceType): ISourceParser {
-    const parser = this.registry.get(sourceType);
+    const parser = PARSER_REGISTRY.get(sourceType);
     if (!parser) {
-      throw new Error(
-        `No parser registered for sourceType: ${sourceType}. ` +
-        `Available: [${[...this.registry.keys()].join(', ')}]`,
-      );
+      throw new Error(`不支持的源数据类型: ${sourceType}`);
     }
     return parser;
   }
 
-  /**
-   * 注册新解析器（支持运行时扩展）
-   * 若已存在相同 sourceType 则覆盖
-   */
-  static register(parser: ISourceParser): void {
-    this.registry.set(parser.sourceType, parser);
-  }
-
-  /** 获取所有已注册的来源类型 */
   static getSupportedTypes(): SourceType[] {
-    return [...this.registry.keys()];
+    return Array.from(PARSER_REGISTRY.keys());
   }
 }

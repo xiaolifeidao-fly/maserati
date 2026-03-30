@@ -26,6 +26,7 @@ func NewCollectHandler() *CollectHandler {
 func (h *CollectHandler) RegisterHandler(engine *gin.RouterGroup) {
 	engine.GET("/collect-batches", h.listCollectBatches)
 	engine.GET("/collect-batches/:id", h.getCollectBatchByID)
+	engine.GET("/collect-batches/:id/records", h.listCollectBatchRecords)
 	engine.POST("/collect-batches", h.createCollectBatch)
 	engine.PUT("/collect-batches/:id", h.updateCollectBatch)
 	engine.DELETE("/collect-batches/:id", h.deleteCollectBatch)
@@ -35,6 +36,25 @@ func (h *CollectHandler) RegisterHandler(engine *gin.RouterGroup) {
 	engine.POST("/collect-records", h.createCollectRecord)
 	engine.PUT("/collect-records/:id", h.updateCollectRecord)
 	engine.DELETE("/collect-records/:id", h.deleteCollectRecord)
+}
+
+func (h *CollectHandler) listCollectBatchRecords(c *gin.Context) {
+	id, ok := parseCollectID(c)
+	if !ok {
+		return
+	}
+	var q collectDTO.CollectRecordQueryDTO
+	if c.ShouldBindQuery(&q) != nil {
+		commonRouter.ToError(c, "参数错误")
+		return
+	}
+	applyCollectAppUserID(c, &q.AppUserID)
+	r, e := h.collectService.ListCollectRecordsByBatch(id, q)
+	if e == gorm.ErrRecordNotFound {
+		commonRouter.ToError(c, "collect batch not found")
+		return
+	}
+	commonRouter.ToJson(c, r, e)
 }
 
 func (h *CollectHandler) listCollectBatches(c *gin.Context) {

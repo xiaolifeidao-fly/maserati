@@ -1,188 +1,136 @@
+import { StepCode, StepStatus } from '../types/publish-task';
+import type { PublishProgressEvent } from '../types/publish-task';
+import type { PublishStep } from './publish-step';
+import type { StepContext } from './step-context';
+import { CaptchaRequiredError } from './errors';
+import type { IPublishPersister } from './publish-runner';
+
+export type ProgressListener = (event: PublishProgressEvent) => void;
+
 /**
- * step-chain.ts
- * 发布步骤责任链（Chain of Responsibility）
+ * StepChain — 责任链编排器
  *
- * 核心职责：
- *  1. 按顺序执行 steps
- *  2. 检测 CaptchaRequiredError → 调度 captchaStep → 重试当前步骤
- *  3. 超出重试次数时终止链并上报失败
- *  4. 支持从断点步骤续跑（resume）
- *  5. 通过 onProgress 回调上报每步进度
+ * 职责：
+ *  1. 按 stepOrder 依次执行所有步骤
+ *  2. 每步执行前后调用 persister 更新服务端状态
+ *  3. 捕获 CaptchaRequiredError 并通过进度事件通知上层
+ *  4. 支持从指定步骤断点续跑（fromStepCode）
  */
-
-import { PublishStep, type StepResult } from './publish-step';
-import { StepContext }                   from './step-context';
-import { CaptchaRequiredError, StepMaxRetriesError, TaskCancelledError } from './errors';
-import { StepName, StepStatus }         from '../types/publish-task';
-
-// ────────────────────────────────────────────────
-// 类型
-// ────────────────────────────────────────────────
-
-export interface ChainResult {
-  success:     boolean;
-  failedStep?: StepName;
-  error?:      Error;
-}
-
-export type ProgressCallback = (
-  stepName: StepName,
-  status:   StepStatus,
-  error?:   Error,
-) => void | Promise<void>;
-
-export interface ChainOptions {
-  /**
-   * 续跑起始步骤名（从该步骤开始，跳过之前已完成的步骤）
-   * 不传则从头开始
-   */
-  resumeFromStep?: StepName;
-  /** 进度回调 */
-  onProgress?:    ProgressCallback;
-}
-
-// ────────────────────────────────────────────────
-// StepChain
-// ────────────────────────────────────────────────
-
 export class StepChain {
-  private readonly steps:       PublishStep[];
-  private readonly captchaStep: PublishStep; // 验证码处理 Step（共享）
+  private readonly steps: PublishStep[];
+  private progressListeners: ProgressListener[] = [];
+  private persister?: IPublishPersister;
 
-  constructor(steps: PublishStep[], captchaStep: PublishStep) {
-    if (steps.length === 0) throw new Error('StepChain requires at least one step');
-    this.steps       = steps;
-    this.captchaStep = captchaStep;
+  constructor(steps: PublishStep[]) {
+    this.steps = [...steps].sort((a, b) => a.stepOrder - b.stepOrder);
   }
 
-  async execute(context: StepContext, options: ChainOptions = {}): Promise<ChainResult> {
-    const { resumeFromStep, onProgress } = options;
+  withPersister(persister: IPublishPersister): this {
+    this.persister = persister;
+    return this;
+  }
 
-    let skipping = !!resumeFromStep;
+  onProgress(listener: ProgressListener): this {
+    this.progressListeners.push(listener);
+    return this;
+  }
 
-    for (const step of this.steps) {
-      // ── 续跑跳过逻辑 ────────────────────────
-      if (skipping) {
-        if (step.name === resumeFromStep) {
-          skipping = false;
-          // 如果该步骤已完成且可恢复，则继续跳过
-          if (step.resumable) {
-            await onProgress?.(step.name, StepStatus.SKIPPED);
-            continue;
-          }
-        } else {
-          await onProgress?.(step.name, StepStatus.SKIPPED);
-          continue;
-        }
-      }
+  private emit(event: PublishProgressEvent): void {
+    for (const listener of this.progressListeners) {
+      try { listener(event); } catch { /* ignore listener errors */ }
+    }
+  }
 
-      // ── 取消检查 ────────────────────────────
-      if (context.isCancelled) {
-        return {
-          success:     false,
-          failedStep:  step.name,
-          error:       new TaskCancelledError(context.taskId),
-        };
-      }
-
-      // ── 执行步骤（含验证码重试） ─────────────
-      const result = await this.executeWithRetry(step, context, onProgress);
-
-      if (!result.success) {
-        return {
-          success:    false,
-          failedStep: step.name,
-          error:      result.error,
-        };
-      }
-
-      // ── 跳转指令 ────────────────────────────
-      if (result.skipToStep) {
-        skipping        = true;
-        // 将 resumeFromStep 设为 skipToStep，利用同一套逻辑处理
-        // （实际上是"跳过直到 skipToStep"）
-        const skipIdx   = this.steps.findIndex(s => s.name === result.skipToStep);
-        if (skipIdx === -1) {
-          return { success: false, error: new Error(`Unknown skipToStep: ${result.skipToStep}`) };
-        }
-      }
+  /**
+   * 执行步骤链
+   * @param ctx        共享上下文
+   * @param fromStepCode 断点续跑起始步骤（含），省略则从头执行
+   */
+  async run(ctx: StepContext, fromStepCode?: StepCode): Promise<void> {
+    let startIndex = 0;
+    if (fromStepCode) {
+      const idx = this.steps.findIndex(s => s.stepCode === fromStepCode);
+      if (idx >= 0) startIndex = idx;
     }
 
-    return { success: true };
-  }
+    for (let i = startIndex; i < this.steps.length; i++) {
+      const step = this.steps[i];
+      const stepId = await this.resolveStepId(ctx.taskId, step.stepCode);
 
-  // ────────────────────────────────────────────────
-  // 私有方法
-  // ────────────────────────────────────────────────
-
-  /**
-   * 执行单步，支持验证码中断 + 重试
-   */
-  private async executeWithRetry(
-    step:        PublishStep,
-    context:     StepContext,
-    onProgress?: ProgressCallback,
-  ): Promise<StepResult> {
-    let attempt         = 0;
-    const maxAttempts   = step.maxRetries + 1; // 首次 + N 次重试
-
-    await onProgress?.(step.name, StepStatus.RUNNING);
-
-    while (attempt < maxAttempts) {
-      attempt++;
+      // 通知：步骤开始
+      this.emit({
+        taskId: ctx.taskId,
+        stepCode: step.stepCode,
+        status: StepStatus.RUNNING,
+        message: `开始执行：${step.stepName}`,
+      });
+      await this.persister?.updateStep(ctx.taskId, stepId, {
+        status: StepStatus.RUNNING,
+        startedAt: new Date().toISOString(),
+      });
 
       try {
-        const result = await step.execute(context);
+        const result = await step.execute(ctx);
 
-        if (result.success) {
-          await onProgress?.(step.name, StepStatus.COMPLETED);
-          return result;
+        // 持久化步骤结果
+        await this.persister?.updateStep(ctx.taskId, stepId, {
+          status: result.status,
+          outputData: result.outputData ? JSON.stringify(result.outputData) : undefined,
+          errorMessage: result.status === StepStatus.FAILED ? result.message : undefined,
+          completedAt: new Date().toISOString(),
+        });
+
+        this.emit({
+          taskId: ctx.taskId,
+          stepCode: step.stepCode,
+          status: result.status,
+          message: result.message,
+        });
+
+        if (result.status === StepStatus.FAILED) {
+          throw new Error(result.message || `步骤 [${step.stepName}] 执行失败`);
         }
-
-        // 非验证码失败，重试
-        if (attempt >= maxAttempts) {
-          const err = new StepMaxRetriesError(step.name, step.maxRetries, result.error);
-          await onProgress?.(step.name, StepStatus.FAILED, err);
-          return { success: false, error: err };
-        }
-
-        // 继续循环 → 重试
-        console.warn(`[StepChain] Step ${step.name} failed (attempt ${attempt}), retrying...`, result.error);
 
       } catch (err) {
         if (err instanceof CaptchaRequiredError) {
-          // ── 验证码分支 ────────────────────────
-          context.pendingCaptcha = err.captchaData;
-          await onProgress?.(step.name, StepStatus.WAITING_CAPTCHA);
-
-          const captchaResult = await this.captchaStep.execute(context);
-
-          if (!captchaResult.success) {
-            const captchaErr = captchaResult.error ?? new Error('Captcha failed');
-            await onProgress?.(step.name, StepStatus.FAILED, captchaErr);
-            return { success: false, error: captchaErr };
-          }
-
-          // 验证码成功，清理并重试当前 step（不计入 attempt）
-          context.pendingCaptcha = undefined;
-          attempt--; // 抵消本次 attempt++，验证码不消耗重试次数
-          await onProgress?.(step.name, StepStatus.RUNNING);
-
-        } else {
-          // 其他未预期错误
-          const error = err instanceof Error ? err : new Error(String(err));
-          if (attempt >= maxAttempts) {
-            await onProgress?.(step.name, StepStatus.FAILED, error);
-            return { success: false, error };
-          }
-          console.warn(`[StepChain] Step ${step.name} threw (attempt ${attempt}), retrying...`, error);
+          // 更新步骤为 PENDING（等待验证码）
+          await this.persister?.updateStep(ctx.taskId, stepId, {
+            status: StepStatus.PENDING,
+            errorMessage: '等待验证码',
+          });
+          this.emit({
+            taskId: ctx.taskId,
+            stepCode: step.stepCode,
+            status: StepStatus.PENDING,
+            message: '需要验证码',
+            captchaUrl: err.captchaUrl,
+            validateUrl: err.validateUrl,
+          });
+          // 向上透传，由 PublishRunner 暂停任务
+          throw err;
         }
+        throw err;
       }
     }
+  }
 
-    // 理论上不会走到这里
-    const err = new StepMaxRetriesError(step.name, step.maxRetries);
-    await onProgress?.(step.name, StepStatus.FAILED, err);
-    return { success: false, error: err };
+  /** 查询服务端步骤记录 ID，若不存在则自动创建 */
+  private async resolveStepId(taskId: number, stepCode: StepCode): Promise<number> {
+    if (!this.persister) return 0;
+    try {
+      const steps = await this.persister.listSteps(taskId);
+      const existing = steps.find(s => s.stepCode === stepCode);
+      if (existing) return existing.id;
+
+      const stepOrder = this.steps.findIndex(s => s.stepCode === stepCode) + 1;
+      const created = await this.persister.createStep(taskId, {
+        stepCode,
+        stepOrder,
+        status: StepStatus.PENDING,
+      });
+      return created.id;
+    } catch {
+      return 0;
+    }
   }
 }

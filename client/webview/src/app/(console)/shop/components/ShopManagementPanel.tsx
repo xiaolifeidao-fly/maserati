@@ -40,11 +40,8 @@ function getShopDisplayName(record: Pick<ShopRecord, "remark" | "name" | "code" 
 }
 
 const platformOptions = [
-  { label: "淘宝", value: "taobao" },
-  { label: "天猫", value: "tmall" },
-  { label: "京东", value: "jd" },
-  { label: "拼多多", value: "pdd" },
-  { label: "抖店", value: "douyin" },
+  { label: "淘宝", value: "tb" },
+  { label: "拼多多", value: "pxx" },
 ];
 
 function getShopStage(record: ShopRecord) {
@@ -73,7 +70,8 @@ export function ShopManagementPanel() {
   const router = useRouter();
   const [shopForm] = Form.useForm<ShopFormValues>();
   const [authorizeForm] = Form.useForm<AuthorizeFormValues>();
-  const { shops, total, query, loading, submitting, refresh, saveShop, bindActivationCode, removeShop } = useShopManagement();
+  const { shops, total, query, loading, submitting, refresh, saveShop, bindActivationCode, openShopLogin, removeShop } =
+    useShopManagement();
   const [filters, setFilters] = useState({
     name: "",
     businessId: "",
@@ -85,14 +83,13 @@ export function ShopManagementPanel() {
   const [editOpen, setEditOpen] = useState(false);
   const [authorizeOpen, setAuthorizeOpen] = useState(false);
   const [authorizeTarget, setAuthorizeTarget] = useState<ShopRecord | null>(null);
-  const [loginOpen, setLoginOpen] = useState(false);
-  const [loginTarget, setLoginTarget] = useState<ShopRecord | null>(null);
+  const [loggingShopId, setLoggingShopId] = useState(0);
   const safeShops = Array.isArray(shops) ? shops : [];
 
   const openCreateModal = () => {
     setEditingShop(null);
     shopForm.setFieldsValue({
-      platform: "taobao",
+      platform: "tb",
       remark: "",
     });
     setEditOpen(true);
@@ -101,7 +98,7 @@ export function ShopManagementPanel() {
   const openEditModal = (record: ShopRecord) => {
     setEditingShop(record);
     shopForm.setFieldsValue({
-      platform: record.platform || "taobao",
+      platform: normalizePlatform(record.platform),
       remark: record.remark,
     });
     setEditOpen(true);
@@ -115,9 +112,16 @@ export function ShopManagementPanel() {
     setAuthorizeOpen(true);
   };
 
-  const openLoginModal = (record?: ShopRecord) => {
-    setLoginTarget(record ?? null);
-    setLoginOpen(true);
+  const handleLogin = async (record: ShopRecord) => {
+    setLoggingShopId(record.id);
+    try {
+      const result = await openShopLogin(record.id);
+      message.success(result.message || "登录窗口已打开");
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "打开登录窗口失败");
+    } finally {
+      setLoggingShopId(0);
+    }
   };
 
   const handleSaveShop = async () => {
@@ -164,7 +168,7 @@ export function ShopManagementPanel() {
           <div>
             <div style={{ color: "var(--manager-text)", fontWeight: 700 }}>{getShopDisplayName(record)}</div>
             <div style={{ color: "var(--manager-text-faint)", marginTop: 4 }}>
-              {record.platform || "-"}
+              {getPlatformLabel(record.platform)}
             </div>
             <div style={{ marginTop: 8 }}>
               <Tag color={stage.color}>{stage.label}</Tag>
@@ -238,7 +242,7 @@ export function ShopManagementPanel() {
       width: 260,
       render: (_, record) => (
         <Space size={4} wrap>
-          <Button type="text" icon={<LinkOutlined />} onClick={() => openLoginModal(record)}>
+          <Button type="text" icon={<LinkOutlined />} loading={loggingShopId === record.id} onClick={() => void handleLogin(record)}>
             外部登录
           </Button>
           <Button type="text" icon={<KeyOutlined />} onClick={() => openAuthorizeModal(record)}>
@@ -375,44 +379,6 @@ export function ShopManagementPanel() {
       </Modal>
 
       <Modal
-        title={loginTarget ? "重新绑定外部账号登录" : "绑定外部账号登录"}
-        open={loginOpen}
-        onCancel={() => {
-          setLoginOpen(false);
-          setLoginTarget(null);
-        }}
-        footer={[
-          <Button
-            key="close"
-            type="primary"
-            onClick={() => {
-              setLoginOpen(false);
-              setLoginTarget(null);
-            }}
-          >
-            知道了
-          </Button>,
-        ]}
-        destroyOnClose
-      >
-        <div style={{ display: "grid", gap: 16 }}>
-          <div style={{ padding: 16, borderRadius: 16, background: "rgba(170,192,238,0.12)", color: "var(--manager-text)" }}>
-            <div style={{ fontWeight: 700, marginBottom: 8 }}>{loginTarget ? getShopDisplayName(loginTarget) : "新店铺外部登录"}</div>
-            <div style={{ color: "var(--manager-text-faint)", lineHeight: 1.8 }}>
-              已为外部登录预留弹窗流程。
-              <br />
-              当前阶段先弹出等待界面，后续再接真实扫码、授权回调和登录态回填。
-            </div>
-          </div>
-          <div style={{ padding: "14px 16px", borderRadius: 14, border: "1px dashed rgba(170,192,238,0.28)", color: "var(--manager-text-faint)" }}>
-            等待外部登录中...
-            <br />
-            TODO: 接入真实外部登录窗口、登录成功回调、店铺信息自动回填。
-          </div>
-        </div>
-      </Modal>
-
-      <Modal
         title="激活码授权"
         open={authorizeOpen}
         onCancel={() => {
@@ -431,4 +397,19 @@ export function ShopManagementPanel() {
       </Modal>
     </div>
   );
+}
+
+function normalizePlatform(platform: string) {
+  const normalized = (platform || "").trim().toLowerCase();
+  if (normalized === "taobao" || normalized === "tb") {
+    return "tb";
+  }
+  if (normalized === "pdd" || normalized === "pxx") {
+    return "pxx";
+  }
+  return "tb";
+}
+
+function getPlatformLabel(platform: string) {
+  return platformOptions.find((item) => item.value === normalizePlatform(platform))?.label || platform || "-";
 }

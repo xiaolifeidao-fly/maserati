@@ -1,39 +1,51 @@
+import type { NormalizedProduct } from '../types/source-data';
+import type { TbCategoryInfo, TbDraftContext } from '../types/draft';
+
 /**
- * filler.interface.ts
- * 草稿填充器统一接口（Strategy Pattern）
+ * FillerContext — 填充器共享上下文
  *
- * 每个 IDraftFiller 负责填充 ProductDraft 的某一个区块：
- *   BasicInfoFiller     → title + mainImages
- *   AttributesFiller    → attributes
- *   SkuFiller           → skuList（规格 / 价格 / 库存 / sku图）
- *   LogisticsFiller     → logistics
- *   DetailImagesFiller  → detailImages
+ * 所有填充器共享同一个 FillerContext 实例。
+ * 填充器通过修改 draftPayload 字段向草稿追加数据。
+ */
+export interface FillerContext {
+  /** 归一化商品数据（只读） */
+  readonly product: NormalizedProduct;
+  /** 淘宝类目信息（只读） */
+  readonly categoryInfo: TbCategoryInfo;
+  /** 上传后的主图 URL 列表 */
+  readonly uploadedMainImages: string[];
+  /** 上传后的详情图 URL 列表 */
+  readonly uploadedDetailImages: string[];
+  /** 草稿上下文（含 catId / startTraceId / draftId 等） */
+  readonly draftContext: TbDraftContext;
+  /**
+   * 草稿提交载荷（可写）
+   * 各填充器向此对象追加需要提交给淘宝的字段
+   */
+  draftPayload: Record<string, unknown>;
+}
+
+/**
+ * IFiller — 草稿填充器接口（策略模式）
+ *
+ * 每个填充器负责草稿的一个独立维度：
+ *  - BasicInfoFiller   主图、标题等必填字段
+ *  - PropsFiller       商品属性（类目属性 pid/vid）
+ *  - SkuFiller         SKU 规格、价格、库存
+ *  - LogisticsFiller   运费模板、重量
+ *  - DetailImagesFiller 商品详情图
  *
  * 设计原则：
- *  - 单一职责：每个 Filler 只写自己负责的字段，不越权修改其他字段
- *  - 可组合：FillerRegistry 按注册顺序依次调用，顺序即优先级
- *  - 可替换：对同一区块，不同平台可注册不同实现
+ *  - 填充器之间不互相依赖，按需独立调用
+ *  - 新增填充维度只需实现此接口并注册到 FillDraftStep
  */
-
-import type { ProductDraft, ParsedProductData, UploadedImages } from '../types/draft';
-import type { StepContext } from '../core/step-context';
-
-export interface IDraftFiller {
-  /** 填充器唯一名称（用于日志 & 注册表去重） */
-  readonly name: string;
+export interface IFiller {
+  /** 填充器名称（用于日志） */
+  readonly fillerName: string;
 
   /**
-   * 将解析数据 + 已上传图片填充进草稿对象
-   *
-   * @param draft          目标草稿（直接修改，无需返回值）
-   * @param parsedData     规范化的来源商品数据
-   * @param uploadedImages 已上传到 CDN 的图片 URL 集合
-   * @param context        步骤共享上下文（读取 category、extra 等）
+   * 执行填充逻辑
+   * 将字段写入 ctx.draftPayload
    */
-  fill(
-    draft:          ProductDraft,
-    parsedData:     ParsedProductData,
-    uploadedImages: UploadedImages,
-    context:        StepContext,
-  ): Promise<void>;
+  fill(ctx: FillerContext): Promise<void>;
 }

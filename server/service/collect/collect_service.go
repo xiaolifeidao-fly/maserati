@@ -151,6 +151,24 @@ func ensureCollectProductBelongsToAppUser(repo *productRepository.ProductReposit
 	return nil
 }
 
+func resolveCollectProductName(repo *productRepository.ProductRepository, productID uint64, fallback string) (string, error) {
+	name := strings.TrimSpace(fallback)
+	if name != "" {
+		return name, nil
+	}
+	if productID == 0 {
+		return "", nil
+	}
+	entity, err := repo.FindById(uint(productID))
+	if err != nil {
+		return "", err
+	}
+	if entity.Active == 0 {
+		return "", gorm.ErrRecordNotFound
+	}
+	return strings.TrimSpace(entity.Title), nil
+}
+
 func ensureBatch(repo *collectRepository.CollectBatchRepository, id uint64) error {
 	if id == 0 {
 		return fmt.Errorf("collectBatchId must be positive")
@@ -316,6 +334,14 @@ func (s *CollectService) ListCollectRecords(query collectDTO.CollectRecordQueryD
 	return baseDTO.BuildPage(int(total), db.ToDTOs[collectDTO.CollectRecordDTO](entities)), nil
 }
 
+func (s *CollectService) ListCollectRecordsByBatch(batchID uint, query collectDTO.CollectRecordQueryDTO) (*baseDTO.PageDTO[collectDTO.CollectRecordDTO], error) {
+	if err := ensureBatch(s.collectBatchRepository, uint64(batchID)); err != nil {
+		return nil, err
+	}
+	query.CollectBatchID = uint64(batchID)
+	return s.ListCollectRecords(query)
+}
+
 func (s *CollectService) GetCollectRecordByID(id uint) (*collectDTO.CollectRecordDTO, error) {
 	entity, err := s.collectRecordRepository.FindById(id)
 	if err != nil {
@@ -340,12 +366,18 @@ func (s *CollectService) CreateCollectRecord(req *collectDTO.CreateCollectRecord
 	if err := ensureCollectProductBelongsToAppUser(s.productRepository, req.ProductID, req.AppUserID); err != nil {
 		return nil, err
 	}
+	productName, err := resolveCollectProductName(s.productRepository, req.ProductID, req.ProductName)
+	if err != nil {
+		return nil, err
+	}
 	entity, err := s.collectRecordRepository.Create(&collectRepository.CollectRecord{
 		AppUserID:         req.AppUserID,
 		CollectBatchID:    req.CollectBatchID,
 		ProductID:         req.ProductID,
+		ProductName:       productName,
 		SourceProductID:   strings.TrimSpace(req.SourceProductID),
 		SourceSnapshotURL: strings.TrimSpace(req.SourceSnapshotURL),
+		IsFavorite:        req.IsFavorite,
 		Status:            normalizeCollectRecordStatus(req.Status),
 	})
 	if err != nil {
@@ -388,6 +420,13 @@ func (s *CollectService) UpdateCollectRecord(id uint, req *collectDTO.UpdateColl
 			return nil, err
 		}
 		entity.ProductID = *req.ProductID
+		if req.ProductName == nil {
+			productName, resolveErr := resolveCollectProductName(s.productRepository, entity.ProductID, "")
+			if resolveErr != nil {
+				return nil, resolveErr
+			}
+			entity.ProductName = productName
+		}
 	}
 	if req.AppUserID != nil && req.CollectBatchID == nil {
 		if err := ensureBatchBelongsToAppUser(s.collectBatchRepository, entity.CollectBatchID, entity.AppUserID); err != nil {
@@ -399,14 +438,27 @@ func (s *CollectService) UpdateCollectRecord(id uint, req *collectDTO.UpdateColl
 			return nil, err
 		}
 	}
+	if req.ProductName != nil {
+		entity.ProductName = strings.TrimSpace(*req.ProductName)
+	}
 	if req.SourceProductID != nil {
 		entity.SourceProductID = strings.TrimSpace(*req.SourceProductID)
 	}
 	if req.SourceSnapshotURL != nil {
 		entity.SourceSnapshotURL = strings.TrimSpace(*req.SourceSnapshotURL)
 	}
+	if req.IsFavorite != nil {
+		entity.IsFavorite = *req.IsFavorite
+	}
 	if req.Status != nil {
 		entity.Status = normalizeCollectRecordStatus(*req.Status)
+	}
+	if entity.ProductName == "" {
+		productName, resolveErr := resolveCollectProductName(s.productRepository, entity.ProductID, "")
+		if resolveErr != nil {
+			return nil, resolveErr
+		}
+		entity.ProductName = productName
 	}
 	saved, err := s.collectRecordRepository.SaveOrUpdate(entity)
 	if err != nil {

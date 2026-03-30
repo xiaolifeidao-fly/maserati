@@ -1,79 +1,82 @@
-/**
- * draft.ts
- * 平台无关的规范化商品数据结构 & 草稿结构
- * 解析器输出 ParsedProductData，填充器将其写入 ProductDraft
- */
+// ─── 淘宝草稿相关数据结构 ──────────────────────────────────────────────────────
 
-// ────────────────────────────────────────────────
-// 解析后的规范化商品数据（平台无关）
-// ────────────────────────────────────────────────
-
-export interface ProductAttribute {
-  name:      string;
-  value:     string;
-  required?: boolean;
+/** 草稿上下文：贯穿 FillDraft / EditDraft / Publish 三个步骤 */
+export interface TbDraftContext {
+  /** 淘宝类目 ID */
+  catId: string;
+  /** 草稿 ID（createDraft 后获取） */
+  draftId?: string;
+  /** 请求追踪 ID（UUID） */
+  startTraceId: string;
+  /** 商品 ID（发布成功后有值） */
+  itemId?: string;
+  /** CSRF Token */
+  csrfToken?: string;
+  /** 页面 window 中抓取的 JSON 数据（原始页面状态） */
+  pageJsonData?: Record<string, unknown>;
 }
 
-export interface SKUSpec {
-  specName:  string;  // '颜色'
-  specValue: string;  // '红色'
+/** 淘宝类目信息（SearchCategory 步骤获取） */
+export interface TbCategoryInfo {
+  catId: string;
+  catName: string;
+  /** 面包屑路径，如 "服装 > 女装 > T恤" */
+  catPath: string;
+  /** 类目属性列表（非销售属性） */
+  props: TbCategoryProp[];
+  /** 销售属性列表（颜色/尺码等 SKU 维度） */
+  salePropList: TbSaleProp[];
 }
 
-export interface SKUItem {
-  specs:     SKUSpec[];
-  price:     number;      // 分
-  stock:     number;
-  skuId?:    string;      // 原始平台 sku id
-  image?:    string;      // 原始 sku 图 URL（上传前）
+export interface TbCategoryProp {
+  pid: string;
+  name: string;
+  required: boolean;
+  /**
+   * UI 类型:
+   *  - input        纯文本输入
+   *  - dataSource   下拉选择（来自 dataSource 列表）
+   *  - taoSirProp   淘Sir属性（特殊逻辑）
+   *  - multiSelect  多选
+   */
+  uiType: string;
+  /** 可选值列表（uiType=dataSource 时有效） */
+  dataSource?: TbPropValue[];
+  /** 当前已填充的文本值 */
+  input?: string;
+  multiSelect?: boolean;
 }
 
-export interface LogisticsData {
-  weight?:     number;  // 克
-  volume?:     number;  // 立方厘米
-  templateId?: string;  // 目标平台物流模板 id
+export interface TbPropValue {
+  vid: string;
+  name: string;
+  alias?: string;
 }
 
-/**
- * 解析器输出的规范化数据结构
- * 所有平台的原始数据都会被归一到这个格式
- */
-export interface ParsedProductData {
-  title:          string;
-  mainImages:     string[];          // 原始主图 URL（未上传）
-  detailImages:   string[];          // 原始详情图 URL（未上传）
-  attributes:     ProductAttribute[];
-  skuList:        SKUItem[];
-  categoryHint:   string[];          // 给分类搜索的路径提示
-  logistics:      LogisticsData;
-  description?:   string;
+export interface TbSaleProp {
+  pid: string;
+  name: string;
+  uiType: string;
+  values: TbSalePropValue[];
 }
 
-// ────────────────────────────────────────────────
-// 正在填充中的草稿（目标平台结构）
-// ────────────────────────────────────────────────
-
-/** 已上传至 CDN 的图片组 */
-export interface UploadedImages {
-  mainImages:   string[];  // CDN URL
-  detailImages: string[];  // CDN URL
-  skuImages:    Record<string, string>; // skuId → CDN URL
+export interface TbSalePropValue {
+  vid: string;
+  name: string;
+  alias?: string;
+  imageUrl?: string;
 }
 
-/**
- * ProductDraft 是填充器将 ParsedProductData 写入目标平台的工作对象。
- * 每个 Filler 负责填充其对应的部分。
- */
-export interface ProductDraft {
-  draftId?:       string;
-  title:          string;
-  mainImages:     string[];          // 已上传 CDN URL
-  detailImages:   string[];          // 已上传 CDN URL
-  categoryId?:    string;
-  categoryPath?:  string[];
-  attributes:     ProductAttribute[];
-  skuList:        SKUItem[];         // price/stock 已处理，image 已上传
-  logistics:      LogisticsData;
-  description?:   string;
-  /** 目标平台特有字段（不同平台可扩展此字段） */
-  extra?:         Record<string, unknown>;
+/** 提交给淘宝 updateDraft 接口的载荷 */
+export interface TbDraftPayload {
+  catId: string;
+  startTraceId: string;
+  /** 其余字段为淘宝动态表单字段，使用索引签名 */
+  [key: string]: unknown;
+}
+
+/** 淘宝上传图片返回结果 */
+export interface TbUploadImageResult {
+  imageUrl: string;
+  imageId?: string;
 }
