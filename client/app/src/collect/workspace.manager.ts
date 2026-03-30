@@ -14,22 +14,12 @@ interface OpenCollectionWorkspaceOptions {
   records: CollectRecordPreview[];
   initialUrl: string;
   cookies?: CookiesSetDetails[];
-  controller?: CollectionWorkspaceController;
 }
 
 interface CollectionWorkspaceViews {
   left: BrowserView;
   center: BrowserView;
   right: BrowserView;
-}
-
-interface CollectionWorkspaceController {
-  syncToUrl(url: string): Promise<void>;
-  goBack(): Promise<string>;
-  goForward(): Promise<string>;
-  goHome(): Promise<string>;
-  reload(): Promise<string>;
-  readRawData(): Promise<unknown>;
 }
 
 const LEFT_RATIO = 0.28;
@@ -43,10 +33,11 @@ const RIGHT_WORKSPACE_ROUTE = "/collection-workspace/right";
 let workspaceWindow: BrowserWindow | null = null;
 let workspaceViews: CollectionWorkspaceViews | null = null;
 let workspaceState = new CollectionWorkspaceState();
-let workspaceController: CollectionWorkspaceController | null = null;
-let isSyncingController = false;
 let isScrapingRecord = false;
 let lastScrapedSourceProductId = "";
+let centerDebuggerBoundViewId = 0;
+const pendingGoodsResponses = new Map<string, { url: string; resourceType: string; mimeType: string }>();
+const capturedGoodsSummaryById = new Map<string, ReturnType<typeof parsePxxGoodsSummary>>();
 
 function getPreloadPath() {
   return path.join(__dirname, 'preload.js');
@@ -176,6 +167,71 @@ function extractGoodsIdFromUrl(url: string) {
   }
 }
 
+function extractJsonObject(input: string, startIndex: number): string | null {
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+
+  for (let index = startIndex; index < input.length; index += 1) {
+    const char = input[index];
+
+    if (escape) {
+      escape = false;
+      continue;
+    }
+
+    if (char === "\\") {
+      escape = true;
+      continue;
+    }
+
+    if (char === "\"") {
+      inString = !inString;
+      continue;
+    }
+
+    if (inString) {
+      continue;
+    }
+
+    if (char === "{") {
+      depth += 1;
+    } else if (char === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        return input.slice(startIndex, index + 1);
+      }
+    }
+  }
+
+  return null;
+}
+
+function extractRawDataFromHtml(html: string): unknown {
+  const marker = "window.rawData";
+  const markerIndex = html.indexOf(marker);
+  if (markerIndex < 0) {
+    return null;
+  }
+
+  const braceIndex = html.indexOf("{", markerIndex);
+  if (braceIndex < 0) {
+    return null;
+  }
+
+  const jsonText = extractJsonObject(html, braceIndex);
+  if (!jsonText) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(jsonText);
+  } catch (error) {
+    log.warn("[collection workspace] failed to parse rawData json from html", error);
+    return null;
+  }
+}
+
 function parsePxxGoodsSummary(rawData: unknown) {
   if (!rawData || typeof rawData !== "object") {
     return null;
@@ -203,6 +259,141 @@ function parsePxxGoodsSummary(rawData: unknown) {
     productId: Number(sourceProductId) || 0,
     status: statusValue === 1 ? "COLLECTED" : (statusExplain || "UNAVAILABLE"),
   };
+}
+
+function parsePxxGoodsSummaryFromResponse(url: string, mimeType: string, body: string) {
+  const sourceProductId = extractGoodsIdFromUrl(url);
+  if (!sourceProductId || !body.trim()) {
+    return null;
+  }
+
+  const normalizedMimeType = String(mimeType || "").toLowerCase();
+
+  if (normalizedMimeType.includes("html") || body.includes("window.rawData")) {
+    return parsePxxGoodsSummary(extractRawDataFromHtml(body));
+  }
+
+  if (normalizedMimeType.includes("json")) {
+    try {
+      const parsed = JSON.parse(body);
+      return (
+        parsePxxGoodsSummary(parsed)
+        || parsePxxGoodsSummary((parsed as { data?: unknown })?.data)
+        || parsePxxGoodsSummary((parsed as { result?: unknown })?.result)
+      );
+    } catch (error) {
+      log.warn("[collection workspace] failed to parse goods json response", { url, error });
+    }
+  }
+
+  return null;
+}
+
+async function waitForCapturedGoodsSummary(sourceProductId: string, timeoutMs = 10000) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    const summary = capturedGoodsSummaryById.get(sourceProductId);
+    if (summary) {
+      return summary;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  return null;
+}
+
+function clearCapturedGoodsState() {
+  pendingGoodsResponses.clear();
+  capturedGoodsSummaryById.clear();
+}
+
+function isGoodsResponseCandidate(url: string, resourceType: string) {
+  if (!url || !["Document", "XHR", "Fetch"].includes(resourceType)) {
+    return false;
+  }
+
+  return Boolean(extractGoodsIdFromUrl(url));
+}
+
+async function handleCenterDebuggerMessage(view: BrowserView, method: string, params: any) {
+  if (!view || view.webContents.isDestroyed()) {
+    return;
+  }
+
+  if (method === "Network.responseReceived") {
+    const requestId = String(params?.requestId || "");
+    const responseUrl = String(params?.response?.url || "");
+    const resourceType = String(params?.type || "");
+    if (!requestId || !isGoodsResponseCandidate(responseUrl, resourceType)) {
+      return;
+    }
+
+    pendingGoodsResponses.set(requestId, {
+      url: responseUrl,
+      resourceType,
+      mimeType: String(params?.response?.mimeType || ""),
+    });
+    return;
+  }
+
+  if (method === "Network.loadingFailed") {
+    pendingGoodsResponses.delete(String(params?.requestId || ""));
+    return;
+  }
+
+  if (method !== "Network.loadingFinished") {
+    return;
+  }
+
+  const requestId = String(params?.requestId || "");
+  const meta = pendingGoodsResponses.get(requestId);
+  if (!meta) {
+    return;
+  }
+  pendingGoodsResponses.delete(requestId);
+
+  try {
+    const result = await view.webContents.debugger.sendCommand("Network.getResponseBody", { requestId }) as {
+      body?: string;
+      base64Encoded?: boolean;
+    };
+    const rawBody = String(result?.body || "");
+    const body = result?.base64Encoded ? Buffer.from(rawBody, "base64").toString("utf8") : rawBody;
+    const parsed = parsePxxGoodsSummaryFromResponse(meta.url, meta.mimeType, body);
+    if (!parsed?.sourceProductId) {
+      return;
+    }
+
+    capturedGoodsSummaryById.set(parsed.sourceProductId, parsed);
+    const currentUrl = view.webContents.getURL();
+    if (extractGoodsIdFromUrl(currentUrl) === parsed.sourceProductId) {
+      void collectCurrentGoods(currentUrl);
+    }
+  } catch (error) {
+    log.warn("[collection workspace] failed to read center response body", { url: meta.url, error });
+  }
+}
+
+async function ensureCenterNetworkCapture(view: BrowserView) {
+  const debuggerInstance = view.webContents.debugger;
+  if (!debuggerInstance.isAttached()) {
+    debuggerInstance.attach("1.3");
+  }
+
+  const targetViewId = view.webContents.id;
+  if (centerDebuggerBoundViewId !== targetViewId) {
+    debuggerInstance.removeAllListeners("message");
+    debuggerInstance.removeAllListeners("detach");
+    debuggerInstance.on("message", (_event, method, params) => {
+      void handleCenterDebuggerMessage(view, method, params);
+    });
+    debuggerInstance.on("detach", (_event, reason) => {
+      centerDebuggerBoundViewId = 0;
+      log.warn("[collection workspace] center debugger detached", { reason });
+    });
+    centerDebuggerBoundViewId = targetViewId;
+  }
+
+  await debuggerInstance.sendCommand("Network.enable");
 }
 
 async function pushRecordToTestingBridge(record: CollectRecordPreview) {
@@ -285,7 +476,7 @@ async function upsertCollectRecord(record: CollectRecordPreview) {
 }
 
 async function collectCurrentGoods(url: string) {
-  if (!workspaceController || isScrapingRecord) {
+  if (isScrapingRecord) {
     return;
   }
 
@@ -296,9 +487,12 @@ async function collectCurrentGoods(url: string) {
 
   isScrapingRecord = true;
   try {
-    const rawData = await workspaceController.readRawData();
-    const parsed = parsePxxGoodsSummary(rawData);
+    const parsed = await waitForCapturedGoodsSummary(sourceProductId);
     if (!parsed) {
+      log.warn("[collection workspace] skipped goods collect because no intercepted payload was captured", {
+        sourceProductId,
+        url,
+      });
       return;
     }
 
@@ -330,19 +524,8 @@ async function collectCurrentGoods(url: string) {
 }
 
 async function handleCenterNavigation(url: string) {
-  if (!workspaceController || !url) {
+  if (!url) {
     return;
-  }
-
-  if (!isSyncingController) {
-    isSyncingController = true;
-    try {
-      await workspaceController.syncToUrl(url);
-    } catch (error) {
-      log.warn("[collection workspace] failed to sync playwright page", { url, error });
-    } finally {
-      isSyncingController = false;
-    }
   }
 
   if (extractGoodsIdFromUrl(url)) {
@@ -363,10 +546,9 @@ function bindCenterViewEvents(view: BrowserView) {
 
 export async function openCollectionWorkspace(options: OpenCollectionWorkspaceOptions) {
   const display = electronScreen.getPrimaryDisplay();
-  workspaceController = options.controller || null;
-  isSyncingController = false;
   isScrapingRecord = false;
   lastScrapedSourceProductId = "";
+  clearCapturedGoodsState();
 
   workspaceState = {
     batch: Object.assign(new CollectBatchRecord(), options.batch),
@@ -416,10 +598,10 @@ export async function openCollectionWorkspace(options: OpenCollectionWorkspaceOp
       workspaceWindow = null;
       workspaceViews = null;
       workspaceState = new CollectionWorkspaceState();
-      workspaceController = null;
-      isSyncingController = false;
       isScrapingRecord = false;
       lastScrapedSourceProductId = "";
+      centerDebuggerBoundViewId = 0;
+      clearCapturedGoodsState();
     });
 
     left.webContents.setWindowOpenHandler(({ url }) => {
@@ -446,11 +628,13 @@ export async function openCollectionWorkspace(options: OpenCollectionWorkspaceOp
     throw new Error("采集工作台初始化失败");
   }
 
+  await ensureCenterNetworkCapture(workspaceViews.center);
+
   if (options.cookies?.length) {
     await applyCookies(workspaceViews.center, options.cookies);
   }
 
-  await workspaceViews.center.webContents.loadURL(options.initialUrl);
+  await workspaceViews.center.webContents.loadURL(PXX_HOME_URL);
   await renderSidePanes();
 
   if (workspaceWindow.isMinimized()) {
@@ -483,31 +667,19 @@ export async function navigateCollectionWorkspace(action: "back" | "forward" | "
 
   switch (action) {
     case "back":
-      if (workspaceController) {
-        await workspaceController.goBack();
-      }
       if (webContents.canGoBack()) {
         webContents.goBack();
       }
       break;
     case "forward":
-      if (workspaceController) {
-        await workspaceController.goForward();
-      }
       if (webContents.canGoForward()) {
         webContents.goForward();
       }
       break;
     case "home":
-      if (workspaceController) {
-        await workspaceController.goHome();
-      }
       await webContents.loadURL(PXX_HOME_URL);
       break;
     case "refresh":
-      if (workspaceController) {
-        await workspaceController.reload();
-      }
       webContents.reload();
       break;
     default:

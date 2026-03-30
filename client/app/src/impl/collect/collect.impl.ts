@@ -88,96 +88,13 @@ export class CollectImpl extends CollectApi {
       records: Array.isArray(records.data) ? records.data : [],
       initialUrl: openedPage.url() || "https://mobile.yangkeduo.com/",
       cookies: cookieDetails,
-      controller: {
-        async syncToUrl(url: string) {
-          if (!url || openedPage.isClosed()) {
-            return;
-          }
-          if (openedPage.url() === url) {
-            return;
-          }
-          await openedPage.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
-        },
-        async goBack() {
-          if (openedPage.isClosed()) {
-            return "https://mobile.yangkeduo.com/";
-          }
-          const page = await openedPage.goBack({ waitUntil: "domcontentloaded", timeout: 30000 }).catch(() => null);
-          return page?.url() || openedPage.url() || "https://mobile.yangkeduo.com/";
-        },
-        async goForward() {
-          if (openedPage.isClosed()) {
-            return "https://mobile.yangkeduo.com/";
-          }
-          const page = await openedPage.goForward({ waitUntil: "domcontentloaded", timeout: 30000 }).catch(() => null);
-          return page?.url() || openedPage.url() || "https://mobile.yangkeduo.com/";
-        },
-        async goHome() {
-          if (openedPage.isClosed()) {
-            return "https://mobile.yangkeduo.com/";
-          }
-          await openedPage.goto("https://mobile.yangkeduo.com/", { waitUntil: "domcontentloaded", timeout: 30000 });
-          return openedPage.url() || "https://mobile.yangkeduo.com/";
-        },
-        async reload() {
-          if (openedPage.isClosed()) {
-            return "https://mobile.yangkeduo.com/";
-          }
-          await openedPage.reload({ waitUntil: "domcontentloaded", timeout: 30000 });
-          return openedPage.url() || "https://mobile.yangkeduo.com/";
-        },
-        async readRawData() {
-          if (openedPage.isClosed()) {
-            return null;
-          }
-          const isRetryableNavigationError = (error: unknown) => {
-            const message = error instanceof Error ? error.message : String(error);
-            return message.includes("Execution context was destroyed")
-              || message.includes("Cannot find context with specified id")
-              || message.includes("Target page, context or browser has been closed");
-          };
-
-          for (let attempt = 0; attempt < 5; attempt += 1) {
-            if (openedPage.isClosed()) {
-              return null;
-            }
-
-            try {
-              await openedPage.waitForLoadState("domcontentloaded", { timeout: 5000 }).catch(() => null);
-              return await openedPage.evaluate(() => {
-                const pageWindow = globalThis as typeof globalThis & {
-                  rawData?: unknown;
-                  setInterval: (handler: () => void, timeout?: number) => number;
-                  clearInterval: (timerId: number) => void;
-                };
-                return new Promise((resolve) => {
-                  let index = 0;
-                  const timer = pageWindow.setInterval(() => {
-                    if (pageWindow.rawData) {
-                      pageWindow.clearInterval(timer);
-                      resolve(pageWindow.rawData);
-                      return;
-                    }
-                    index += 1;
-                    if (index >= 40) {
-                      pageWindow.clearInterval(timer);
-                      resolve(null);
-                    }
-                  }, 250);
-                });
-              });
-            } catch (error) {
-              if (!isRetryableNavigationError(error) || attempt === 4) {
-                throw error;
-              }
-              await new Promise((resolve) => setTimeout(resolve, 400));
-            }
-          }
-
-          return null;
-        },
-      },
     });
+
+    if (!openedPage.isClosed()) {
+      await openedPage.close().catch(() => null);
+    }
+    await engine.closeContext().catch(() => null);
+    await engine.closeBrowser().catch(() => null);
 
     return Object.assign(new PxxCollectStartResult(), {
       success: true,
