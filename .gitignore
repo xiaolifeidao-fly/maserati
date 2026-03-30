@@ -26,5 +26,6 @@ __debug**
 package
 *.tar.gz
 !.codex
+!.claude
 old_source_code
 old_client_code
