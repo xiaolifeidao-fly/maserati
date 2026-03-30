@@ -167,6 +167,20 @@ function extractGoodsIdFromUrl(url: string) {
   }
 }
 
+function normalizeWorkspaceUrl(url: string | undefined) {
+  const normalized = String(url || "").trim();
+  if (!normalized || normalized === "about:blank") {
+    return PXX_HOME_URL;
+  }
+
+  try {
+    return new URL(normalized).toString();
+  } catch (error) {
+    log.warn("[collection workspace] invalid initial url, fallback to home", { url: normalized, error });
+    return PXX_HOME_URL;
+  }
+}
+
 function extractJsonObject(input: string, startIndex: number): string | null {
   let depth = 0;
   let inString = false;
@@ -540,8 +554,20 @@ function bindCenterViewEvents(view: BrowserView) {
 
   view.webContents.removeAllListeners("did-navigate");
   view.webContents.removeAllListeners("did-navigate-in-page");
+  view.webContents.removeAllListeners("did-fail-load");
+  view.webContents.removeAllListeners("render-process-gone");
   view.webContents.on("did-navigate", onNavigation);
   view.webContents.on("did-navigate-in-page", onNavigation);
+  view.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL) => {
+    log.error("[collection workspace] center view load failed", {
+      errorCode,
+      errorDescription,
+      validatedURL,
+    });
+  });
+  view.webContents.on("render-process-gone", (_event, details) => {
+    log.error("[collection workspace] center view render process gone", details);
+  });
 }
 
 export async function openCollectionWorkspace(options: OpenCollectionWorkspaceOptions) {
@@ -628,13 +654,17 @@ export async function openCollectionWorkspace(options: OpenCollectionWorkspaceOp
     throw new Error("采集工作台初始化失败");
   }
 
-  await ensureCenterNetworkCapture(workspaceViews.center);
+  try {
+    await ensureCenterNetworkCapture(workspaceViews.center);
+  } catch (error) {
+    log.warn("[collection workspace] failed to enable center network capture", error);
+  }
 
   if (options.cookies?.length) {
     await applyCookies(workspaceViews.center, options.cookies);
   }
 
-  await workspaceViews.center.webContents.loadURL(PXX_HOME_URL);
+  await workspaceViews.center.webContents.loadURL(normalizeWorkspaceUrl(options.initialUrl));
   await renderSidePanes();
 
   if (workspaceWindow.isMinimized()) {

@@ -83,10 +83,14 @@ export class CollectImpl extends CollectApi {
       })
       .filter((item): item is NonNullable<typeof item> => Boolean(item));
 
+    const initialUrl = openedPage.url() && openedPage.url() !== "about:blank"
+      ? openedPage.url()
+      : "https://mobile.yangkeduo.com/";
+
     const workspaceUrl = await openCollectionWorkspace({
       batch,
       records: Array.isArray(records.data) ? records.data : [],
-      initialUrl: openedPage.url() || "https://mobile.yangkeduo.com/",
+      initialUrl,
       cookies: cookieDetails,
     });
 
