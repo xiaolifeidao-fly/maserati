@@ -28,6 +28,7 @@ interface CollectionWorkspaceController {
   goBack(): Promise<string>;
   goForward(): Promise<string>;
   goHome(): Promise<string>;
+  reload(): Promise<string>;
   readRawData(): Promise<unknown>;
 }
 
@@ -36,6 +37,8 @@ const CENTER_RATIO = 0.44;
 const RIGHT_RATIO = 0.28;
 const MIN_PANEL_WIDTH = 280;
 const PXX_HOME_URL = "https://mobile.yangkeduo.com/";
+const LEFT_WORKSPACE_ROUTE = "/collection-workspace/left";
+const RIGHT_WORKSPACE_ROUTE = "/collection-workspace/right";
 
 let workspaceWindow: BrowserWindow | null = null;
 let workspaceViews: CollectionWorkspaceViews | null = null;
@@ -46,7 +49,7 @@ let isScrapingRecord = false;
 let lastScrapedSourceProductId = "";
 
 function getPreloadPath() {
-  return path.join(__dirname, "..", "preload.js");
+  return path.join(__dirname, 'preload.js');
 }
 
 function cloneState(): CollectionWorkspaceState {
@@ -57,391 +60,14 @@ function cloneState(): CollectionWorkspaceState {
   };
 }
 
-function getSelectedRecord() {
-  return workspaceState.records.find((record) => record.id === workspaceState.selectedRecordId) || null;
-}
-
-function escapeHtml(value: string) {
-  return String(value)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
-
-function escapeAttribute(value: string) {
-  return escapeHtml(value);
-}
-
-function buildShellHtml(pane: "left" | "right") {
-  const title = pane === "left" ? "采集列表" : "商品详情";
-
-  return `<!DOCTYPE html>
-<html lang="zh-CN">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>${title}</title>
-    <style>
-      :root {
-        color-scheme: light;
-        --bg: #eef2f6;
-        --panel: #ffffff;
-        --panel-soft: #f8fafc;
-        --border: #e5e7eb;
-        --text: #0f172a;
-        --muted: #64748b;
-        --accent: #2563eb;
-        --accent-soft: #eff6ff;
-        --warn-soft: #fff7ed;
-      }
-
-      * {
-        box-sizing: border-box;
-      }
-
-      html, body {
-        width: 100%;
-        height: 100%;
-        margin: 0;
-        padding: 0;
-        overflow: hidden;
-        background: var(--bg);
-        color: var(--text);
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      }
-
-      body {
-        padding: 14px;
-      }
-
-      .panel {
-        height: 100%;
-        display: flex;
-        flex-direction: column;
-        gap: 14px;
-      }
-
-      .card {
-        background: var(--panel);
-        border: 1px solid var(--border);
-        border-radius: 18px;
-        padding: 14px 16px;
-        box-shadow: 0 10px 28px rgba(15, 23, 42, 0.05);
-      }
-
-      .header-card {
-        background: linear-gradient(135deg, #f7fafc, #eef6ff);
-      }
-
-      .detail-card {
-        background: linear-gradient(135deg, #fff7ed, #fff1f2);
-      }
-
-      .eyebrow {
-        font-size: 12px;
-        font-weight: 700;
-        letter-spacing: 0.08em;
-        color: var(--muted);
-        text-transform: uppercase;
-      }
-
-      .title {
-        margin-top: 8px;
-        font-size: 18px;
-        font-weight: 700;
-        line-height: 1.5;
-      }
-
-      .subtle {
-        margin-top: 8px;
-        font-size: 12px;
-        color: var(--muted);
-        line-height: 1.6;
-      }
-
-      .section-head {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 12px;
-        padding: 0 2px;
-      }
-
-      .section-title {
-        font-size: 14px;
-        font-weight: 700;
-      }
-
-      .section-helper {
-        font-size: 12px;
-        color: var(--muted);
-      }
-
-      .scroll {
-        min-height: 0;
-        flex: 1;
-        overflow: auto;
-        display: grid;
-        gap: 10px;
-        padding-right: 4px;
-      }
-
-      .record {
-        width: 100%;
-        border: 1px solid var(--border);
-        border-radius: 16px;
-        background: var(--panel);
-        padding: 14px;
-        text-align: left;
-        cursor: pointer;
-        transition: all 0.18s ease;
-        box-shadow: 0 4px 12px rgba(15, 23, 42, 0.03);
-      }
-
-      .record:hover {
-        border-color: #93c5fd;
-        transform: translateY(-1px);
-      }
-
-      .record.is-active {
-        border-color: var(--accent);
-        background: var(--accent-soft);
-      }
-
-      .record-title {
-        font-size: 14px;
-        font-weight: 700;
-        line-height: 1.5;
-      }
-
-      .record-meta {
-        margin-top: 6px;
-        font-size: 12px;
-        color: var(--muted);
-      }
-
-      .chip-row {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 8px;
-        margin-top: 10px;
-      }
-
-      .chip {
-        display: inline-flex;
-        align-items: center;
-        padding: 4px 10px;
-        border-radius: 999px;
-        font-size: 12px;
-        font-weight: 600;
-      }
-
-      .field {
-        background: var(--panel);
-        border: 1px solid var(--border);
-        border-radius: 16px;
-        padding: 14px 16px;
-      }
-
-      .field-label {
-        font-size: 12px;
-        font-weight: 700;
-        color: var(--muted);
-        letter-spacing: 0.04em;
-        text-transform: uppercase;
-      }
-
-      .field-value {
-        margin-top: 8px;
-        font-size: 14px;
-        line-height: 1.7;
-        word-break: break-word;
-      }
-
-      .field-value a {
-        color: var(--accent);
-        text-decoration: none;
-      }
-
-      .empty {
-        background: var(--panel-soft);
-        border: 1px dashed #cbd5e1;
-        color: var(--muted);
-        border-radius: 16px;
-        padding: 20px;
-        text-align: center;
-        line-height: 1.6;
-      }
-    </style>
-  </head>
-  <body>
-    <div id="app" class="panel"></div>
-    <script>
-      const pane = ${JSON.stringify(pane)};
-
-      const buildChip = (text, background, color) =>
-        '<span class="chip" style="background:' + background + ';color:' + color + ';">' + escapeHtml(text) + '</span>';
-
-      const escapeHtml = (value) =>
-        String(value)
-          .replace(/&/g, '&amp;')
-          .replace(/</g, '&lt;')
-          .replace(/>/g, '&gt;')
-          .replace(/"/g, '&quot;')
-          .replace(/'/g, '&#39;');
-
-      const buildField = (label, valueHtml) =>
-        '<div class="field"><div class="field-label">' + label + '</div><div class="field-value">' + valueHtml + '</div></div>';
-
-      const state = {
-        batch: null,
-        records: [],
-        selectedRecordId: 0,
-      };
-
-      const root = document.getElementById('app');
-
-      function getSelectedRecord() {
-        return state.records.find((item) => item.id === state.selectedRecordId) || null;
-      }
-
-      function renderLeft() {
-        root.innerHTML = '';
-
-        const header = document.createElement('div');
-        header.className = 'card header-card';
-        header.innerHTML = [
-          '<div class="eyebrow">采集批次</div>',
-          '<div class="title">' + escapeHtml(state.batch?.name || ('批次 #' + (state.batch?.id || 0))) + '</div>',
-          '<div class="subtle">批次ID：' + (state.batch?.id || 0) + ' ｜ 已加载 ' + state.records.length + ' 条商品</div>',
-        ].join('');
-        root.appendChild(header);
-
-        const sectionHead = document.createElement('div');
-        sectionHead.className = 'section-head';
-        sectionHead.innerHTML = '<div class="section-title">采集列表</div><div class="section-helper">点击左侧商品切换右侧详情</div>';
-        root.appendChild(sectionHead);
-
-        const scroll = document.createElement('div');
-        scroll.className = 'scroll';
-
-        if (!state.records.length) {
-          scroll.innerHTML = '<div class="empty">当前批次下暂无采集商品。</div>';
-          root.appendChild(scroll);
-          return;
-        }
-
-        state.records.forEach((record) => {
-          const button = document.createElement('button');
-          button.type = 'button';
-          button.className = 'record' + (record.id === state.selectedRecordId ? ' is-active' : '');
-          button.innerHTML = [
-            '<div class="record-title">' + escapeHtml(record.productName || ('商品 #' + (record.productId || record.id || 0))) + '</div>',
-            '<div class="record-meta">商品ID：' + (record.productId || '-') + '</div>',
-            '<div class="record-meta">来源ID：' + escapeHtml(record.sourceProductId || '-') + '</div>',
-          ].join('');
-          button.addEventListener('click', async () => {
-            state.selectedRecordId = record.id;
-            renderLeft();
-            try {
-              await window.collectionWorkspace.selectRecord(record.id);
-            } catch (error) {
-              console.error(error);
-            }
-          });
-          scroll.appendChild(button);
-        });
-
-        root.appendChild(scroll);
-      }
-
-      function renderRight() {
-        root.innerHTML = '';
-        const selected = getSelectedRecord();
-
-        const detailHeader = document.createElement('div');
-        detailHeader.className = 'card detail-card';
-        detailHeader.innerHTML = [
-          '<div class="eyebrow" style="color:#9a3412;">商品详情</div>',
-          '<div class="subtle" style="margin-top:10px;color:#7c2d12;">右侧详情区和中间页面彼此独立，中间刷新时这里不会丢状态。</div>',
-        ].join('');
-        root.appendChild(detailHeader);
-
-        const scroll = document.createElement('div');
-        scroll.className = 'scroll';
-
-        if (!selected) {
-          scroll.innerHTML = '<div class="empty">当前批次下暂无商品，右侧详情区域已预留。</div>';
-          root.appendChild(scroll);
-          return;
-        }
-
-        const summary = document.createElement('div');
-        summary.className = 'field';
-        summary.innerHTML = [
-          '<div class="title" style="margin-top:0;font-size:18px;">' + escapeHtml(selected.productName || ('商品 #' + (selected.productId || selected.id || 0))) + '</div>',
-          '<div class="chip-row">',
-          buildChip(selected.status || 'PENDING', '#e0f2fe', '#075985'),
-          buildChip(selected.isFavorite ? '已收藏' : '未收藏', selected.isFavorite ? '#fef3c7' : '#e5e7eb', selected.isFavorite ? '#92400e' : '#475569'),
-          '</div>',
-        ].join('');
-        scroll.appendChild(summary);
-
-        scroll.insertAdjacentHTML('beforeend', buildField('商品ID', String(selected.productId || '-')));
-        scroll.insertAdjacentHTML('beforeend', buildField('来源商品ID', escapeHtml(selected.sourceProductId || '-')));
-        scroll.insertAdjacentHTML('beforeend', buildField('批次ID', String(selected.collectBatchId || '-')));
-        scroll.insertAdjacentHTML(
-          'beforeend',
-          buildField(
-            '快照地址',
-            selected.sourceSnapshotUrl
-              ? '<a href="' + escapeHtml(selected.sourceSnapshotUrl) + '" data-external-link="true">' + escapeHtml(selected.sourceSnapshotUrl) + '</a>'
-              : '-',
-          ),
-        );
-
-        root.appendChild(scroll);
-
-        root.querySelectorAll('[data-external-link="true"]').forEach((node) => {
-          node.addEventListener('click', (event) => {
-            event.preventDefault();
-            const target = event.currentTarget;
-            if (target instanceof HTMLAnchorElement && target.href) {
-              window.open(target.href, '_blank');
-            }
-          });
-        });
-      }
-
-      window.__COLLECTION_WORKSPACE_UPDATE__ = (nextState) => {
-        state.batch = nextState.batch;
-        state.records = Array.isArray(nextState.records) ? nextState.records : [];
-        state.selectedRecordId = nextState.selectedRecordId || state.records[0]?.id || 0;
-        if (pane === 'left') {
-          renderLeft();
-          return;
-        }
-        renderRight();
-      };
-
-      window.addEventListener('DOMContentLoaded', async () => {
-        try {
-          const nextState = await window.collectionWorkspace.getState();
-          window.__COLLECTION_WORKSPACE_UPDATE__(nextState);
-        } catch (error) {
-          root.innerHTML = '<div class="empty">采集工作台初始化失败，请稍后重试。</div>';
-          console.error(error);
-        }
-      });
-    </script>
-  </body>
-</html>`;
-}
-
 function buildPaneUrl(pane: "left" | "right") {
-  return `data:text/html;charset=UTF-8,${encodeURIComponent(buildShellHtml(pane))}`;
+  const webviewBaseUrl = process.env.WEBVIEW_URL;
+  if (!webviewBaseUrl) {
+    throw new Error("WEBVIEW_URL is not configured");
+  }
+
+  const route = pane === "left" ? LEFT_WORKSPACE_ROUTE : RIGHT_WORKSPACE_ROUTE;
+  return new URL(route, webviewBaseUrl).toString();
 }
 
 function createUtilityView(backgroundColor: string) {
@@ -847,7 +473,7 @@ export async function selectCollectionWorkspaceRecord(recordId: number) {
   return cloneState();
 }
 
-export async function navigateCollectionWorkspace(action: "back" | "forward" | "home") {
+export async function navigateCollectionWorkspace(action: "back" | "forward" | "home" | "refresh") {
   if (!workspaceViews || !workspaceWindow || workspaceWindow.isDestroyed()) {
     throw new Error("采集工作台尚未打开");
   }
@@ -877,6 +503,12 @@ export async function navigateCollectionWorkspace(action: "back" | "forward" | "
         await workspaceController.goHome();
       }
       await webContents.loadURL(PXX_HOME_URL);
+      break;
+    case "refresh":
+      if (workspaceController) {
+        await workspaceController.reload();
+      }
+      webContents.reload();
       break;
     default:
       throw new Error(`unsupported navigation action: ${action}`);

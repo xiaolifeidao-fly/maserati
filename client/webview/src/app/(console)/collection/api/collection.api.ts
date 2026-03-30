@@ -7,12 +7,14 @@ import {
   CollectBatchRecord,
   PxxCollectStartResult,
 } from "@eleapi/collect/collect.api";
+import { CollectionWorkspaceApi, CollectionWorkspaceState } from "@eleapi/collection-workspace/collection-workspace.api";
 import { type ShopRecord } from "@eleapi/commerce/commerce.api";
 import { getPage, instance, unwrapApiResponse, type ApiResponse } from "@/utils/axios";
 import { getCollectApi } from "@/utils/collect";
 import { getCommerceApi } from "@/utils/commerce";
 
-export type { CollectBatchListQuery, CollectBatchPayload, CollectBatchRecord, ShopRecord };
+export { CollectBatchRecord, CollectionWorkspaceState };
+export type { CollectBatchListQuery, CollectBatchPayload, ShopRecord };
 
 export class CollectRecordDetailRecord {
   id!: number;
@@ -80,6 +82,21 @@ export async function startPxxCollection(batchId: number) {
 
 export async function navigateCollectionWorkspace(action: CollectionWorkspaceNavigationAction) {
   return getCollectApi().navigateCollectionWorkspace(action);
+}
+
+function getCollectionWorkspaceApi() {
+  if (typeof window === "undefined") {
+    throw new Error("electron collection workspace api is not available");
+  }
+  return new CollectionWorkspaceApi();
+}
+
+export async function fetchCollectionWorkspaceState() {
+  return getCollectionWorkspaceApi().getState();
+}
+
+export async function selectCollectionWorkspaceRecord(recordId: number) {
+  return getCollectionWorkspaceApi().selectRecord(recordId);
 }
 
 export async function fetchCollectionShopOptions() {

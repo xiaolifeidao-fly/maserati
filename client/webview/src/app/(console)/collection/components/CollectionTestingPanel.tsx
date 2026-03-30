@@ -12,11 +12,13 @@ import {
   RightOutlined,
 } from "@ant-design/icons";
 import { Button, Empty, Input, Modal, Select, Space, Spin, Tag, message } from "antd";
-import type { CollectBatchRecord, CollectRecordDetailRecord } from "../api/collection.api";
+import { type CollectionWorkspaceState, CollectBatchRecord, type CollectRecordDetailRecord } from "../api/collection.api";
 import {
+  fetchCollectionWorkspaceState,
   fetchCollectBatchRecords,
   fetchCollectBatchTestingOptions,
   navigateCollectionWorkspace,
+  selectCollectionWorkspaceRecord,
   updateCollectRecord,
 } from "../api/collection.api";
 
@@ -49,9 +51,18 @@ interface CollectTestingBridge {
 
 type CollectTestingWindow = Window & {
   collectTestingBridge?: CollectTestingBridge;
+  __COLLECTION_WORKSPACE_UPDATE__?: (nextState: CollectionWorkspaceState) => void;
 };
 
 const DEFAULT_PAGE_SIZE = 12;
+
+function createEmptyWorkspaceState(): CollectionWorkspaceState {
+  return {
+    batch: new CollectBatchRecord(),
+    records: [],
+    selectedRecordId: 0,
+  };
+}
 
 function normalizeInjectedItems(items: InjectedCollectTestingItem[], fallbackBatchId: number) {
   const now = Date.now();
@@ -71,6 +82,227 @@ function normalizeInjectedItems(items: InjectedCollectTestingItem[], fallbackBat
     source: "injected",
     clientKey: `injected-${now}-${index}-${Math.random().toString(36).slice(2, 8)}`,
   }));
+}
+
+function useCollectionWorkspaceState() {
+  const [workspaceState, setWorkspaceState] = useState<CollectionWorkspaceState>(createEmptyWorkspaceState);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const collectionWindow = window as CollectTestingWindow;
+    const handleWorkspaceUpdate = (nextState: CollectionWorkspaceState) => {
+      setWorkspaceState({
+        batch: nextState.batch || new CollectBatchRecord(),
+        records: Array.isArray(nextState.records) ? nextState.records : [],
+        selectedRecordId: Number(nextState.selectedRecordId || nextState.records?.[0]?.id || 0),
+      });
+      setLoading(false);
+    };
+
+    collectionWindow.__COLLECTION_WORKSPACE_UPDATE__ = handleWorkspaceUpdate;
+
+    void (async () => {
+      try {
+        const nextState = await fetchCollectionWorkspaceState();
+        handleWorkspaceUpdate(nextState);
+      } catch (error) {
+        setLoading(false);
+        message.error(error instanceof Error ? error.message : "采集工作台状态加载失败");
+      }
+    })();
+
+    return () => {
+      if (collectionWindow.__COLLECTION_WORKSPACE_UPDATE__ === handleWorkspaceUpdate) {
+        delete collectionWindow.__COLLECTION_WORKSPACE_UPDATE__;
+      }
+    };
+  }, []);
+
+  return { workspaceState, loading };
+}
+
+export function CollectionWorkspaceLeftPanel() {
+  const { workspaceState, loading } = useCollectionWorkspaceState();
+  const [navigatingAction, setNavigatingAction] = useState<string>("");
+
+  const handleWorkspaceNavigation = async (action: "back" | "forward" | "home" | "refresh") => {
+    setNavigatingAction(action);
+    try {
+      await navigateCollectionWorkspace(action);
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "采集工作台导航失败");
+    } finally {
+      setNavigatingAction("");
+    }
+  };
+
+  const handleSelectRecord = async (recordId: number) => {
+    try {
+      await selectCollectionWorkspaceRecord(recordId);
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "切换采集商品失败");
+    }
+  };
+
+  return (
+    <section className="manager-data-card" style={{ minHeight: "100%", display: "flex", flexDirection: "column" }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 16, minHeight: 0, flex: 1 }}>
+        <div>
+          <div className="manager-section-label">采集批次</div>
+          <h3 style={{ margin: "10px 0 6px", color: "var(--manager-text)" }}>
+            {workspaceState.batch?.name || `批次 #${workspaceState.batch?.id || 0}`}
+          </h3>
+          <div className="manager-muted">
+            批次ID：{workspaceState.batch?.id || 0} ｜ 已加载 {workspaceState.records.length} 条商品
+          </div>
+        </div>
+
+        <Space wrap size={10}>
+          <Button icon={<LeftOutlined />} loading={navigatingAction === "back"} onClick={() => void handleWorkspaceNavigation("back")}>
+            后退
+          </Button>
+          <Button icon={<RightOutlined />} loading={navigatingAction === "forward"} onClick={() => void handleWorkspaceNavigation("forward")}>
+            前进
+          </Button>
+          <Button icon={<HomeOutlined />} loading={navigatingAction === "home"} onClick={() => void handleWorkspaceNavigation("home")}>
+            首页
+          </Button>
+          <Button icon={<ReloadOutlined />} loading={navigatingAction === "refresh"} onClick={() => void handleWorkspaceNavigation("refresh")}>
+            刷新
+          </Button>
+        </Space>
+
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+          <div style={{ fontWeight: 700, color: "var(--manager-text)" }}>采集列表</div>
+          <div className="manager-muted">点击左侧商品切换右侧详情</div>
+        </div>
+
+        <div style={{ minHeight: 0, flex: 1, overflowY: "auto", paddingRight: 6, display: "grid", gap: 12 }}>
+          {loading ? (
+            <div style={{ display: "grid", placeItems: "center", minHeight: 200 }}>
+              <Spin />
+            </div>
+          ) : null}
+
+          {!loading && !workspaceState.records.length ? <Empty description="当前批次下暂无采集商品" /> : null}
+
+          {!loading
+            ? workspaceState.records.map((record) => (
+                <button
+                  key={record.id || record.sourceProductId || record.productId}
+                  type="button"
+                  onClick={() => void handleSelectRecord(record.id)}
+                  style={{
+                    width: "100%",
+                    textAlign: "left",
+                    cursor: "pointer",
+                    borderRadius: 18,
+                    padding: 16,
+                    border:
+                      record.id === workspaceState.selectedRecordId
+                        ? "1px solid rgba(59,130,246,0.72)"
+                        : "1px solid rgba(170,192,238,0.22)",
+                    background:
+                      record.id === workspaceState.selectedRecordId
+                        ? "linear-gradient(135deg, rgba(219,234,254,0.88), rgba(255,255,255,0.98))"
+                        : "linear-gradient(135deg, rgba(248,250,252,0.94), rgba(255,255,255,0.98))",
+                    boxShadow: "0 10px 24px rgba(15, 23, 42, 0.05)",
+                  }}
+                >
+                  <div style={{ color: "var(--manager-text)", fontWeight: 700, lineHeight: 1.5 }}>
+                    {record.productName || `商品 #${record.productId || record.id}`}
+                  </div>
+                  <div style={{ marginTop: 8, color: "var(--manager-text-faint)" }}>商品ID：{record.productId || "-"}</div>
+                  <div style={{ marginTop: 4, color: "var(--manager-text-faint)" }}>来源ID：{record.sourceProductId || "-"}</div>
+                </button>
+              ))
+            : null}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+export function CollectionWorkspaceRightPanel() {
+  const { workspaceState, loading } = useCollectionWorkspaceState();
+  const selectedRecord = useMemo(() => {
+    return workspaceState.records.find((item) => item.id === workspaceState.selectedRecordId) || null;
+  }, [workspaceState.records, workspaceState.selectedRecordId]);
+
+  return (
+    <section className="manager-data-card" style={{ minHeight: "100%", display: "flex", flexDirection: "column" }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 16, minHeight: 0, flex: 1 }}>
+        <div>
+          <div className="manager-section-label">商品详情</div>
+          <h3 style={{ margin: "10px 0 6px", color: "var(--manager-text)" }}>右侧详情面板</h3>
+          <div className="manager-muted">右侧详情区和中间页面独立展示，中间导航不会清空这里的选中态。</div>
+        </div>
+
+        {loading ? (
+          <div style={{ display: "grid", placeItems: "center", minHeight: 240 }}>
+            <Spin />
+          </div>
+        ) : null}
+
+        {!loading && !selectedRecord ? <Empty description="当前还没有选中的采集商品" /> : null}
+
+        {!loading && selectedRecord ? (
+          <div style={{ display: "grid", gap: 14 }}>
+            <div
+              style={{
+                borderRadius: 20,
+                border: "1px solid rgba(251,191,36,0.24)",
+                background: "linear-gradient(135deg, rgba(255,247,237,0.96), rgba(255,255,255,0.98))",
+                padding: 18,
+              }}
+            >
+              <div style={{ color: "var(--manager-text)", fontSize: 18, fontWeight: 700, lineHeight: 1.5 }}>
+                {selectedRecord.productName || `商品 #${selectedRecord.productId || selectedRecord.id}`}
+              </div>
+              <Space wrap size={8} style={{ marginTop: 12 }}>
+                <Tag color="blue">{selectedRecord.status || "PENDING"}</Tag>
+                <Tag color={selectedRecord.isFavorite ? "gold" : "default"}>
+                  {selectedRecord.isFavorite ? "已收藏" : "未收藏"}
+                </Tag>
+              </Space>
+            </div>
+
+            <div style={{ borderRadius: 18, border: "1px solid rgba(170,192,238,0.22)", padding: 16, background: "#fff" }}>
+              <div className="manager-section-label">商品ID</div>
+              <div style={{ marginTop: 8, color: "var(--manager-text)" }}>{selectedRecord.productId || "-"}</div>
+            </div>
+
+            <div style={{ borderRadius: 18, border: "1px solid rgba(170,192,238,0.22)", padding: 16, background: "#fff" }}>
+              <div className="manager-section-label">来源商品ID</div>
+              <div style={{ marginTop: 8, color: "var(--manager-text)" }}>{selectedRecord.sourceProductId || "-"}</div>
+            </div>
+
+            <div style={{ borderRadius: 18, border: "1px solid rgba(170,192,238,0.22)", padding: 16, background: "#fff" }}>
+              <div className="manager-section-label">批次ID</div>
+              <div style={{ marginTop: 8, color: "var(--manager-text)" }}>{selectedRecord.collectBatchId || "-"}</div>
+            </div>
+
+            <div style={{ borderRadius: 18, border: "1px solid rgba(170,192,238,0.22)", padding: 16, background: "#fff" }}>
+              <div className="manager-section-label">快照地址</div>
+              <div style={{ marginTop: 8, wordBreak: "break-all" }}>
+                {selectedRecord.sourceSnapshotUrl ? (
+                  <a href={selectedRecord.sourceSnapshotUrl} target="_blank" rel="noreferrer">
+                    {selectedRecord.sourceSnapshotUrl}
+                  </a>
+                ) : (
+                  <span style={{ color: "var(--manager-text-faint)" }}>暂无</span>
+                )}
+              </div>
+            </div>
+          </div>
+        ) : null}
+      </div>
+    </section>
+  );
 }
 
 export function CollectionTestingPanel() {
@@ -251,7 +483,7 @@ export function CollectionTestingPanel() {
     }
   };
 
-  const handleWorkspaceNavigation = async (action: "back" | "forward" | "home") => {
+  const handleWorkspaceNavigation = async (action: "back" | "forward" | "home" | "refresh") => {
     setNavigatingAction(action);
     try {
       await navigateCollectionWorkspace(action);
@@ -298,6 +530,13 @@ export function CollectionTestingPanel() {
             onClick={() => void handleWorkspaceNavigation("home")}
           >
             首页
+          </Button>
+          <Button
+            icon={<ReloadOutlined />}
+            loading={navigatingAction === "refresh"}
+            onClick={() => void handleWorkspaceNavigation("refresh")}
+          >
+            刷新
           </Button>
         </Space>
       </div>

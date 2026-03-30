@@ -58,7 +58,7 @@ export class PxxCollectStartResult {
   message = "";
 }
 
-export type CollectionWorkspaceNavigationAction = "back" | "forward" | "home";
+export type CollectionWorkspaceNavigationAction = "back" | "forward" | "home" | "refresh";
 
 export class CollectApi extends ElectronApi {
   getApiName(): string {

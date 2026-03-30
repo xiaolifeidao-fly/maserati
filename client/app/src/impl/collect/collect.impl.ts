@@ -119,6 +119,13 @@ export class CollectImpl extends CollectApi {
           await openedPage.goto("https://mobile.yangkeduo.com/", { waitUntil: "domcontentloaded", timeout: 30000 });
           return openedPage.url() || "https://mobile.yangkeduo.com/";
         },
+        async reload() {
+          if (openedPage.isClosed()) {
+            return "https://mobile.yangkeduo.com/";
+          }
+          await openedPage.reload({ waitUntil: "domcontentloaded", timeout: 30000 });
+          return openedPage.url() || "https://mobile.yangkeduo.com/";
+        },
         async readRawData() {
           if (openedPage.isClosed()) {
             return null;
