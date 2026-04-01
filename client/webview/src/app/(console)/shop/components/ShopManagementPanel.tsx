@@ -13,6 +13,7 @@ import {
   SearchOutlined,
 } from "@ant-design/icons";
 import {
+  Alert,
   Button,
   Form,
   Input,
@@ -70,8 +71,20 @@ export function ShopManagementPanel() {
   const router = useRouter();
   const [shopForm] = Form.useForm<ShopFormValues>();
   const [authorizeForm] = Form.useForm<AuthorizeFormValues>();
-  const { shops, total, query, loading, submitting, refresh, saveShop, bindActivationCode, openShopLogin, removeShop } =
-    useShopManagement();
+  const {
+    shops,
+    total,
+    query,
+    loading,
+    submitting,
+    refresh,
+    saveShop,
+    bindActivationCode,
+    openShopLogin,
+    removeShop,
+    loginNotice,
+    setLoginNotice,
+  } = useShopManagement();
   const [filters, setFilters] = useState({
     name: "",
     businessId: "",
@@ -276,6 +289,18 @@ export function ShopManagementPanel() {
   return (
     <div className="manager-page-stack">
       <section className="manager-data-card">
+        {loginNotice ? (
+          <Alert
+            style={{ marginBottom: 16 }}
+            type={loginNotice.type}
+            showIcon
+            closable
+            message={loginNotice.title}
+            description={loginNotice.description}
+            onClose={() => setLoginNotice(null)}
+          />
+        ) : null}
+
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap", justifyContent: "space-between" }}>
           <Space wrap size={12}>
             <Input

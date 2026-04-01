@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import { ManagerShell } from "@/components/manager-shell/ManagerShell";
-import { isAuthenticated } from "@/utils/auth";
+import { getAuthState, hasValidSession } from "@/utils/auth";
 
 export default function ConsoleLayout({
   children,
@@ -17,11 +17,17 @@ export default function ConsoleLayout({
 
   useEffect(() => {
     void (async () => {
-      if (!(await isAuthenticated())) {
+      const session = await getAuthState();
+      if (!session.authenticated) {
         router.replace("/login");
         return;
       }
+
       setReady(true);
+
+      if (!(await hasValidSession())) {
+        router.replace("/login");
+      }
     })();
   }, [router]);
 

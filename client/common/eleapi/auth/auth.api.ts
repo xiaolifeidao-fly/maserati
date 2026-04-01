@@ -47,4 +47,9 @@ export class AuthApi extends ElectronApi {
   async getToken(): Promise<string> {
     return this.invokeApi("getToken");
   }
+
+  @InvokeType(Protocols.INVOKE)
+  async validateStoredSession(): Promise<AuthSession> {
+    return this.invokeApi("validateStoredSession");
+  }
 }

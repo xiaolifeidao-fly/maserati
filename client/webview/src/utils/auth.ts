@@ -8,6 +8,7 @@ type AuthBridge = {
   logout?: (...args: unknown[]) => Promise<unknown>;
   getAuthState?: (...args: unknown[]) => Promise<unknown>;
   getToken?: (...args: unknown[]) => Promise<unknown>;
+  validateStoredSession?: (...args: unknown[]) => Promise<unknown>;
 };
 
 function getWindowBridgeState() {
@@ -49,7 +50,8 @@ function hasAuthBridge(authBridge?: AuthBridge) {
       typeof authBridge.register === "function" &&
       typeof authBridge.logout === "function" &&
       typeof authBridge.getAuthState === "function" &&
-      typeof authBridge.getToken === "function",
+      typeof authBridge.getToken === "function" &&
+      typeof authBridge.validateStoredSession === "function",
   );
 }
 
@@ -139,5 +141,18 @@ export async function getAuthToken() {
 
 export async function isAuthenticated() {
   const session = await getAuthState();
+  return Boolean(session.authenticated);
+}
+
+export async function validateStoredSession(): Promise<AuthSession> {
+  const authApi = await createAuthApi();
+  if (!authApi) {
+    return { authenticated: false };
+  }
+  return authApi.validateStoredSession();
+}
+
+export async function hasValidSession() {
+  const session = await validateStoredSession();
   return Boolean(session.authenticated);
 }

@@ -36,9 +36,10 @@ export async function requestBackend<T>(
 ): Promise<T> {
   const session = readAuthSession();
   const token = normalizeValue(options?.token) || normalizeValue(session.token);
+  const url = joinUrl(resolveBackendBaseUrl(), path);
   const response = await axios.request<BackendResponse<T>>({
     method,
-    url: joinUrl(resolveBackendBaseUrl(), path),
+    url,
     data: options?.data,
     params: options?.params,
     headers: token ? { token } : undefined,

@@ -1,17 +1,23 @@
 import path from "path";
-import { BrowserView, BrowserWindow, shell, screen as electronScreen } from "electron";
+import fs from "fs";
+import { BrowserView, BrowserWindow, shell, screen as electronScreen, app } from "electron";
 import type { CookiesGetFilter, CookiesSetDetails } from "electron";
 import log from "electron-log";
 import { mainWindow } from "@src/kernel/windows";
 import {
   CollectionWorkspaceState,
+  type CollectedProductData,
 } from "@eleapi/collection-workspace/collection-workspace.api";
 import { CollectBatchRecord, CollectRecordPreview } from "@eleapi/collect/collect.api";
+import { type CollectSourceType } from "@eleapi/collect/collect.platform";
+import { getCollectionPlatformDriver } from "./platforms/registry";
 import { requestBackend } from "@src/impl/shared/backend";
+import { setGlobal, getGlobal } from "../../../common/utils/store/electron";
 
 interface OpenCollectionWorkspaceOptions {
   batch: CollectBatchRecord;
   records: CollectRecordPreview[];
+  sourceType: CollectSourceType;
   initialUrl: string;
   cookies?: CookiesSetDetails[];
 }
@@ -22,13 +28,69 @@ interface CollectionWorkspaceViews {
   right: BrowserView;
 }
 
-const LEFT_RATIO = 0.28;
-const CENTER_RATIO = 0.44;
-const RIGHT_RATIO = 0.28;
+const LEFT_RATIO = 0.2;
+const CENTER_RATIO = 0.4;
+const RIGHT_RATIO = 0.4;
 const MIN_PANEL_WIDTH = 280;
-const PXX_HOME_URL = "https://mobile.yangkeduo.com/";
 const LEFT_WORKSPACE_ROUTE = "/collection-workspace/left";
 const RIGHT_WORKSPACE_ROUTE = "/collection-workspace/right";
+
+function getCollectedHtmlDir() {
+  return path.join(app.getPath("userData"), "collected-html");
+}
+
+function getCollectedHtmlPath(sourceProductId: string, sourceType: CollectSourceType = workspaceState.sourceType || "unknown") {
+  return path.join(getCollectedHtmlDir(), `${sourceType}_${sourceProductId}.html`);
+}
+
+function getCollectedStoreKey(sourceProductId: string, sourceType: CollectSourceType = workspaceState.sourceType || "unknown") {
+  return `${getCollectionPlatformDriver(sourceType).storeKeyPrefix}_${sourceProductId}`;
+}
+
+function getCollectedRawDataStoreKey(sourceProductId: string, sourceType: CollectSourceType = workspaceState.sourceType || "unknown") {
+  return `${getCollectionPlatformDriver(sourceType).storeKeyPrefix}_rawdata_${sourceProductId}`;
+}
+
+function saveCollectedProductToStore(sourceProductId: string, data: CollectedProductData, sourceType: CollectSourceType) {
+  try {
+    setGlobal(getCollectedStoreKey(sourceProductId, sourceType), data);
+    log.info("[collection workspace] saved product data to store", { sourceProductId, sourceType });
+  } catch (error) {
+    log.warn("[collection workspace] failed to save product data to store", { sourceProductId, sourceType, error });
+  }
+}
+
+function saveRawDataToStore(sourceProductId: string, rawData: unknown, sourceType: CollectSourceType) {
+  try {
+    setGlobal(getCollectedRawDataStoreKey(sourceProductId, sourceType), rawData);
+    log.info("[collection workspace] saved rawData to store", { sourceProductId, sourceType });
+  } catch (error) {
+    log.warn("[collection workspace] failed to save rawData to store", { sourceProductId, sourceType, error });
+  }
+}
+
+export function getCollectedProductStoreData(sourceProductId: string, sourceType: CollectSourceType = workspaceState.sourceType || "unknown"): CollectedProductData | null {
+  try {
+    const data = getGlobal(getCollectedStoreKey(sourceProductId, sourceType));
+    return data && typeof data === "object" ? (data as CollectedProductData) : null;
+  } catch (error) {
+    log.warn("[collection workspace] failed to read product data from store", { sourceProductId, sourceType, error });
+    return null;
+  }
+}
+
+export function getCollectedProductRawData(sourceProductId: string, sourceType: CollectSourceType = workspaceState.sourceType || "unknown"): unknown | null {
+  try {
+    return getGlobal(getCollectedRawDataStoreKey(sourceProductId, sourceType)) ?? null;
+  } catch (error) {
+    log.warn("[collection workspace] failed to read rawData from store", { sourceProductId, sourceType, error });
+    return null;
+  }
+}
+
+export function hasCollectedHtml(sourceProductId: string, sourceType: CollectSourceType = workspaceState.sourceType || "unknown"): boolean {
+  return fs.existsSync(getCollectedHtmlPath(sourceProductId, sourceType));
+}
 
 let workspaceWindow: BrowserWindow | null = null;
 let workspaceViews: CollectionWorkspaceViews | null = null;
@@ -37,7 +99,7 @@ let isScrapingRecord = false;
 let lastScrapedSourceProductId = "";
 let centerDebuggerBoundViewId = 0;
 const pendingGoodsResponses = new Map<string, { url: string; resourceType: string; mimeType: string }>();
-const capturedGoodsSummaryById = new Map<string, ReturnType<typeof parsePxxGoodsSummary>>();
+const capturedGoodsSummaryById = new Map<string, { productName: string; sourceProductId: string; status: string }>();
 
 function getPreloadPath() {
   return path.join(__dirname, 'preload.js');
@@ -48,17 +110,22 @@ function cloneState(): CollectionWorkspaceState {
     batch: Object.assign(new CollectBatchRecord(), workspaceState.batch),
     records: workspaceState.records.map((record) => Object.assign(new CollectRecordPreview(), record)),
     selectedRecordId: workspaceState.selectedRecordId,
+    sourceType: workspaceState.sourceType || "unknown",
   };
 }
 
-function buildPaneUrl(pane: "left" | "right") {
+function buildPaneUrl(pane: "left" | "right", batchId?: number) {
   const webviewBaseUrl = process.env.WEBVIEW_URL;
   if (!webviewBaseUrl) {
     throw new Error("WEBVIEW_URL is not configured");
   }
 
   const route = pane === "left" ? LEFT_WORKSPACE_ROUTE : RIGHT_WORKSPACE_ROUTE;
-  return new URL(route, webviewBaseUrl).toString();
+  const url = new URL(route, webviewBaseUrl);
+  if (Number(batchId) > 0) {
+    url.searchParams.set("batchId", String(batchId));
+  }
+  return url.toString();
 }
 
 function createUtilityView(backgroundColor: string) {
@@ -69,6 +136,8 @@ function createUtilityView(backgroundColor: string) {
       sandbox: false,
       nodeIntegration: false,
       webSecurity: true,
+      webviewTag: true, // 启用 webview 标签
+      // devTools: true,
     },
   });
   view.setBackgroundColor(backgroundColor);
@@ -158,149 +227,23 @@ async function applyCookies(view: BrowserView, cookies: CookiesSetDetails[]) {
   }
 }
 
-function extractGoodsIdFromUrl(url: string) {
-  try {
-    const parsed = new URL(url);
-    return parsed.searchParams.get("goods_id")?.trim() || "";
-  } catch (error) {
-    return "";
-  }
+function getCurrentDriver() {
+  return getCollectionPlatformDriver(workspaceState.sourceType);
 }
 
 function normalizeWorkspaceUrl(url: string | undefined) {
   const normalized = String(url || "").trim();
+  const homeUrl = getCurrentDriver().homeUrl;
   if (!normalized || normalized === "about:blank") {
-    return PXX_HOME_URL;
+    return homeUrl;
   }
 
   try {
     return new URL(normalized).toString();
   } catch (error) {
     log.warn("[collection workspace] invalid initial url, fallback to home", { url: normalized, error });
-    return PXX_HOME_URL;
+    return homeUrl;
   }
-}
-
-function extractJsonObject(input: string, startIndex: number): string | null {
-  let depth = 0;
-  let inString = false;
-  let escape = false;
-
-  for (let index = startIndex; index < input.length; index += 1) {
-    const char = input[index];
-
-    if (escape) {
-      escape = false;
-      continue;
-    }
-
-    if (char === "\\") {
-      escape = true;
-      continue;
-    }
-
-    if (char === "\"") {
-      inString = !inString;
-      continue;
-    }
-
-    if (inString) {
-      continue;
-    }
-
-    if (char === "{") {
-      depth += 1;
-    } else if (char === "}") {
-      depth -= 1;
-      if (depth === 0) {
-        return input.slice(startIndex, index + 1);
-      }
-    }
-  }
-
-  return null;
-}
-
-function extractRawDataFromHtml(html: string): unknown {
-  const marker = "window.rawData";
-  const markerIndex = html.indexOf(marker);
-  if (markerIndex < 0) {
-    return null;
-  }
-
-  const braceIndex = html.indexOf("{", markerIndex);
-  if (braceIndex < 0) {
-    return null;
-  }
-
-  const jsonText = extractJsonObject(html, braceIndex);
-  if (!jsonText) {
-    return null;
-  }
-
-  try {
-    return JSON.parse(jsonText);
-  } catch (error) {
-    log.warn("[collection workspace] failed to parse rawData json from html", error);
-    return null;
-  }
-}
-
-function parsePxxGoodsSummary(rawData: unknown) {
-  if (!rawData || typeof rawData !== "object") {
-    return null;
-  }
-
-  const container = rawData as Record<string, unknown>;
-  const initDataObj = (container.store as { initDataObj?: Record<string, unknown> } | undefined)?.initDataObj;
-  const goods = initDataObj?.goods as Record<string, unknown> | undefined;
-  if (!goods) {
-    return null;
-  }
-
-  const sourceProductId = String(goods.goodsID || "").trim();
-  const productName = String(goods.goodsName || "").trim();
-  if (!sourceProductId || !productName) {
-    return null;
-  }
-
-  const statusValue = Number(goods.status || 0);
-  const statusExplain = String(goods.statusExplain || "").trim();
-
-  return {
-    productName,
-    sourceProductId,
-    productId: Number(sourceProductId) || 0,
-    status: statusValue === 1 ? "COLLECTED" : (statusExplain || "UNAVAILABLE"),
-  };
-}
-
-function parsePxxGoodsSummaryFromResponse(url: string, mimeType: string, body: string) {
-  const sourceProductId = extractGoodsIdFromUrl(url);
-  if (!sourceProductId || !body.trim()) {
-    return null;
-  }
-
-  const normalizedMimeType = String(mimeType || "").toLowerCase();
-
-  if (normalizedMimeType.includes("html") || body.includes("window.rawData")) {
-    return parsePxxGoodsSummary(extractRawDataFromHtml(body));
-  }
-
-  if (normalizedMimeType.includes("json")) {
-    try {
-      const parsed = JSON.parse(body);
-      return (
-        parsePxxGoodsSummary(parsed)
-        || parsePxxGoodsSummary((parsed as { data?: unknown })?.data)
-        || parsePxxGoodsSummary((parsed as { result?: unknown })?.result)
-      );
-    } catch (error) {
-      log.warn("[collection workspace] failed to parse goods json response", { url, error });
-    }
-  }
-
-  return null;
 }
 
 async function waitForCapturedGoodsSummary(sourceProductId: string, timeoutMs = 10000) {
@@ -325,7 +268,7 @@ function isGoodsResponseCandidate(url: string, resourceType: string) {
     return false;
   }
 
-  return Boolean(extractGoodsIdFromUrl(url));
+  return Boolean(getCurrentDriver().extractSourceProductId(url));
 }
 
 async function handleCenterDebuggerMessage(view: BrowserView, method: string, params: any) {
@@ -372,16 +315,46 @@ async function handleCenterDebuggerMessage(view: BrowserView, method: string, pa
     };
     const rawBody = String(result?.body || "");
     const body = result?.base64Encoded ? Buffer.from(rawBody, "base64").toString("utf8") : rawBody;
-    const parsed = parsePxxGoodsSummaryFromResponse(meta.url, meta.mimeType, body);
+    const parsed = getCurrentDriver().parseGoodsSummaryFromResponse(meta.url, meta.mimeType, body);
     if (!parsed?.sourceProductId) {
       return;
     }
 
     capturedGoodsSummaryById.set(parsed.sourceProductId, parsed);
-    const currentUrl = view.webContents.getURL();
-    if (extractGoodsIdFromUrl(currentUrl) === parsed.sourceProductId) {
-      void collectCurrentGoods(currentUrl);
+
+    // Save parsed goods data to electron-store
+    saveCollectedProductToStore(parsed.sourceProductId, {
+      sourceProductId: parsed.sourceProductId,
+      productName: parsed.productName,
+      status: parsed.status,
+      sourceUrl: meta.url,
+      capturedAt: new Date().toISOString(),
+    }, workspaceState.sourceType);
+
+    if (meta.resourceType === "Document" && body.trim()) {
+      const dir = getCollectedHtmlDir();
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      fs.writeFile(getCollectedHtmlPath(parsed.sourceProductId, workspaceState.sourceType), body, "utf8", (err) => {
+        if (err) {
+          log.warn("[collection workspace] failed to save product html to file", {
+            sourceProductId: parsed.sourceProductId,
+            error: err,
+          });
+        } else {
+          log.info("[collection workspace] saved product html to file", { sourceProductId: parsed.sourceProductId });
+        }
+      });
+      const rawData = getCurrentDriver().extractRawDataFromResponse(meta.url, meta.mimeType, body);
+      if (rawData) {
+        saveRawDataToStore(parsed.sourceProductId, rawData, workspaceState.sourceType);
+      }
     }
+
+    // Always trigger collection — covers cases where did-navigate didn't fire (PDD SPA in-page nav).
+    // If collectCurrentGoods is already running (isScrapingRecord=true), the call returns immediately.
+    void collectCurrentGoods(meta.url);
   } catch (error) {
     log.warn("[collection workspace] failed to read center response body", { url: meta.url, error });
   }
@@ -428,10 +401,19 @@ async function pushRecordToTestingBridge(record: CollectRecordPreview) {
 
 async function upsertCollectRecord(record: CollectRecordPreview) {
   const batchId = Number(record.collectBatchId || 0);
+  log.info("[collection workspace] upsertCollectRecord start", {
+    batchId,
+    sourceProductId: record.sourceProductId,
+    productName: record.productName,
+    status: record.status,
+  });
+
   if (batchId <= 0) {
+    log.warn("[collection workspace] upsertCollectRecord skipped: invalid batchId", { batchId });
     return record;
   }
 
+  log.info("[collection workspace] fetching existing records for batch", { batchId });
   const existingPage = await requestBackend<{ total: number; data: CollectRecordPreview[] }>(
     "GET",
     `/collect-batches/${batchId}/records`,
@@ -442,15 +424,23 @@ async function upsertCollectRecord(record: CollectRecordPreview) {
       },
     },
   );
+  log.info("[collection workspace] existing records fetched", {
+    batchId,
+    total: existingPage?.total,
+    count: Array.isArray(existingPage?.data) ? existingPage.data.length : 0,
+  });
 
   const matchedRecord = (Array.isArray(existingPage.data) ? existingPage.data : []).find((item) => {
     return String(item.sourceProductId || "").trim() === String(record.sourceProductId || "").trim();
   });
 
   if (matchedRecord?.id) {
+    log.info("[collection workspace] updating existing record", {
+      recordId: matchedRecord.id,
+      sourceProductId: record.sourceProductId,
+    });
     return requestBackend<CollectRecordPreview>("PUT", `/collect-records/${matchedRecord.id}`, {
       data: {
-        productId: record.productId,
         productName: record.productName,
         sourceProductId: record.sourceProductId,
         sourceSnapshotUrl: record.sourceSnapshotUrl,
@@ -460,11 +450,15 @@ async function upsertCollectRecord(record: CollectRecordPreview) {
     });
   }
 
+  log.info("[collection workspace] creating new record", {
+    sourceProductId: record.sourceProductId,
+    collectBatchId: record.collectBatchId,
+    appUserId: record.appUserId,
+  });
   const createdRecord = await requestBackend<CollectRecordPreview>("POST", "/collect-records", {
     data: {
       appUserId: record.appUserId,
       collectBatchId: record.collectBatchId,
-      productId: record.productId,
       productName: record.productName,
       sourceProductId: record.sourceProductId,
       sourceSnapshotUrl: record.sourceSnapshotUrl,
@@ -472,9 +466,14 @@ async function upsertCollectRecord(record: CollectRecordPreview) {
       status: record.status,
     },
   });
+  log.info("[collection workspace] record created", {
+    recordId: (createdRecord as CollectRecordPreview)?.id,
+    sourceProductId: record.sourceProductId,
+  });
 
   const nextCollectedCount = Math.max(Number(workspaceState.batch.collectedCount || 0), workspaceState.records.length + 1);
   try {
+    log.info("[collection workspace] updating batch collect count", { batchId, nextCollectedCount });
     const updatedBatch = await requestBackend<CollectBatchRecord>("PUT", `/collect-batches/${batchId}`, {
       data: {
         collectedCount: nextCollectedCount,
@@ -491,15 +490,30 @@ async function upsertCollectRecord(record: CollectRecordPreview) {
 
 async function collectCurrentGoods(url: string) {
   if (isScrapingRecord) {
+    log.info("[collection workspace] collectCurrentGoods skipped: already scraping", { url });
     return;
   }
 
-  const sourceProductId = extractGoodsIdFromUrl(url);
-  if (!sourceProductId || lastScrapedSourceProductId === sourceProductId) {
+  const sourceProductId = getCurrentDriver().extractSourceProductId(url);
+  if (!sourceProductId) {
+    log.info("[collection workspace] collectCurrentGoods skipped: no goods_id in url", { url });
     return;
   }
+
+  if (lastScrapedSourceProductId === sourceProductId) {
+    log.info("[collection workspace] collectCurrentGoods skipped: already scraped this product", { sourceProductId });
+    return;
+  }
+
+  log.info("[collection workspace] collectCurrentGoods start", {
+    url,
+    sourceProductId,
+    batchId: workspaceState.batch?.id,
+    appUserId: workspaceState.batch?.appUserId,
+  });
 
   isScrapingRecord = true;
+  const tempId = -(Date.now());
   try {
     const parsed = await waitForCapturedGoodsSummary(sourceProductId);
     if (!parsed) {
@@ -510,10 +524,35 @@ async function collectCurrentGoods(url: string) {
       return;
     }
 
+    log.info("[collection workspace] goods summary captured, pushing loading placeholder to left panel", {
+      sourceProductId: parsed.sourceProductId,
+      productName: parsed.productName,
+      status: parsed.status,
+    });
+
+    // Step 1: Immediately push loading placeholder to left panel
+    const placeholderRecord = Object.assign(new CollectRecordPreview(), {
+      id: tempId,
+      appUserId: workspaceState.batch.appUserId,
+      collectBatchId: workspaceState.batch.id,
+      productName: parsed.productName,
+      sourceProductId: parsed.sourceProductId,
+      sourceSnapshotUrl: url,
+      isFavorite: false,
+      status: parsed.status,
+      isLoading: true,
+    });
+    workspaceState.records = [
+      placeholderRecord,
+      ...workspaceState.records.filter((item) => String(item.sourceProductId) !== String(parsed.sourceProductId)),
+    ];
+    await renderSidePanes();
+
+    // Step 2: Call server API
+    log.info("[collection workspace] upserting record via server", { sourceProductId: parsed.sourceProductId });
     const savedRecord = await upsertCollectRecord(Object.assign(new CollectRecordPreview(), {
       appUserId: workspaceState.batch.appUserId,
       collectBatchId: workspaceState.batch.id,
-      productId: parsed.productId,
       productName: parsed.productName,
       sourceProductId: parsed.sourceProductId,
       sourceSnapshotUrl: url,
@@ -521,16 +560,20 @@ async function collectCurrentGoods(url: string) {
       status: parsed.status,
     }));
 
+    // Step 3: Replace placeholder with real record
     const normalizedRecord = Object.assign(new CollectRecordPreview(), savedRecord);
     workspaceState.records = [
       normalizedRecord,
-      ...workspaceState.records.filter((item) => item.id !== normalizedRecord.id),
+      ...workspaceState.records.filter((item) => item.id !== tempId && item.id !== normalizedRecord.id),
     ];
     workspaceState.selectedRecordId = normalizedRecord.id || workspaceState.selectedRecordId;
     lastScrapedSourceProductId = parsed.sourceProductId;
     await renderSidePanes();
     await pushRecordToTestingBridge(normalizedRecord);
   } catch (error) {
+    // Clean up placeholder on error
+    workspaceState.records = workspaceState.records.filter((item) => item.id !== tempId);
+    await renderSidePanes();
     log.warn("[collection workspace] failed to collect current goods", error);
   } finally {
     isScrapingRecord = false;
@@ -542,7 +585,7 @@ async function handleCenterNavigation(url: string) {
     return;
   }
 
-  if (extractGoodsIdFromUrl(url)) {
+  if (getCurrentDriver().extractSourceProductId(url)) {
     await collectCurrentGoods(url);
   }
 }
@@ -580,6 +623,7 @@ export async function openCollectionWorkspace(options: OpenCollectionWorkspaceOp
     batch: Object.assign(new CollectBatchRecord(), options.batch),
     records: (options.records || []).map((record) => Object.assign(new CollectRecordPreview(), record)),
     selectedRecordId: options.records[0]?.id || 0,
+    sourceType: options.sourceType || "unknown",
   };
 
   if (!workspaceWindow || workspaceWindow.isDestroyed()) {
@@ -643,6 +687,7 @@ export async function openCollectionWorkspace(options: OpenCollectionWorkspaceOp
 
     await Promise.all([
       left.webContents.loadURL(buildPaneUrl("left")),
+      center.webContents.loadURL(getCollectionPlatformDriver(options.sourceType).homeUrl),
       right.webContents.loadURL(buildPaneUrl("right")),
     ]);
   } else {
@@ -652,6 +697,20 @@ export async function openCollectionWorkspace(options: OpenCollectionWorkspaceOp
 
   if (!workspaceViews || !workspaceWindow) {
     throw new Error("采集工作台初始化失败");
+  }
+
+  const leftPaneUrl = buildPaneUrl("left", options.batch.id);
+  const rightPaneUrl = buildPaneUrl("right", options.batch.id);
+  const paneLoads: Promise<unknown>[] = [];
+
+  if (workspaceViews.left.webContents.getURL() !== leftPaneUrl) {
+    paneLoads.push(workspaceViews.left.webContents.loadURL(leftPaneUrl));
+  }
+  if (workspaceViews.right.webContents.getURL() !== rightPaneUrl) {
+    paneLoads.push(workspaceViews.right.webContents.loadURL(rightPaneUrl));
+  }
+  if (paneLoads.length > 0) {
+    await Promise.all(paneLoads);
   }
 
   try {
@@ -684,7 +743,67 @@ export async function selectCollectionWorkspaceRecord(recordId: number) {
   const nextId = Number(recordId) || workspaceState.records[0]?.id || 0;
   workspaceState.selectedRecordId = nextId;
   await renderSidePanes();
+
+  // Load local HTML snapshot in center view if available
+  const record = workspaceState.records.find((item) => item.id === nextId);
+  if (record?.sourceProductId && workspaceViews?.center && !workspaceViews.center.webContents.isDestroyed()) {
+    const htmlPath = getCollectedHtmlPath(record.sourceProductId, workspaceState.sourceType);
+    if (fs.existsSync(htmlPath)) {
+      try {
+        await workspaceViews.center.webContents.loadURL(`file://${htmlPath}`);
+        log.info("[collection workspace] loaded local html snapshot for record", {
+          recordId: nextId,
+          sourceProductId: record.sourceProductId,
+          htmlPath,
+        });
+      } catch (error) {
+        log.warn("[collection workspace] failed to load local html snapshot", { htmlPath, error });
+      }
+    }
+  }
+
   return cloneState();
+}
+
+export async function previewCollectedRecord(sourceProductId: string, sourceType: CollectSourceType = workspaceState.sourceType || "unknown") {
+  if (!workspaceViews || !workspaceWindow || workspaceWindow.isDestroyed()) {
+    throw new Error("采集工作台尚未打开");
+  }
+
+  const htmlPath = getCollectedHtmlPath(sourceProductId, sourceType);
+  if (fs.existsSync(htmlPath)) {
+    await workspaceViews.center.webContents.loadURL(`file://${htmlPath}`);
+    log.info("[collection workspace] preview loaded local html", { sourceProductId, htmlPath });
+    return { success: true, url: `file://${htmlPath}` };
+  }
+
+  // Fallback: load the original source URL if available
+  const record = workspaceState.records.find((item) => item.sourceProductId === sourceProductId);
+  if (record?.sourceSnapshotUrl) {
+    await workspaceViews.center.webContents.loadURL(record.sourceSnapshotUrl);
+    return { success: true, url: record.sourceSnapshotUrl };
+  }
+
+  return { success: false, url: "" };
+}
+
+export async function updateWorkspaceRecord(recordId: number, payload: { isFavorite?: boolean; status?: string }) {
+  const record = workspaceState.records.find((item) => item.id === recordId);
+  if (!record) {
+    throw new Error(`采集记录 #${recordId} 不存在`);
+  }
+
+  const savedRecord = await requestBackend<CollectRecordPreview>("PUT", `/collect-records/${recordId}`, {
+    data: payload,
+  });
+
+  const normalizedRecord = Object.assign(new CollectRecordPreview(), savedRecord);
+  workspaceState.records = workspaceState.records.map((item) =>
+    item.id === recordId ? normalizedRecord : item,
+  );
+  await renderSidePanes();
+
+  return getCollectionWorkspaceState();
 }
 
 export async function navigateCollectionWorkspace(action: "back" | "forward" | "home" | "refresh") {
@@ -707,7 +826,7 @@ export async function navigateCollectionWorkspace(action: "back" | "forward" | "
       }
       break;
     case "home":
-      await webContents.loadURL(PXX_HOME_URL);
+      await webContents.loadURL(getCurrentDriver().homeUrl);
       break;
     case "refresh":
       webContents.reload();
@@ -716,7 +835,7 @@ export async function navigateCollectionWorkspace(action: "back" | "forward" | "
       throw new Error(`unsupported navigation action: ${action}`);
   }
 
-  const url = webContents.getURL() || PXX_HOME_URL;
+  const url = webContents.getURL() || getCurrentDriver().homeUrl;
   return {
     success: true,
     url,

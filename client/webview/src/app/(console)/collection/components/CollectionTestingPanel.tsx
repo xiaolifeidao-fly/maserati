@@ -6,27 +6,39 @@ import {
   HomeOutlined,
   ReloadOutlined,
   SearchOutlined,
-  StarFilled,
-  StarOutlined,
+  HeartFilled,
+  HeartOutlined,
+  EyeOutlined,
   LeftOutlined,
   RightOutlined,
+  InboxOutlined,
 } from "@ant-design/icons";
-import { Button, Empty, Input, Modal, Select, Space, Spin, Tag, message } from "antd";
-import { type CollectionWorkspaceState, CollectBatchRecord, type CollectRecordDetailRecord } from "../api/collection.api";
+import { Button, Empty, Input, Select, Space, Spin, Tag, Tooltip, message } from "antd";
+import {
+  type CollectionWorkspaceState,
+  type CollectRecordUpdatePayload,
+  CollectBatchRecord,
+  CollectRecordPreview,
+} from "../api/collection.api";
 import {
   fetchCollectionWorkspaceState,
+  fetchCollectBatch,
   fetchCollectBatchRecords,
   fetchCollectBatchTestingOptions,
+  fetchCollectionShopOptions,
   navigateCollectionWorkspace,
   selectCollectionWorkspaceRecord,
   updateCollectRecord,
+  updateWorkspaceRecord,
+  getCollectedProductRawData,
 } from "../api/collection.api";
-
-type TestingDialog = "batch-list" | "product-detail" | null;
+import { convertRawDataToStandard } from "./standard-product.types";
+import { normalizeCollectSourceType, type CollectSourceType } from "../api/collection.api";
+import { ProductDetailEditor } from "./ProductDetailEditor";
 
 type FeedSource = "server" | "injected";
 
-interface FeedRecord extends CollectRecordDetailRecord {
+interface FeedRecord extends CollectRecordPreview {
   source: FeedSource;
   clientKey: string;
 }
@@ -35,7 +47,6 @@ interface InjectedCollectTestingItem {
   id?: number;
   appUserId?: number;
   collectBatchId?: number;
-  productId?: number;
   productName?: string;
   sourceProductId?: string;
   sourceSnapshotUrl?: string;
@@ -61,6 +72,7 @@ function createEmptyWorkspaceState(): CollectionWorkspaceState {
     batch: new CollectBatchRecord(),
     records: [],
     selectedRecordId: 0,
+    sourceType: "unknown",
   };
 }
 
@@ -70,7 +82,6 @@ function normalizeInjectedItems(items: InjectedCollectTestingItem[], fallbackBat
     id: Number(item.id || 0),
     appUserId: Number(item.appUserId || 0),
     collectBatchId: Number(item.collectBatchId || fallbackBatchId || 0),
-    productId: Number(item.productId || 0),
     productName: String(item.productName || "").trim() || `临时商品 ${now}-${index + 1}`,
     sourceProductId: String(item.sourceProductId || "").trim(),
     sourceSnapshotUrl: String(item.sourceSnapshotUrl || "").trim(),
@@ -84,12 +95,60 @@ function normalizeInjectedItems(items: InjectedCollectTestingItem[], fallbackBat
   }));
 }
 
-function useCollectionWorkspaceState() {
+function getStatusColor(status: string) {
+  switch (status?.toUpperCase()) {
+    case "COLLECTED": return "#10b981";
+    case "SUCCESS": return "#10b981";
+    case "RUNNING": return "#3b82f6";
+    case "PENDING": return "#f59e0b";
+    case "FAILED": return "#ef4444";
+    case "MATCHED": return "#8b5cf6";
+    case "LOADING": return "#94a3b8";
+    default: return "#94a3b8";
+  }
+}
+
+function getStatusLabel(status: string) {
+  switch (status?.toUpperCase()) {
+    case "COLLECTED": return "已采集";
+    case "SUCCESS": return "成功";
+    case "RUNNING": return "采集中";
+    case "PENDING": return "待处理";
+    case "FAILED": return "失败";
+    case "MATCHED": return "已匹配";
+    case "LOADING": return "保存中";
+    default: return status || "未知";
+  }
+}
+
+async function loadBatchWorkspaceState(batchId: number): Promise<CollectionWorkspaceState> {
+  const [batch, recordsResult, shopsResult] = await Promise.all([
+    fetchCollectBatch(batchId),
+    fetchCollectBatchRecords(batchId, { pageIndex: 1, pageSize: 200 }),
+    fetchCollectionShopOptions(),
+  ]);
+  const records = Array.isArray(recordsResult.data) ? recordsResult.data : [];
+  const shops = Array.isArray(shopsResult.data) ? shopsResult.data : [];
+  const sourceType = normalizeCollectSourceType(shops.find((item) => item.id === batch.shopId)?.platform);
+  return {
+    batch,
+    records,
+    selectedRecordId: records[0]?.id || 0,
+    sourceType,
+  };
+}
+
+function hasWorkspacePayload(state: CollectionWorkspaceState | null | undefined) {
+  return Boolean(state && (state.batch?.id || state.records?.length));
+}
+
+function useCollectionWorkspaceState({ enabled = true, fallbackBatchId = 0 } = {}) {
   const [workspaceState, setWorkspaceState] = useState<CollectionWorkspaceState>(createEmptyWorkspaceState);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (typeof window === "undefined") {
+    if (!enabled || typeof window === "undefined") {
+      setLoading(false);
       return;
     }
 
@@ -99,6 +158,7 @@ function useCollectionWorkspaceState() {
         batch: nextState.batch || new CollectBatchRecord(),
         records: Array.isArray(nextState.records) ? nextState.records : [],
         selectedRecordId: Number(nextState.selectedRecordId || nextState.records?.[0]?.id || 0),
+        sourceType: nextState.sourceType || "unknown",
       });
       setLoading(false);
     };
@@ -108,8 +168,26 @@ function useCollectionWorkspaceState() {
     void (async () => {
       try {
         const nextState = await fetchCollectionWorkspaceState();
+        if (hasWorkspacePayload(nextState)) {
+          handleWorkspaceUpdate(nextState);
+          return;
+        }
+        if (fallbackBatchId > 0) {
+          handleWorkspaceUpdate(await loadBatchWorkspaceState(fallbackBatchId));
+          return;
+        }
         handleWorkspaceUpdate(nextState);
       } catch (error) {
+        if (fallbackBatchId > 0) {
+          try {
+            handleWorkspaceUpdate(await loadBatchWorkspaceState(fallbackBatchId));
+            return;
+          } catch (fallbackError) {
+            setLoading(false);
+            message.error(fallbackError instanceof Error ? fallbackError.message : "采集工作台状态加载失败");
+            return;
+          }
+        }
         setLoading(false);
         message.error(error instanceof Error ? error.message : "采集工作台状态加载失败");
       }
@@ -120,14 +198,35 @@ function useCollectionWorkspaceState() {
         delete collectionWindow.__COLLECTION_WORKSPACE_UPDATE__;
       }
     };
-  }, []);
+  }, [enabled, fallbackBatchId]);
 
   return { workspaceState, loading };
 }
 
-export function CollectionWorkspaceLeftPanel() {
-  const { workspaceState, loading } = useCollectionWorkspaceState();
+export function CollectionWorkspaceLeftPanel({
+  workspaceState: propState,
+  loading: propLoading,
+  onSelectRecord: propOnSelectRecord,
+  onToggleFavorite: propOnToggleFavorite,
+  onPreviewRecord: propOnPreviewRecord,
+  fallbackBatchId,
+}: {
+  workspaceState?: CollectionWorkspaceState;
+  loading?: boolean;
+  onSelectRecord?: (recordId: number) => void;
+  onToggleFavorite?: (record: CollectRecordPreview) => Promise<void> | void;
+  onPreviewRecord?: (record: CollectRecordPreview) => Promise<void> | void;
+  fallbackBatchId?: number;
+} = {}) {
+  const isControlled = propState !== undefined;
+  const { workspaceState: hookState, loading: hookLoading } = useCollectionWorkspaceState({
+    enabled: !isControlled,
+    fallbackBatchId,
+  });
+  const workspaceState = isControlled ? propState : hookState;
+  const loading = propLoading !== undefined ? propLoading : hookLoading;
   const [navigatingAction, setNavigatingAction] = useState<string>("");
+  const [togglingIds, setTogglingIds] = useState<Set<number>>(new Set());
 
   const handleWorkspaceNavigation = async (action: "back" | "forward" | "home" | "refresh") => {
     setNavigatingAction(action);
@@ -141,172 +240,588 @@ export function CollectionWorkspaceLeftPanel() {
   };
 
   const handleSelectRecord = async (recordId: number) => {
+    const targetRecord = workspaceState.records.find((item) => item.id === recordId);
+    if (propOnSelectRecord) {
+      propOnSelectRecord(recordId);
+      if (targetRecord && propOnPreviewRecord) {
+        await propOnPreviewRecord(targetRecord);
+      }
+      return;
+    }
     try {
+      // selectRecord in main process: updates selectedRecordId + loads local HTML snapshot if available
       await selectCollectionWorkspaceRecord(recordId);
     } catch (error) {
       message.error(error instanceof Error ? error.message : "切换采集商品失败");
     }
   };
 
+  const handleToggleFavorite = async (record: CollectRecordPreview, event: React.MouseEvent) => {
+    event.stopPropagation();
+    if (record.isLoading || togglingIds.has(record.id)) return;
+    if (propOnToggleFavorite) {
+      await propOnToggleFavorite(record);
+      return;
+    }
+    setTogglingIds((prev) => new Set(prev).add(record.id));
+    try {
+      await updateWorkspaceRecord(record.id, { isFavorite: !record.isFavorite });
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "收藏状态更新失败");
+    } finally {
+      setTogglingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(record.id);
+        return next;
+      });
+    }
+  };
+
+  const records = workspaceState.records;
+  const favoriteCount = records.filter((record) => record.isFavorite).length;
+
   return (
-    <section className="manager-data-card" style={{ minHeight: "100%", display: "flex", flexDirection: "column" }}>
-      <div style={{ display: "flex", flexDirection: "column", gap: 16, minHeight: 0, flex: 1 }}>
-        <div>
-          <div className="manager-section-label">采集批次</div>
-          <h3 style={{ margin: "10px 0 6px", color: "var(--manager-text)" }}>
-            {workspaceState.batch?.name || `批次 #${workspaceState.batch?.id || 0}`}
-          </h3>
-          <div className="manager-muted">
-            批次ID：{workspaceState.batch?.id || 0} ｜ 已加载 {workspaceState.records.length} 条商品
+    <section
+      style={{
+        flex: "0 0 auto",
+        width: "100%",
+        height: "100%",
+        minHeight: 0,
+        minWidth: 0,
+        display: "flex",
+        flexDirection: "column",
+        gap: 0,
+        overflow: "hidden",
+      }}
+    >
+      {/* Header */}
+      <div
+        style={{
+          flexShrink: 0,
+          borderRadius: 16,
+          padding: "14px 16px",
+          marginBottom: 10,
+          background: "linear-gradient(135deg, #1e3a5f 0%, #1e40af 100%)",
+          color: "#fff",
+        }}
+      >
+        <div style={{ fontSize: 11, letterSpacing: 1, opacity: 0.7, textTransform: "uppercase", marginBottom: 4 }}>
+          采集批次
+        </div>
+        <div style={{ fontSize: 15, fontWeight: 700, lineHeight: 1.4, marginBottom: 2 }}>
+          {workspaceState.batch?.name || `批次 #${workspaceState.batch?.id || 0}`}
+        </div>
+        <div style={{ fontSize: 12, opacity: 0.65 }}>
+          ID: {workspaceState.batch?.id || 0} · 已加载 {records.length} 件商品
+        </div>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            marginTop: 10,
+            flexWrap: "wrap",
+          }}
+        >
+          <div
+            style={{
+              padding: "5px 10px",
+              borderRadius: 999,
+              background: "rgba(255,255,255,0.14)",
+              border: "1px solid rgba(255,255,255,0.16)",
+              fontSize: 12,
+              fontWeight: 600,
+            }}
+          >
+            已关注 {favoriteCount}
+          </div>
+          <div
+            style={{
+              padding: "5px 10px",
+              borderRadius: 999,
+              background: "rgba(249,115,22,0.18)",
+              border: "1px solid rgba(251,146,60,0.24)",
+              color: "#ffedd5",
+              fontSize: 12,
+              fontWeight: 600,
+            }}
+          >
+            占比 {records.length > 0 ? `${Math.round((favoriteCount / records.length) * 100)}%` : "0%"}
           </div>
         </div>
+      </div>
 
-        <Space wrap size={10}>
-          <Button icon={<LeftOutlined />} loading={navigatingAction === "back"} onClick={() => void handleWorkspaceNavigation("back")}>
-            后退
-          </Button>
-          <Button icon={<RightOutlined />} loading={navigatingAction === "forward"} onClick={() => void handleWorkspaceNavigation("forward")}>
-            前进
-          </Button>
-          <Button icon={<HomeOutlined />} loading={navigatingAction === "home"} onClick={() => void handleWorkspaceNavigation("home")}>
-            首页
-          </Button>
-          <Button icon={<ReloadOutlined />} loading={navigatingAction === "refresh"} onClick={() => void handleWorkspaceNavigation("refresh")}>
-            刷新
-          </Button>
-        </Space>
+      {/* Navigation - only shown in Electron workspace context */}
+      {!isControlled && <div
+        style={{
+          display: "flex",
+          gap: 6,
+          marginBottom: 10,
+          padding: "10px 12px",
+          borderRadius: 14,
+          background: "rgba(255,255,255,0.9)",
+          border: "1px solid rgba(226,232,240,0.8)",
+          boxShadow: "0 2px 8px rgba(15,23,42,0.04)",
+        }}
+      >
+        {(["back", "forward", "home", "refresh"] as const).map((action) => {
+          const icons = {
+            back: <LeftOutlined />,
+            forward: <RightOutlined />,
+            home: <HomeOutlined />,
+            refresh: <ReloadOutlined />,
+          };
+          const labels = { back: "后退", forward: "前进", home: "首页", refresh: "刷新" };
+          return (
+            <button
+              key={action}
+              type="button"
+              disabled={navigatingAction !== ""}
+              onClick={() => void handleWorkspaceNavigation(action)}
+              style={{
+                flex: 1,
+                height: 34,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 4,
+                borderRadius: 8,
+                border: "1px solid rgba(226,232,240,0.9)",
+                background: navigatingAction === action ? "#3b82f6" : "rgba(248,250,252,0.9)",
+                color: navigatingAction === action ? "#fff" : "#475569",
+                fontSize: 12,
+                fontWeight: 500,
+                cursor: navigatingAction !== "" ? "not-allowed" : "pointer",
+                transition: "all 0.15s",
+                opacity: navigatingAction !== "" && navigatingAction !== action ? 0.5 : 1,
+              }}
+            >
+              {navigatingAction === action ? <Spin size="small" /> : icons[action]}
+              <span style={{ display: "none" }}>{labels[action]}</span>
+            </button>
+          );
+        })}
+      </div>}
 
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-          <div style={{ fontWeight: 700, color: "var(--manager-text)" }}>采集列表</div>
-          <div className="manager-muted">点击左侧商品切换右侧详情</div>
+      {/* List Header */}
+      <div
+        style={{
+          flexShrink: 0,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          padding: "0 4px",
+          marginBottom: 8,
+        }}
+      >
+        <div style={{ fontSize: 12, fontWeight: 700, color: "#334155", letterSpacing: 0.5 }}>
+          采集列表
         </div>
+        <div style={{ fontSize: 11, color: "#94a3b8" }}>点击商品查看详情</div>
+      </div>
 
-        <div style={{ minHeight: 0, flex: 1, overflowY: "auto", paddingRight: 6, display: "grid", gap: 12 }}>
-          {loading ? (
-            <div style={{ display: "grid", placeItems: "center", minHeight: 200 }}>
-              <Spin />
-            </div>
-          ) : null}
+      {/* Records */}
+      <div
+        style={{
+          flex: 1,
+          minHeight: 0,
+          minWidth: 0,
+          overflowX: "hidden",
+          overflowY: "auto",
+          display: "grid",
+          gap: 8,
+          alignContent: "start",
+          paddingRight: 4,
+          scrollbarGutter: "stable",
+        }}
+      >
+        {loading && (
+          <div style={{ display: "grid", placeItems: "center", minHeight: 160 }}>
+            <Spin />
+          </div>
+        )}
 
-          {!loading && !workspaceState.records.length ? <Empty description="当前批次下暂无采集商品" /> : null}
+        {!loading && records.length === 0 && (
+          <div style={{ display: "grid", placeItems: "center", minHeight: 160 }}>
+            <Empty description={<span style={{ color: "#94a3b8", fontSize: 13 }}>暂无采集商品</span>} />
+          </div>
+        )}
 
-          {!loading
-            ? workspaceState.records.map((record) => (
-                <button
-                  key={record.id || record.sourceProductId || record.productId}
-                  type="button"
-                  onClick={() => void handleSelectRecord(record.id)}
+        {!loading &&
+          records.map((record) => {
+            const isSelected = record.id === workspaceState.selectedRecordId;
+            const isLoadingRecord = record.isLoading === true;
+            const isToggling = togglingIds.has(record.id);
+
+            return (
+              <button
+                key={record.id || record.sourceProductId}
+                type="button"
+                onClick={() => !isLoadingRecord && void handleSelectRecord(record.id)}
+                style={{
+                  width: "100%",
+                  height: 90,
+                  textAlign: "left",
+                  cursor: isLoadingRecord ? "default" : "pointer",
+                  borderRadius: 12,
+                  padding: "8px 80px 8px 12px",
+                  border: isSelected
+                    ? "1.5px solid rgba(59,130,246,0.7)"
+                    : "1px solid rgba(226,232,240,0.7)",
+                  background: isLoadingRecord
+                    ? "linear-gradient(135deg, rgba(241,245,249,0.95), rgba(255,255,255,0.9))"
+                    : isSelected
+                    ? "linear-gradient(135deg, rgba(219,234,254,0.9), rgba(255,255,255,0.97))"
+                    : "rgba(255,255,255,0.92)",
+                  boxShadow: isSelected
+                    ? "0 2px 12px rgba(59,130,246,0.12)"
+                    : "0 1px 4px rgba(15,23,42,0.05)",
+                  transition: "all 0.15s",
+                  position: "relative",
+                }}
+              >
+                {isLoadingRecord && (
+                  <div
+                    style={{
+                      position: "absolute",
+                      inset: 0,
+                      background: "linear-gradient(90deg, transparent 0%, rgba(148,163,184,0.06) 50%, transparent 100%)",
+                      animation: "shimmer 1.5s infinite",
+                    }}
+                  />
+                )}
+                <div
                   style={{
-                    width: "100%",
-                    textAlign: "left",
-                    cursor: "pointer",
-                    borderRadius: 18,
-                    padding: 16,
-                    border:
-                      record.id === workspaceState.selectedRecordId
-                        ? "1px solid rgba(59,130,246,0.72)"
-                        : "1px solid rgba(170,192,238,0.22)",
-                    background:
-                      record.id === workspaceState.selectedRecordId
-                        ? "linear-gradient(135deg, rgba(219,234,254,0.88), rgba(255,255,255,0.98))"
-                        : "linear-gradient(135deg, rgba(248,250,252,0.94), rgba(255,255,255,0.98))",
-                    boxShadow: "0 10px 24px rgba(15, 23, 42, 0.05)",
+                    display: "flex",
+                    flexDirection: "column",
+                    height: "100%",
+                    gap: 6,
                   }}
                 >
-                  <div style={{ color: "var(--manager-text)", fontWeight: 700, lineHeight: 1.5 }}>
-                    {record.productName || `商品 #${record.productId || record.id}`}
+                  <div style={{ minWidth: 0, flex: "1 1 auto" }}>
+                    <div
+                      style={{
+                        fontSize: 13,
+                        fontWeight: 600,
+                        color: isLoadingRecord ? "#94a3b8" : "#1e293b",
+                        lineHeight: 1.4,
+                        marginBottom: 6,
+                        whiteSpace: "normal",
+                        overflowWrap: "anywhere",
+                        wordBreak: "break-word",
+                        display: "-webkit-box",
+                        WebkitBoxOrient: "vertical",
+                        WebkitLineClamp: 2,
+                        overflow: "hidden",
+                      }}
+                      title={record.productName || `商品 #${record.id}`}
+                    >
+                      {isLoadingRecord ? (
+                        <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                          <Spin size="small" />
+                          <span>{record.productName || "采集中..."}</span>
+                        </span>
+                      ) : (
+                        <Tooltip title={record.productName || `商品 #${record.id}`}>
+                          <span
+                            style={{
+                              display: "-webkit-box",
+                              whiteSpace: "normal",
+                              overflowWrap: "anywhere",
+                              wordBreak: "break-word",
+                              WebkitBoxOrient: "vertical",
+                              WebkitLineClamp: 2,
+                              overflow: "hidden",
+                            }}
+                          >
+                            {record.productName || `商品 #${record.id}`}
+                          </span>
+                        </Tooltip>
+                      )}
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                      {record.sourceProductId && (
+                        <span style={{ fontSize: 11, color: "#94a3b8", fontFamily: "monospace" }}>
+                          #{record.sourceProductId.slice(0, 10)}
+                        </span>
+                      )}
+                    </div>
                   </div>
-                  <div style={{ marginTop: 8, color: "var(--manager-text-faint)" }}>商品ID：{record.productId || "-"}</div>
-                  <div style={{ marginTop: 4, color: "var(--manager-text-faint)" }}>来源ID：{record.sourceProductId || "-"}</div>
-                </button>
-              ))
-            : null}
-        </div>
+
+                  {/* Action buttons */}
+                  {!isLoadingRecord && (
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 6,
+                        position: "absolute",
+                        right: 12,
+                        bottom: 8,
+                      }}
+                    >
+                      <button
+                        type="button"
+                        onClick={(e) => void handleToggleFavorite(record, e)}
+                        disabled={isToggling}
+                        style={{
+                          width: 28,
+                          height: 28,
+                          borderRadius: 7,
+                          border: "1px solid rgba(226,232,240,0.8)",
+                          background: record.isFavorite ? "rgba(255,237,213,0.9)" : "rgba(248,250,252,0.9)",
+                          cursor: isToggling ? "default" : "pointer",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          fontSize: 13,
+                          transition: "all 0.15s",
+                        }}
+                        title={record.isFavorite ? "取消收藏" : "收藏"}
+                      >
+                        {isToggling ? (
+                          <Spin size="small" />
+                        ) : record.isFavorite ? (
+                          <HeartFilled style={{ color: "#f97316" }} />
+                        ) : (
+                          <HeartOutlined style={{ color: "#cbd5e1" }} />
+                        )}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); void handleSelectRecord(record.id); }}
+                        style={{
+                          width: 28,
+                          height: 28,
+                          borderRadius: 7,
+                          border: "1px solid rgba(226,232,240,0.8)",
+                          background: isSelected ? "rgba(219,234,254,0.9)" : "rgba(248,250,252,0.9)",
+                          cursor: "pointer",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          fontSize: 13,
+                          transition: "all 0.15s",
+                        }}
+                        title="查看详情"
+                      >
+                        <EyeOutlined style={{ color: isSelected ? "#3b82f6" : "#cbd5e1" }} />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </button>
+            );
+          })}
       </div>
+
+      <style>{`
+        @keyframes shimmer {
+          0% { transform: translateX(-100%); }
+          100% { transform: translateX(100%); }
+        }
+      `}</style>
     </section>
   );
 }
 
-export function CollectionWorkspaceRightPanel() {
-  const { workspaceState, loading } = useCollectionWorkspaceState();
+export function CollectionWorkspaceRightPanel({
+  workspaceState: propState,
+  loading: propLoading,
+  onToggleFavorite: propOnToggleFavorite,
+  fallbackBatchId,
+}: {
+  workspaceState?: CollectionWorkspaceState;
+  loading?: boolean;
+  onToggleFavorite?: (record: CollectRecordPreview) => Promise<void> | void;
+  fallbackBatchId?: number;
+} = {}) {
+  const isControlled = propState !== undefined;
+  const { workspaceState: hookState, loading: hookLoading } = useCollectionWorkspaceState({
+    enabled: !isControlled,
+    fallbackBatchId,
+  });
+  const workspaceState = isControlled ? propState : hookState;
+  const loading = propLoading !== undefined ? propLoading : hookLoading;
+  const [togglingFavorite, setTogglingFavorite] = useState(false);
+  const [rawData, setRawData] = useState<Record<string, unknown> | null>(null);
+  const [dataLoading, setDataLoading] = useState(false);
+  const [editedData, setEditedData] = useState<import("./standard-product.types").StandardProductData | null>(null);
+
   const selectedRecord = useMemo(() => {
     return workspaceState.records.find((item) => item.id === workspaceState.selectedRecordId) || null;
   }, [workspaceState.records, workspaceState.selectedRecordId]);
 
+  useEffect(() => {
+    if (!selectedRecord?.sourceProductId) {
+      setRawData(null);
+      return;
+    }
+    setDataLoading(true);
+    void getCollectedProductRawData(selectedRecord.sourceProductId, workspaceState.sourceType)
+      .then((data) => {
+        setRawData(data && typeof data === "object" ? (data as Record<string, unknown>) : null);
+      })
+      .catch(() => setRawData(null))
+      .finally(() => setDataLoading(false));
+  }, [selectedRecord?.sourceProductId]);
+
+  // 将 pxx 原始数据转换为标准结构
+  const standardData = useMemo(() => {
+    if (!rawData) return null;
+    return convertRawDataToStandard(workspaceState.sourceType, rawData, {
+      productName: selectedRecord?.productName,
+      sourceProductId: selectedRecord?.sourceProductId,
+      sourceUrl: selectedRecord?.sourceSnapshotUrl,
+    });
+  }, [rawData, selectedRecord, workspaceState.sourceType]);
+
+  useEffect(() => {
+    setEditedData(standardData);
+  }, [standardData]);
+
+  const handleToggleFavorite = async () => {
+    if (!selectedRecord || selectedRecord.isLoading || togglingFavorite) return;
+    if (propOnToggleFavorite) {
+      await propOnToggleFavorite(selectedRecord);
+      return;
+    }
+    setTogglingFavorite(true);
+    try {
+      await updateWorkspaceRecord(selectedRecord.id, { isFavorite: !selectedRecord.isFavorite });
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "收藏状态更新失败");
+    } finally {
+      setTogglingFavorite(false);
+    }
+  };
+
+  const handleSave = () => {
+    if (!selectedRecord || !editedData) return;
+    message.info("保存逻辑待接入");
+  };
+
   return (
-    <section className="manager-data-card" style={{ minHeight: "100%", display: "flex", flexDirection: "column" }}>
-      <div style={{ display: "flex", flexDirection: "column", gap: 16, minHeight: 0, flex: 1 }}>
-        <div>
-          <div className="manager-section-label">商品详情</div>
-          <h3 style={{ margin: "10px 0 6px", color: "var(--manager-text)" }}>右侧详情面板</h3>
-          <div className="manager-muted">右侧详情区和中间页面独立展示，中间导航不会清空这里的选中态。</div>
+    <section
+      style={{
+        flex: "0 0 auto",
+        width: "100%",
+        height: "100%",
+        minHeight: 0,
+        minWidth: 0,
+        display: "flex",
+        flexDirection: "column",
+        gap: 0,
+        overflow: "hidden",
+      }}
+    >
+      {/* ── Header ───────────────────────────────────────────────────────── */}
+      <div
+        style={{
+          borderRadius: 12,
+          padding: "12px 16px",
+          marginBottom: 10,
+          background: "linear-gradient(135deg, #1e3a5f 0%, #1e40af 100%)",
+          color: "#fff",
+          flexShrink: 0,
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+        }}
+      >
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 11, letterSpacing: 1, opacity: 0.65, textTransform: "uppercase", marginBottom: 2 }}>
+            商品详情编辑
+          </div>
+          <div
+            style={{
+              fontSize: 13,
+              opacity: 0.9,
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+            }}
+            title={
+              selectedRecord
+                ? selectedRecord.productName || `商品 #${selectedRecord.id}`
+                : "请在左侧列表选择商品"
+            }
+          >
+            {selectedRecord
+              ? selectedRecord.productName || `商品 #${selectedRecord.id}`
+              : "请在左侧列表选择商品"}
+          </div>
         </div>
 
-        {loading ? (
-          <div style={{ display: "grid", placeItems: "center", minHeight: 240 }}>
-            <Spin />
-          </div>
-        ) : null}
-
-        {!loading && !selectedRecord ? <Empty description="当前还没有选中的采集商品" /> : null}
-
-        {!loading && selectedRecord ? (
-          <div style={{ display: "grid", gap: 14 }}>
-            <div
+        {selectedRecord && (
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+            <Button
+              type="primary"
+              size="small"
+              onClick={handleSave}
+              disabled={dataLoading}
               style={{
-                borderRadius: 20,
-                border: "1px solid rgba(251,191,36,0.24)",
-                background: "linear-gradient(135deg, rgba(255,247,237,0.96), rgba(255,255,255,0.98))",
-                padding: 18,
+                border: "none",
+                boxShadow: "0 8px 24px rgba(15,23,42,0.18)",
               }}
             >
-              <div style={{ color: "var(--manager-text)", fontSize: 18, fontWeight: 700, lineHeight: 1.5 }}>
-                {selectedRecord.productName || `商品 #${selectedRecord.productId || selectedRecord.id}`}
-              </div>
-              <Space wrap size={8} style={{ marginTop: 12 }}>
-                <Tag color="blue">{selectedRecord.status || "PENDING"}</Tag>
-                <Tag color={selectedRecord.isFavorite ? "gold" : "default"}>
-                  {selectedRecord.isFavorite ? "已收藏" : "未收藏"}
-                </Tag>
-              </Space>
-            </div>
+              保存
+            </Button>
 
-            <div style={{ borderRadius: 18, border: "1px solid rgba(170,192,238,0.22)", padding: 16, background: "#fff" }}>
-              <div className="manager-section-label">商品ID</div>
-              <div style={{ marginTop: 8, color: "var(--manager-text)" }}>{selectedRecord.productId || "-"}</div>
-            </div>
-
-            <div style={{ borderRadius: 18, border: "1px solid rgba(170,192,238,0.22)", padding: 16, background: "#fff" }}>
-              <div className="manager-section-label">来源商品ID</div>
-              <div style={{ marginTop: 8, color: "var(--manager-text)" }}>{selectedRecord.sourceProductId || "-"}</div>
-            </div>
-
-            <div style={{ borderRadius: 18, border: "1px solid rgba(170,192,238,0.22)", padding: 16, background: "#fff" }}>
-              <div className="manager-section-label">批次ID</div>
-              <div style={{ marginTop: 8, color: "var(--manager-text)" }}>{selectedRecord.collectBatchId || "-"}</div>
-            </div>
-
-            <div style={{ borderRadius: 18, border: "1px solid rgba(170,192,238,0.22)", padding: 16, background: "#fff" }}>
-              <div className="manager-section-label">快照地址</div>
-              <div style={{ marginTop: 8, wordBreak: "break-all" }}>
-                {selectedRecord.sourceSnapshotUrl ? (
-                  <a href={selectedRecord.sourceSnapshotUrl} target="_blank" rel="noreferrer">
-                    {selectedRecord.sourceSnapshotUrl}
-                  </a>
-                ) : (
-                  <span style={{ color: "var(--manager-text-faint)" }}>暂无</span>
-                )}
-              </div>
-            </div>
+            {/* 收藏按钮 */}
+            <button
+              type="button"
+              onClick={() => void handleToggleFavorite()}
+              disabled={togglingFavorite || selectedRecord.isLoading}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 4,
+                fontSize: 16,
+                color: selectedRecord.isFavorite ? "#fb923c" : "rgba(255,255,255,0.5)",
+                background: "transparent",
+                border: "none",
+                cursor: togglingFavorite || selectedRecord.isLoading ? "default" : "pointer",
+                padding: 0,
+                transition: "color 0.15s",
+              }}
+            >
+              {togglingFavorite ? (
+                <Spin size="small" />
+              ) : selectedRecord.isFavorite ? (
+                <HeartFilled />
+              ) : (
+                <HeartOutlined />
+              )}
+            </button>
           </div>
-        ) : null}
+        )}
       </div>
+
+      {/* ── Body ─────────────────────────────────────────────────────────── */}
+      {loading ? (
+        <div style={{ display: "grid", placeItems: "center", flex: 1 }}>
+          <Spin />
+        </div>
+      ) : !selectedRecord ? (
+        <div style={{ display: "grid", placeItems: "center", flex: 1 }}>
+          <div style={{ textAlign: "center" }}>
+            <InboxOutlined style={{ fontSize: 36, color: "#cbd5e1", marginBottom: 10 }} />
+            <div style={{ color: "#94a3b8", fontSize: 13 }}>暂无选中商品</div>
+          </div>
+        </div>
+      ) : (
+        <ProductDetailEditor
+          data={editedData}
+          loading={dataLoading}
+          onChange={setEditedData}
+        />
+      )}
     </section>
   );
 }
 
 export function CollectionTestingPanel() {
-  const [activeDialog, setActiveDialog] = useState<TestingDialog>(null);
   const [batchOptions, setBatchOptions] = useState<CollectBatchRecord[]>([]);
   const [selectedBatchId, setSelectedBatchId] = useState(0);
   const [keywordInput, setKeywordInput] = useState("");
@@ -321,9 +836,47 @@ export function CollectionTestingPanel() {
   const [togglingKeys, setTogglingKeys] = useState<Record<string, boolean>>({});
   const selectedBatchIdRef = useRef(0);
 
+  // 商品详情 Drawer
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [detailRecord, setDetailRecord] = useState<FeedRecord | null>(null);
+  const [detailData, setDetailData] = useState<import("./standard-product.types").StandardProductData | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailSourceType, setDetailSourceType] = useState<CollectSourceType>("pxx");
+
+  const handleViewDetail = async (record: FeedRecord) => {
+    setDetailRecord(record);
+    setDetailData(null);
+    setDetailOpen(true);
+    if (!record.sourceProductId) return;
+    setDetailLoading(true);
+    try {
+      const raw = await getCollectedProductRawData(record.sourceProductId, detailSourceType);
+      if (raw && typeof raw === "object") {
+        setDetailData(
+          convertRawDataToStandard(detailSourceType, raw as Record<string, unknown>, {
+            productName: record.productName,
+            sourceProductId: record.sourceProductId,
+            sourceUrl: record.sourceSnapshotUrl,
+          })
+        );
+      }
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "商品数据加载失败");
+    } finally {
+      setDetailLoading(false);
+    }
+  };
+
   useEffect(() => {
     selectedBatchIdRef.current = selectedBatchId;
   }, [selectedBatchId]);
+
+  useEffect(() => {
+    const currentBatch = batchOptions.find((item) => item.id === selectedBatchId);
+    if (currentBatch) {
+      setDetailSourceType("pxx");
+    }
+  }, [batchOptions, selectedBatchId]);
 
   const loadBatchOptions = useCallback(async () => {
     try {
@@ -419,7 +972,6 @@ export function CollectionTestingPanel() {
   }, [injectedRecords, keyword, selectedBatchId]);
 
   const mergedRecords = useMemo(() => [...filteredInjectedRecords, ...records], [filteredInjectedRecords, records]);
-
   const hasMore = records.length < serverTotal;
 
   const handleSearch = () => {
@@ -504,183 +1056,170 @@ export function CollectionTestingPanel() {
         </div>
 
         <Space wrap>
-          <Button type="primary" onClick={() => setActiveDialog("batch-list")}>
-            采集批次列表按钮
-          </Button>
-          <Button onClick={() => setActiveDialog("product-detail")}>
-            商品详情按钮
-          </Button>
-          <Button
-            icon={<LeftOutlined />}
-            loading={navigatingAction === "back"}
-            onClick={() => void handleWorkspaceNavigation("back")}
-          >
+          <Button icon={<LeftOutlined />} loading={navigatingAction === "back"} onClick={() => void handleWorkspaceNavigation("back")}>
             后退
           </Button>
-          <Button
-            icon={<RightOutlined />}
-            loading={navigatingAction === "forward"}
-            onClick={() => void handleWorkspaceNavigation("forward")}
-          >
+          <Button icon={<RightOutlined />} loading={navigatingAction === "forward"} onClick={() => void handleWorkspaceNavigation("forward")}>
             前进
           </Button>
-          <Button
-            icon={<HomeOutlined />}
-            loading={navigatingAction === "home"}
-            onClick={() => void handleWorkspaceNavigation("home")}
-          >
+          <Button icon={<HomeOutlined />} loading={navigatingAction === "home"} onClick={() => void handleWorkspaceNavigation("home")}>
             首页
           </Button>
-          <Button
-            icon={<ReloadOutlined />}
-            loading={navigatingAction === "refresh"}
-            onClick={() => void handleWorkspaceNavigation("refresh")}
-          >
+          <Button icon={<ReloadOutlined />} loading={navigatingAction === "refresh"} onClick={() => void handleWorkspaceNavigation("refresh")}>
             刷新
           </Button>
         </Space>
       </div>
 
-      <Modal
-        title="采集批次列表"
-        open={activeDialog === "batch-list"}
-        onCancel={() => setActiveDialog(null)}
-        footer={null}
-        width={980}
-        destroyOnClose={false}
-      >
-        <div style={{ marginTop: 8 }}>
-          <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center", marginBottom: 16 }}>
-            <Select
-              placeholder="选择采集批次"
-              value={selectedBatchId || undefined}
-              onChange={(value) => setSelectedBatchId(Number(value || 0))}
-              options={batchOptions.map((item) => ({ label: item.name || `批次 #${item.id}`, value: item.id }))}
-              style={{ width: 240 }}
-            />
-            <Input
-              placeholder="按商品名称搜索"
-              value={keywordInput}
-              onChange={(event) => setKeywordInput(event.target.value)}
-              onPressEnter={handleSearch}
-              style={{ width: 280, maxWidth: "100%" }}
-            />
-            <Button type="primary" icon={<SearchOutlined />} onClick={handleSearch}>
-              搜索
-            </Button>
-            <Button icon={<ReloadOutlined />} onClick={handleReset}>
-              刷新
-            </Button>
-            <Tag style={{ marginInlineStart: 0, border: "none", background: "rgba(170,192,238,0.16)", color: "var(--manager-text-soft)" }}>
-              手动注入 {filteredInjectedRecords.length} 条 / 服务端 {serverTotal} 条
-            </Tag>
-          </div>
+      <div style={{ marginTop: 16 }}>
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center", marginBottom: 16 }}>
+          <Select
+            placeholder="选择采集批次"
+            value={selectedBatchId || undefined}
+            onChange={(value) => setSelectedBatchId(Number(value || 0))}
+            options={batchOptions.map((item) => ({ label: item.name || `批次 #${item.id}`, value: item.id }))}
+            style={{ width: 240 }}
+          />
+          <Input
+            placeholder="按商品名称搜索"
+            value={keywordInput}
+            onChange={(event) => setKeywordInput(event.target.value)}
+            onPressEnter={handleSearch}
+            style={{ width: 280, maxWidth: "100%" }}
+          />
+          <Button type="primary" icon={<SearchOutlined />} onClick={handleSearch}>
+            搜索
+          </Button>
+          <Button icon={<ReloadOutlined />} onClick={handleReset}>
+            刷新
+          </Button>
+          <Tag style={{ marginInlineStart: 0, border: "none", background: "rgba(170,192,238,0.16)", color: "var(--manager-text-soft)" }}>
+            注入 {filteredInjectedRecords.length} 条 / 服务端 {serverTotal} 条
+          </Tag>
+        </div>
 
-          <div
-            onScroll={(event) => void handleScroll(event)}
-            style={{
-              maxHeight: 520,
-              overflowY: "auto",
-              paddingRight: 6,
-              display: "grid",
-              gap: 12,
-            }}
-          >
-            {mergedRecords.map((record) => (
+        <div
+          onScroll={(event) => void handleScroll(event)}
+          style={{ maxHeight: 520, overflowY: "auto", paddingRight: 6, display: "grid", gap: 10 }}
+        >
+          {mergedRecords.map((record) => (
+            <div
+              key={record.clientKey}
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                height: 90,
+                gap: 6,
+                padding: "8px 82px 8px 14px",
+                borderRadius: 14,
+                border: "1px solid rgba(226,232,240,0.7)",
+                background:
+                  record.source === "injected"
+                    ? "linear-gradient(135deg, rgba(255,247,237,0.8), rgba(255,255,255,0.95))"
+                    : "rgba(255,255,255,0.9)",
+                boxShadow: "0 1px 4px rgba(15,23,42,0.04)",
+                position: "relative",
+              }}
+            >
+              <div style={{ minWidth: 0, flex: "1 1 auto" }}>
+                <div style={{ display: "flex", alignItems: "flex-start", gap: 8, flexWrap: "wrap", marginBottom: 6 }}>
+                  <strong
+                    style={{
+                      color: "#0f172a",
+                      fontSize: 14,
+                      lineHeight: 1.45,
+                      whiteSpace: "normal",
+                      overflowWrap: "anywhere",
+                      wordBreak: "break-word",
+                      flex: "1 1 100%",
+                      display: "-webkit-box",
+                      WebkitBoxOrient: "vertical",
+                      WebkitLineClamp: 2,
+                      overflow: "hidden",
+                    }}
+                  >
+                    {record.productName || `商品 #${record.id}`}
+                  </strong>
+                  {record.source === "injected" && (
+                    <Tag color="orange" style={{ fontSize: 11, margin: 0 }}>注入</Tag>
+                  )}
+                </div>
+                <div style={{ fontSize: 12, color: "#94a3b8" }}>
+                  来源ID：{record.sourceProductId || "-"} · 批次：{record.collectBatchId || "-"}
+                </div>
+              </div>
+
               <div
-                key={record.clientKey}
                 style={{
                   display: "flex",
-                  justifyContent: "space-between",
-                  gap: 12,
-                  padding: 16,
-                  borderRadius: 18,
-                  border: "1px solid rgba(170,192,238,0.22)",
-                  background:
-                    record.source === "injected"
-                      ? "linear-gradient(135deg, rgba(255, 244, 204, 0.55), rgba(255,255,255,0.94))"
-                      : "linear-gradient(135deg, rgba(170,192,238,0.16), rgba(255,255,255,0.94))",
+                  alignItems: "center",
+                  gap: 4,
+                  position: "absolute",
+                  right: 14,
+                  bottom: 8,
                 }}
               >
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                    <strong style={{ color: "var(--manager-text)", fontSize: 16 }}>{record.productName || `商品 #${record.productId || record.id}`}</strong>
-                    <Tag color={record.source === "injected" ? "gold" : "blue"}>{record.source === "injected" ? "Playwright注入" : "服务端分页"}</Tag>
-                    <Tag>{record.status || "PENDING"}</Tag>
-                  </div>
-                  <div style={{ marginTop: 8, color: "var(--manager-text-faint)" }}>
-                    商品ID：{record.productId || "-"}　来源商品ID：{record.sourceProductId || "-"}
-                  </div>
-                  <div style={{ marginTop: 6, color: "var(--manager-text-faint)" }}>
-                    批次ID：{record.collectBatchId || "-"}　快照：{record.sourceSnapshotUrl || "暂无"}
-                  </div>
-                </div>
-
                 <Button
                   type="text"
+                  size="small"
+                  icon={<EyeOutlined style={{ fontSize: 16 }} />}
+                  onClick={() => void handleViewDetail(record)}
+                  title="查看商品详情"
+                />
+                <Button
+                  type="text"
+                  size="small"
                   loading={Boolean(togglingKeys[record.clientKey])}
                   icon={
                     record.isFavorite ? (
-                      <StarFilled style={{ color: "#f5a623", fontSize: 18 }} />
+                      <HeartFilled style={{ color: "#f97316", fontSize: 16 }} />
                     ) : (
-                      <StarOutlined style={{ color: "var(--manager-text-faint)", fontSize: 18 }} />
+                      <HeartOutlined style={{ color: "#cbd5e1", fontSize: 16 }} />
                     )
                   }
                   onClick={() => void handleToggleFavorite(record)}
                 />
               </div>
-            ))}
+            </div>
+          ))}
 
-            {!loading && mergedRecords.length === 0 ? <Empty description="当前批次下还没有采集商品" /> : null}
+          {!loading && mergedRecords.length === 0 && (
+            <Empty description="当前批次下还没有采集商品" />
+          )}
 
-            {loading ? (
-              <div style={{ display: "grid", placeItems: "center", padding: 24 }}>
-                <Spin />
-              </div>
-            ) : null}
+          {loading && (
+            <div style={{ display: "grid", placeItems: "center", padding: 24 }}>
+              <Spin />
+            </div>
+          )}
 
-            {loadingMore ? (
-              <div style={{ display: "grid", placeItems: "center", padding: 18, color: "var(--manager-text-faint)" }}>
-                正在加载更多...
-              </div>
-            ) : null}
+          {loadingMore && (
+            <div style={{ textAlign: "center", padding: 16, color: "#94a3b8", fontSize: 13 }}>
+              加载更多...
+            </div>
+          )}
 
-            {!loading && !loadingMore && hasMore ? (
-              <div style={{ textAlign: "center", padding: "4px 0 12px", color: "var(--manager-text-faint)" }}>
-                下拉继续加载更多
-              </div>
-            ) : null}
-          </div>
+          {!loading && !loadingMore && hasMore && (
+            <div style={{ textAlign: "center", padding: "4px 0 12px", color: "#cbd5e1", fontSize: 12 }}>
+              下拉继续加载
+            </div>
+          )}
         </div>
-      </Modal>
-
-      <Modal
-        title="商品详情"
-        open={activeDialog === "product-detail"}
-        onCancel={() => setActiveDialog(null)}
-        footer={null}
-        width={720}
-      >
-        <div
-          style={{
-            minHeight: 280,
-            borderRadius: 20,
-            border: "1px dashed rgba(170,192,238,0.35)",
-            background: "linear-gradient(135deg, rgba(170,192,238,0.12), rgba(255,255,255,0.92))",
-            display: "grid",
-            placeItems: "center",
-            textAlign: "center",
-            color: "var(--manager-text-soft)",
-            padding: 24,
-          }}
-        >
-          <div>
-            <div className="manager-section-label">商品详情测试页</div>
-            <h3 style={{ margin: "10px 0 8px", color: "var(--manager-text)" }}>TODO</h3>
-            <div>这里先保留占位，后续你需要真实商品采集详情时，我们再把明细内容补进去。</div>
-          </div>
-        </div>
-      </Modal>
+      </div>
     </section>
   );
+}
+
+export function CollectionWorkspaceLeftPanelPage() {
+  const fallbackBatchId = typeof window === "undefined"
+    ? 0
+    : Number(new URLSearchParams(window.location.search).get("batchId") || 0);
+  return <CollectionWorkspaceLeftPanel fallbackBatchId={fallbackBatchId} />;
+}
+
+export function CollectionWorkspaceRightPanelPage() {
+  const fallbackBatchId = typeof window === "undefined"
+    ? 0
+    : Number(new URLSearchParams(window.location.search).get("batchId") || 0);
+  return <CollectionWorkspaceRightPanel fallbackBatchId={fallbackBatchId} />;
 }

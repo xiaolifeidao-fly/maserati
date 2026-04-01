@@ -38,18 +38,21 @@ func InitRedisClient(addr string, password string) (err error) {
 	return nil
 }
 
-func SetEx(key string, value string, seconds int64) {
+func SetEx(key string, value string, seconds int64) error {
 	err := Rdb.Set(key, value, time.Duration(seconds)*time.Second).Err()
 	if err != nil {
 		fmt.Printf("redis-setEX failed, err:%v\n", err)
-		return
+		return err
 	}
+	return nil
 }
 
 func Get(key string) string {
 	val, err := Rdb.Get(key).Result()
 	if err != nil {
-		fmt.Printf("redis-get failed, err:%v\n", err)
+		if err != redis.Nil {
+			fmt.Printf("redis-get failed, err:%v\n", err)
+		}
 	}
 	return val
 }

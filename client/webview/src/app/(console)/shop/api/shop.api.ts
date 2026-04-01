@@ -17,6 +17,10 @@ export async function fetchShops(query: ShopListQuery) {
   return getCommerceApi().listShops(query);
 }
 
+export async function fetchShop(id: number) {
+  return getCommerceApi().getShop(id);
+}
+
 export async function createShop(payload: ShopPayload) {
   return getCommerceApi().createShop(payload);
 }

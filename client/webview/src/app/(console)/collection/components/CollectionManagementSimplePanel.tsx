@@ -6,6 +6,7 @@ import {
   ArrowRightOutlined,
   DeleteOutlined,
   EditOutlined,
+  EyeOutlined,
   PlayCircleOutlined,
   PlusOutlined,
   ReloadOutlined,
@@ -13,10 +14,10 @@ import {
 } from "@ant-design/icons";
 import { Button, Form, Input, Modal, Popconfirm, Select, Space, Table, Tag, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import { type CollectBatchRecord } from "../api/collection.api";
-import { startPxxCollection } from "../api/collection.api";
+import { type CollectBatchRecord, normalizeCollectSourceType, startCollection as startCollectionByRoute, type CollectSourceType } from "../api/collection.api";
 import { useCollectionManagement } from "../hooks/useCollectionManagement";
 import { ProductPublishModal } from "../../product/components/ProductPublishModal";
+import { BatchDetailModal } from "./BatchDetailModal";
 import { formatDateTime } from "@/utils/format";
 
 interface CollectionFormValues {
@@ -42,6 +43,9 @@ export function CollectionManagementSimplePanel() {
   const [modalOpen, setModalOpen] = useState(false);
   const [publishModalOpen, setPublishModalOpen] = useState(false);
   const [selectedPublishBatchId, setSelectedPublishBatchId] = useState(0);
+  const [detailModalOpen, setDetailModalOpen] = useState(false);
+  const [detailBatch, setDetailBatch] = useState<CollectBatchRecord | null>(null);
+  const [detailSourceType, setDetailSourceType] = useState<CollectSourceType>("unknown");
   const [editingRecord, setEditingRecord] = useState<CollectBatchRecord | null>(null);
   const [startingBatchId, setStartingBatchId] = useState(0);
   const shopMap = useMemo(() => new Map(shops.map((item) => [item.id, item])), [shops]);
@@ -97,7 +101,7 @@ export function CollectionManagementSimplePanel() {
   const startCollection = async (record: CollectBatchRecord) => {
     setStartingBatchId(record.id);
     try {
-      const result = await startPxxCollection(record.id);
+      const result = await startCollectionByRoute(record.id);
       message.success(result.message || `批次「${record.name}」采集工作台已打开`);
     } catch (error) {
       message.error(error instanceof Error ? error.message : "打开采集工作台失败");
@@ -109,6 +113,13 @@ export function CollectionManagementSimplePanel() {
   const openPublishModal = (record: CollectBatchRecord) => {
     setSelectedPublishBatchId(record.id);
     setPublishModalOpen(true);
+  };
+
+  const openDetailModal = (record: CollectBatchRecord) => {
+    const shop = shopMap.get(record.shopId);
+    setDetailBatch(record);
+    setDetailSourceType(normalizeCollectSourceType(shop?.platform));
+    setDetailModalOpen(true);
   };
 
   const columns: ColumnsType<CollectBatchRecord> = [
@@ -168,6 +179,9 @@ export function CollectionManagementSimplePanel() {
             onClick={() => void startCollection(record)}
           >
             开始采集
+          </Button>
+          <Button type="text" icon={<EyeOutlined />} onClick={() => openDetailModal(record)}>
+            详情
           </Button>
           <Button type="text" icon={<ArrowRightOutlined />} onClick={() => openPublishModal(record)}>
             去发布
@@ -306,6 +320,13 @@ export function CollectionManagementSimplePanel() {
           ) : null}
         </Form>
       </Modal>
+
+      <BatchDetailModal
+        open={detailModalOpen}
+        batch={detailBatch}
+        sourceType={detailSourceType}
+        onClose={() => setDetailModalOpen(false)}
+      />
 
       <ProductPublishModal
         open={publishModalOpen}

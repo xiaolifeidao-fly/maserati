@@ -6,6 +6,7 @@ import (
 	"fmt"
 	appUserRepository "service/app_user/repository"
 	categoryRepository "service/category/repository"
+	collectRepository "service/collect/repository"
 	productDTO "service/product/dto"
 	productRepository "service/product/repository"
 	shopRepository "service/shop/repository"
@@ -15,18 +16,20 @@ import (
 )
 
 type ProductService struct {
-	productRepository  *productRepository.ProductRepository
-	appUserRepository  *appUserRepository.AppUserRepository
-	categoryRepository *categoryRepository.CategoryRepository
-	shopRepository     *shopRepository.ShopRepository
+	productRepository       *productRepository.ProductRepository
+	appUserRepository       *appUserRepository.AppUserRepository
+	categoryRepository      *categoryRepository.CategoryRepository
+	shopRepository          *shopRepository.ShopRepository
+	collectRecordRepository *collectRepository.CollectRecordRepository
 }
 
 func NewProductService() *ProductService {
 	return &ProductService{
-		productRepository:  db.GetRepository[productRepository.ProductRepository](),
-		appUserRepository:  db.GetRepository[appUserRepository.AppUserRepository](),
-		categoryRepository: db.GetRepository[categoryRepository.CategoryRepository](),
-		shopRepository:     db.GetRepository[shopRepository.ShopRepository](),
+		productRepository:       db.GetRepository[productRepository.ProductRepository](),
+		appUserRepository:       db.GetRepository[appUserRepository.AppUserRepository](),
+		categoryRepository:      db.GetRepository[categoryRepository.CategoryRepository](),
+		shopRepository:          db.GetRepository[shopRepository.ShopRepository](),
+		collectRecordRepository: db.GetRepository[collectRepository.CollectRecordRepository](),
 	}
 }
 
@@ -105,6 +108,20 @@ func ensureProductShopBelongsToAppUser(repo *shopRepository.ShopRepository, shop
 	return nil
 }
 
+func ensureProductCollectRecord(repo *collectRepository.CollectRecordRepository, id uint64) error {
+	if id == 0 {
+		return fmt.Errorf("collectRecordId must be positive")
+	}
+	entity, err := repo.FindById(uint(id))
+	if err != nil {
+		return err
+	}
+	if entity.Active == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
+}
+
 func ensureProductCategory(repo *categoryRepository.CategoryRepository, id uint64) error {
 	if id == 0 {
 		return fmt.Errorf("categoryId must be positive")
@@ -156,17 +173,21 @@ func (s *ProductService) CreateProduct(req *productDTO.CreateProductDTO) (*produ
 	if err := ensureProductCategory(s.categoryRepository, req.CategoryID); err != nil {
 		return nil, err
 	}
+	if err := ensureProductCollectRecord(s.collectRecordRepository, req.CollectRecordID); err != nil {
+		return nil, err
+	}
 	title := strings.TrimSpace(req.Title)
 	if title == "" {
 		return nil, fmt.Errorf("title is required")
 	}
 	entity, err := s.productRepository.Create(&productRepository.Product{
-		AppUserID:      req.AppUserID,
-		ShopID:         req.ShopID,
-		CategoryID:     req.CategoryID,
-		Title:          title,
-		OuterProductID: strings.TrimSpace(req.OuterProductID),
-		Status:         normalizeProductStatus(req.Status),
+		AppUserID:       req.AppUserID,
+		ShopID:          req.ShopID,
+		CategoryID:      req.CategoryID,
+		CollectRecordID: req.CollectRecordID,
+		Title:           title,
+		OuterProductID:  strings.TrimSpace(req.OuterProductID),
+		Status:          normalizeProductStatus(req.Status),
 	})
 	if err != nil {
 		return nil, err
@@ -210,6 +231,12 @@ func (s *ProductService) UpdateProduct(id uint, req *productDTO.UpdateProductDTO
 			return nil, err
 		}
 		entity.CategoryID = *req.CategoryID
+	}
+	if req.CollectRecordID != nil {
+		if err := ensureProductCollectRecord(s.collectRecordRepository, *req.CollectRecordID); err != nil {
+			return nil, err
+		}
+		entity.CollectRecordID = *req.CollectRecordID
 	}
 	if req.Title != nil {
 		entity.Title = strings.TrimSpace(*req.Title)

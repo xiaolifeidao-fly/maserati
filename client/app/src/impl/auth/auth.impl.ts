@@ -6,6 +6,12 @@ interface LoginResponse {
   token: string;
 }
 
+interface ValidateSessionResponse {
+  id: number;
+  username: string;
+  displayName?: string;
+}
+
 const authAdapter = {
   async login(input: LoginInput): Promise<AuthSession> {
     const result = await requestBackend<LoginResponse>("POST", "/login", { data: input });
@@ -45,6 +51,30 @@ const authAdapter = {
   async getToken(): Promise<string> {
     return readAuthSession().token || "";
   },
+
+  async validateStoredSession(): Promise<AuthSession> {
+    const session = readAuthSession();
+    if (!session.token) {
+      clearAuthSession();
+      return { authenticated: false };
+    }
+
+    try {
+      const result = await requestBackend<ValidateSessionResponse>("GET", "/auth-state", {
+        token: session.token,
+      });
+
+      return saveAuthSession({
+        authenticated: true,
+        username: result.username.trim(),
+        displayName: result.displayName?.trim() || result.username.trim(),
+        token: session.token,
+      });
+    } catch {
+      clearAuthSession();
+      return { authenticated: false };
+    }
+  },
 };
 
 export class AuthImpl extends AuthApi {
@@ -66,5 +96,9 @@ export class AuthImpl extends AuthApi {
 
   async getToken(): Promise<string> {
     return authAdapter.getToken();
+  }
+
+  async validateStoredSession(): Promise<AuthSession> {
+    return authAdapter.validateStoredSession();
   }
 }

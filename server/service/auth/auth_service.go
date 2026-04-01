@@ -19,7 +19,7 @@ import (
 const (
 	userTokenPrefix    = "KAKROLOT_APP_USER_TOKEN_PRE_"
 	userIPLoginPrefix  = "Kakrolot_app_user_ip_login_"
-	tokenExpireSeconds = 2 * 60 * 60
+	tokenExpireSeconds = 3 * 24 * 60 * 60
 )
 
 var (
@@ -106,7 +106,6 @@ func (s *AuthService) ValidateToken(token, requestURL string) (*LoginUser, error
 	if err := ensureRedisReady(); err != nil {
 		return nil, err
 	}
-	_ = requestURL
 
 	token = strings.TrimSpace(token)
 	if token == "" {
@@ -150,7 +149,17 @@ func (s *AuthService) initAndGetToken(user *LoginUser) (string, error) {
 		return "", err
 	}
 	token := strings.ReplaceAll(fmt.Sprintf("%d_%d", user.ID, time.Now().UnixNano()), "-", "")
-	redisMiddleware.SetEx(buildUserTokenKey(token), string(payload), tokenExpireSeconds)
+	tokenKey := buildUserTokenKey(token)
+	if err := redisMiddleware.SetEx(tokenKey, string(payload), tokenExpireSeconds); err != nil {
+		return "", err
+	}
+	if !redisMiddleware.Exists(tokenKey) {
+		return "", fmt.Errorf("token was not persisted to redis")
+	}
+	ttl := redisMiddleware.TTL(tokenKey)
+	if ttl <= 0 {
+		return "", fmt.Errorf("token ttl was not applied")
+	}
 	return token, nil
 }
 

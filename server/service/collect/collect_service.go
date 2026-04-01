@@ -7,7 +7,6 @@ import (
 	appUserRepository "service/app_user/repository"
 	collectDTO "service/collect/dto"
 	collectRepository "service/collect/repository"
-	productRepository "service/product/repository"
 	shopRepository "service/shop/repository"
 	"strings"
 
@@ -18,7 +17,6 @@ type CollectService struct {
 	collectBatchRepository  *collectRepository.CollectBatchRepository
 	collectRecordRepository *collectRepository.CollectRecordRepository
 	appUserRepository       *appUserRepository.AppUserRepository
-	productRepository       *productRepository.ProductRepository
 	shopRepository          *shopRepository.ShopRepository
 }
 
@@ -27,7 +25,6 @@ func NewCollectService() *CollectService {
 		collectBatchRepository:  db.GetRepository[collectRepository.CollectBatchRepository](),
 		collectRecordRepository: db.GetRepository[collectRepository.CollectRecordRepository](),
 		appUserRepository:       db.GetRepository[appUserRepository.AppUserRepository](),
-		productRepository:       db.GetRepository[productRepository.ProductRepository](),
 		shopRepository:          db.GetRepository[shopRepository.ShopRepository](),
 	}
 }
@@ -121,52 +118,6 @@ func ensureCollectShopBelongsToAppUser(repo *shopRepository.ShopRepository, shop
 		return fmt.Errorf("shop does not belong to appUserId")
 	}
 	return nil
-}
-
-func ensureCollectProduct(repo *productRepository.ProductRepository, id uint64) error {
-	if id == 0 {
-		return fmt.Errorf("productId must be positive")
-	}
-	entity, err := repo.FindById(uint(id))
-	if err != nil {
-		return err
-	}
-	if entity.Active == 0 {
-		return gorm.ErrRecordNotFound
-	}
-	return nil
-}
-
-func ensureCollectProductBelongsToAppUser(repo *productRepository.ProductRepository, productID, appUserID uint64) error {
-	if err := ensureCollectProduct(repo, productID); err != nil {
-		return err
-	}
-	entity, err := repo.FindById(uint(productID))
-	if err != nil {
-		return err
-	}
-	if entity.AppUserID != appUserID {
-		return fmt.Errorf("product does not belong to appUserId")
-	}
-	return nil
-}
-
-func resolveCollectProductName(repo *productRepository.ProductRepository, productID uint64, fallback string) (string, error) {
-	name := strings.TrimSpace(fallback)
-	if name != "" {
-		return name, nil
-	}
-	if productID == 0 {
-		return "", nil
-	}
-	entity, err := repo.FindById(uint(productID))
-	if err != nil {
-		return "", err
-	}
-	if entity.Active == 0 {
-		return "", gorm.ErrRecordNotFound
-	}
-	return strings.TrimSpace(entity.Title), nil
 }
 
 func ensureBatch(repo *collectRepository.CollectBatchRepository, id uint64) error {
@@ -363,18 +314,10 @@ func (s *CollectService) CreateCollectRecord(req *collectDTO.CreateCollectRecord
 	if err := ensureBatchBelongsToAppUser(s.collectBatchRepository, req.CollectBatchID, req.AppUserID); err != nil {
 		return nil, err
 	}
-	if err := ensureCollectProductBelongsToAppUser(s.productRepository, req.ProductID, req.AppUserID); err != nil {
-		return nil, err
-	}
-	productName, err := resolveCollectProductName(s.productRepository, req.ProductID, req.ProductName)
-	if err != nil {
-		return nil, err
-	}
 	entity, err := s.collectRecordRepository.Create(&collectRepository.CollectRecord{
 		AppUserID:         req.AppUserID,
 		CollectBatchID:    req.CollectBatchID,
-		ProductID:         req.ProductID,
-		ProductName:       productName,
+		ProductName:       strings.TrimSpace(req.ProductName),
 		SourceProductID:   strings.TrimSpace(req.SourceProductID),
 		SourceSnapshotURL: strings.TrimSpace(req.SourceSnapshotURL),
 		IsFavorite:        req.IsFavorite,
@@ -412,29 +355,8 @@ func (s *CollectService) UpdateCollectRecord(id uint, req *collectDTO.UpdateColl
 		}
 		entity.CollectBatchID = *req.CollectBatchID
 	}
-	if req.ProductID != nil {
-		if entity.AppUserID == 0 {
-			return nil, fmt.Errorf("appUserId must be positive")
-		}
-		if err := ensureCollectProductBelongsToAppUser(s.productRepository, *req.ProductID, entity.AppUserID); err != nil {
-			return nil, err
-		}
-		entity.ProductID = *req.ProductID
-		if req.ProductName == nil {
-			productName, resolveErr := resolveCollectProductName(s.productRepository, entity.ProductID, "")
-			if resolveErr != nil {
-				return nil, resolveErr
-			}
-			entity.ProductName = productName
-		}
-	}
 	if req.AppUserID != nil && req.CollectBatchID == nil {
 		if err := ensureBatchBelongsToAppUser(s.collectBatchRepository, entity.CollectBatchID, entity.AppUserID); err != nil {
-			return nil, err
-		}
-	}
-	if req.AppUserID != nil && req.ProductID == nil {
-		if err := ensureCollectProductBelongsToAppUser(s.productRepository, entity.ProductID, entity.AppUserID); err != nil {
 			return nil, err
 		}
 	}
@@ -452,13 +374,6 @@ func (s *CollectService) UpdateCollectRecord(id uint, req *collectDTO.UpdateColl
 	}
 	if req.Status != nil {
 		entity.Status = normalizeCollectRecordStatus(*req.Status)
-	}
-	if entity.ProductName == "" {
-		productName, resolveErr := resolveCollectProductName(s.productRepository, entity.ProductID, "")
-		if resolveErr != nil {
-			return nil, resolveErr
-		}
-		entity.ProductName = productName
 	}
 	saved, err := s.collectRecordRepository.SaveOrUpdate(entity)
 	if err != nil {

@@ -1,14 +1,19 @@
 import {
   type CollectionWorkspaceNavigationAction,
+  CollectStartResult,
   CollectApi,
   type CollectBatchListQuery,
   type CollectBatchPayload,
   type CollectBatchRecord,
   type CollectRecordPreview,
+  type CollectRecordListQuery,
+  type CollectRecordUpdatePayload,
   type PageResult,
-  PxxCollectStartResult,
 } from "@eleapi/collect/collect.api";
+import { normalizeCollectSourceType } from "@eleapi/collect/collect.platform";
+import type { ShopRecord } from "@eleapi/commerce/commerce.api";
 import { PxxEngine } from "@src/browser/pxx.engine";
+import { getCollectionPlatformDriver } from "@src/collect/platforms/registry";
 import { navigateCollectionWorkspace, openCollectionWorkspace } from "@src/collect/workspace.manager";
 import { requestBackend } from "../shared/backend";
 
@@ -26,6 +31,10 @@ function mapCookieSameSite(value?: "Strict" | "Lax" | "None") {
 }
 
 export class CollectImpl extends CollectApi {
+  async getCollectBatch(id: number): Promise<CollectBatchRecord> {
+    return requestBackend("GET", `/collect-batches/${id}`);
+  }
+
   async listCollectBatches(query: CollectBatchListQuery): Promise<PageResult<CollectBatchRecord>> {
     return requestBackend("GET", "/collect-batches", { params: query });
   }
@@ -42,18 +51,25 @@ export class CollectImpl extends CollectApi {
     return requestBackend("DELETE", `/collect-batches/${id}`);
   }
 
-  async startPxxCollection(batchId: number): Promise<PxxCollectStartResult> {
+  async startCollection(batchId: number): Promise<CollectStartResult> {
     if (!Number.isFinite(batchId) || batchId <= 0) {
       throw new Error("collect batch id is invalid");
     }
 
     const batch = await requestBackend<CollectBatchRecord>("GET", `/collect-batches/${batchId}`);
+    const shop = await requestBackend<ShopRecord>("GET", `/shops/${batch.shopId}`);
+    const sourceType = normalizeCollectSourceType(shop.platform);
+    const driver = getCollectionPlatformDriver(sourceType);
     const records = await requestBackend<PageResult<CollectRecordPreview>>("GET", `/collect-batches/${batchId}/records`, {
       params: {
         pageIndex: 1,
         pageSize: 100,
       },
     });
+
+    if (driver.sourceType !== "pxx") {
+      throw new Error(`采集平台 ${shop.platform || sourceType || "unknown"} 暂未接入，当前仅支持 pxx`);
+    }
 
     const engine = new PxxEngine(String(batch.shopId), true);
     const openedPage = await engine.openCollectionWorkspace(batch, Array.isArray(records.data) ? records.data : []);
@@ -83,14 +99,11 @@ export class CollectImpl extends CollectApi {
       })
       .filter((item): item is NonNullable<typeof item> => Boolean(item));
 
-    const initialUrl = openedPage.url() && openedPage.url() !== "about:blank"
-      ? openedPage.url()
-      : "https://mobile.yangkeduo.com/";
-
     const workspaceUrl = await openCollectionWorkspace({
       batch,
       records: Array.isArray(records.data) ? records.data : [],
-      initialUrl,
+      sourceType,
+      initialUrl: driver.homeUrl,
       cookies: cookieDetails,
     });
 
@@ -100,15 +113,28 @@ export class CollectImpl extends CollectApi {
     await engine.closeContext().catch(() => null);
     await engine.closeBrowser().catch(() => null);
 
-    return Object.assign(new PxxCollectStartResult(), {
+    return Object.assign(new CollectStartResult(), {
       success: true,
       batchId,
       pageUrl: workspaceUrl,
+      sourceType,
       message: `采集工作台已打开：${batch.name || `批次 #${batchId}`}`,
     });
   }
 
+  async startPxxCollection(batchId: number) {
+    return this.startCollection(batchId);
+  }
+
   async navigateCollectionWorkspace(action: CollectionWorkspaceNavigationAction): Promise<{ success: boolean; url: string }> {
     return navigateCollectionWorkspace(action);
+  }
+
+  async listCollectRecords(batchId: number, query: CollectRecordListQuery): Promise<PageResult<CollectRecordPreview>> {
+    return requestBackend("GET", `/collect-batches/${batchId}/records`, { params: query });
+  }
+
+  async updateCollectRecord(id: number, payload: CollectRecordUpdatePayload): Promise<CollectRecordPreview> {
+    return requestBackend("PUT", `/collect-records/${id}`, { data: payload });
   }
 }

@@ -30,6 +30,9 @@ func (r *ProductRepository) CountByQuery(query productDTO.ProductQueryDTO) (int6
 	if query.CategoryID > 0 {
 		dbQuery = dbQuery.Where("category_id = ?", query.CategoryID)
 	}
+	if query.CollectRecordID > 0 {
+		dbQuery = dbQuery.Where("collect_record_id = ?", query.CollectRecordID)
+	}
 	if value := strings.TrimSpace(query.Title); value != "" {
 		dbQuery = dbQuery.Where("title LIKE ?", "%"+value+"%")
 	}
@@ -59,6 +62,9 @@ func (r *ProductRepository) ListByQuery(query productDTO.ProductQueryDTO, pageIn
 	}
 	if query.CategoryID > 0 {
 		dbQuery = dbQuery.Where("category_id = ?", query.CategoryID)
+	}
+	if query.CollectRecordID > 0 {
+		dbQuery = dbQuery.Where("collect_record_id = ?", query.CollectRecordID)
 	}
 	if value := strings.TrimSpace(query.Title); value != "" {
 		dbQuery = dbQuery.Where("title LIKE ?", "%"+value+"%")

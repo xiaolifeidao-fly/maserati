@@ -2,66 +2,30 @@
 
 import {
   type CollectionWorkspaceNavigationAction,
+  type CollectStartResult,
   type CollectBatchListQuery,
   type CollectBatchPayload,
+  type CollectRecordListQuery,
+  type CollectRecordUpdatePayload,
   CollectBatchRecord,
-  PxxCollectStartResult,
+  CollectRecordPreview,
 } from "@eleapi/collect/collect.api";
-import { CollectionWorkspaceApi, CollectionWorkspaceState } from "@eleapi/collection-workspace/collection-workspace.api";
+import { normalizeCollectSourceType, type CollectSourceType } from "@eleapi/collect/collect.platform";
+import { CollectionWorkspaceApi, CollectionWorkspaceState, type CollectedProductData } from "@eleapi/collection-workspace/collection-workspace.api";
 import { type ShopRecord } from "@eleapi/commerce/commerce.api";
-import { getPage, instance, unwrapApiResponse, type ApiResponse } from "@/utils/axios";
 import { getCollectApi } from "@/utils/collect";
 import { getCommerceApi } from "@/utils/commerce";
 
-export { CollectBatchRecord, CollectionWorkspaceState };
-export type { CollectBatchListQuery, CollectBatchPayload, ShopRecord };
-
-export class CollectRecordDetailRecord {
-  id!: number;
-
-  appUserId = 0;
-
-  collectBatchId = 0;
-
-  productId = 0;
-
-  productName = "";
-
-  sourceProductId = "";
-
-  sourceSnapshotUrl = "";
-
-  isFavorite = false;
-
-  status = "";
-
-  active = 1;
-
-  createdTime?: string;
-
-  updatedTime?: string;
-}
-
-export interface CollectRecordDetailListQuery extends Record<string, string | number | undefined> {
-  pageIndex?: number;
-  pageSize?: number;
-  productName?: string;
-  status?: string;
-}
-
-export interface CollectRecordPayload {
-  appUserId: number;
-  collectBatchId: number;
-  productId: number;
-  productName: string;
-  sourceProductId: string;
-  sourceSnapshotUrl: string;
-  isFavorite: boolean;
-  status: string;
-}
+export { CollectBatchRecord, CollectRecordPreview, CollectionWorkspaceState };
+export { normalizeCollectSourceType };
+export type { CollectBatchListQuery, CollectBatchPayload, CollectRecordListQuery, CollectRecordUpdatePayload, ShopRecord, CollectedProductData, CollectSourceType, CollectStartResult };
 
 export async function fetchCollectBatches(query: CollectBatchListQuery) {
   return getCollectApi().listCollectBatches(query);
+}
+
+export async function fetchCollectBatch(id: number) {
+  return getCollectApi().getCollectBatch(id);
 }
 
 export async function createCollectBatch(payload: CollectBatchPayload) {
@@ -76,8 +40,12 @@ export async function deleteCollectBatch(id: number) {
   return getCollectApi().deleteCollectBatch(id);
 }
 
+export async function startCollection(batchId: number) {
+  return getCollectApi().startCollection(batchId) as Promise<CollectStartResult>;
+}
+
 export async function startPxxCollection(batchId: number) {
-  return getCollectApi().startPxxCollection(batchId) as Promise<PxxCollectStartResult>;
+  return startCollection(batchId);
 }
 
 export async function navigateCollectionWorkspace(action: CollectionWorkspaceNavigationAction) {
@@ -99,19 +67,38 @@ export async function selectCollectionWorkspaceRecord(recordId: number) {
   return getCollectionWorkspaceApi().selectRecord(recordId);
 }
 
+export async function updateWorkspaceRecord(recordId: number, payload: { isFavorite?: boolean }) {
+  return getCollectionWorkspaceApi().updateRecord(recordId, payload);
+}
+
+export async function previewCollectedRecord(sourceProductId: string, sourceType?: CollectSourceType) {
+  return getCollectionWorkspaceApi().previewCollectedRecord(sourceProductId, sourceType);
+}
+
+export async function getCollectedProductData(sourceProductId: string, sourceType?: CollectSourceType): Promise<CollectedProductData | null> {
+  return getCollectionWorkspaceApi().getCollectedProductData(sourceProductId, sourceType) as Promise<CollectedProductData | null>;
+}
+
+export async function getCollectedProductRawData(sourceProductId: string, sourceType?: CollectSourceType): Promise<unknown | null> {
+  return getCollectionWorkspaceApi().getCollectedProductRawData(sourceProductId, sourceType);
+}
+
+export async function hasCollectedHtml(sourceProductId: string, sourceType?: CollectSourceType): Promise<boolean> {
+  return getCollectionWorkspaceApi().hasCollectedHtml(sourceProductId, sourceType);
+}
+
 export async function fetchCollectionShopOptions() {
   return getCommerceApi().listShops({ pageIndex: 1, pageSize: 200 });
 }
 
 export async function fetchCollectBatchTestingOptions() {
-  return getPage(CollectBatchRecord, "/collect-batches", { pageIndex: 1, pageSize: 100 });
+  return getCollectApi().listCollectBatches({ pageIndex: 1, pageSize: 100 });
 }
 
-export async function fetchCollectBatchRecords(collectBatchId: number, query: CollectRecordDetailListQuery) {
-  return getPage(CollectRecordDetailRecord, `/collect-batches/${collectBatchId}/records`, query);
+export async function fetchCollectBatchRecords(collectBatchId: number, query: CollectRecordListQuery) {
+  return getCollectApi().listCollectRecords(collectBatchId, query);
 }
 
-export async function updateCollectRecord(id: number, payload: Partial<CollectRecordPayload>) {
-  const response = await instance.put<ApiResponse<CollectRecordDetailRecord>>(`/collect-records/${id}`, payload);
-  return unwrapApiResponse(response.data);
+export async function updateCollectRecord(id: number, payload: CollectRecordUpdatePayload) {
+  return getCollectApi().updateCollectRecord(id, payload);
 }

@@ -1,5 +1,14 @@
-import { CollectionWorkspaceApi } from "@eleapi/collection-workspace/collection-workspace.api";
-import { getCollectionWorkspaceState, selectCollectionWorkspaceRecord } from "@src/collect/workspace.manager";
+import { CollectionWorkspaceApi, type CollectedProductData } from "@eleapi/collection-workspace/collection-workspace.api";
+import { type CollectSourceType } from "@eleapi/collect/collect.platform";
+import {
+  getCollectionWorkspaceState,
+  selectCollectionWorkspaceRecord,
+  updateWorkspaceRecord,
+  previewCollectedRecord,
+  getCollectedProductStoreData,
+  getCollectedProductRawData,
+  hasCollectedHtml,
+} from "@src/collect/workspace.manager";
 
 export class CollectionWorkspaceImpl extends CollectionWorkspaceApi {
   async getState() {
@@ -8,5 +17,25 @@ export class CollectionWorkspaceImpl extends CollectionWorkspaceApi {
 
   async selectRecord(recordId: number) {
     return selectCollectionWorkspaceRecord(recordId);
+  }
+
+  async updateRecord(recordId: number, payload: { isFavorite?: boolean }) {
+    return updateWorkspaceRecord(recordId, payload);
+  }
+
+  async previewCollectedRecord(sourceProductId: string, sourceType?: CollectSourceType) {
+    return previewCollectedRecord(sourceProductId, sourceType);
+  }
+
+  async getCollectedProductData(sourceProductId: string, sourceType?: CollectSourceType): Promise<CollectedProductData | null> {
+    return getCollectedProductStoreData(sourceProductId, sourceType);
+  }
+
+  async getCollectedProductRawData(sourceProductId: string, sourceType?: CollectSourceType) {
+    return getCollectedProductRawData(sourceProductId, sourceType);
+  }
+
+  async hasCollectedHtml(sourceProductId: string, sourceType?: CollectSourceType) {
+    return hasCollectedHtml(sourceProductId, sourceType);
   }
 }

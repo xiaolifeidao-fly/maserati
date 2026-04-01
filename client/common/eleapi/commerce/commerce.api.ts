@@ -190,6 +190,11 @@ export class CommerceApi extends ElectronApi {
   }
 
   @InvokeType(Protocols.INVOKE)
+  async getShop(id: number): Promise<ShopRecord> {
+    return this.invokeApi("getShop", id);
+  }
+
+  @InvokeType(Protocols.INVOKE)
   async createShop(payload: ShopPayload): Promise<ShopRecord> {
     return this.invokeApi("createShop", payload);
   }

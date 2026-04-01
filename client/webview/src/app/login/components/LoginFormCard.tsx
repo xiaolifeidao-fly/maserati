@@ -5,7 +5,7 @@ import { Button, Form, Input, Segmented, Typography, message } from "antd";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { login, register } from "@/app/login/api/login.api";
-import { isAuthenticated } from "@/utils/auth";
+import { hasValidSession } from "@/utils/auth";
 
 const { Paragraph, Text, Title } = Typography;
 
@@ -40,7 +40,7 @@ export function LoginFormCard() {
 
   useEffect(() => {
     void (async () => {
-      if (await isAuthenticated()) {
+      if (await hasValidSession()) {
         router.replace("/workspace");
       }
     })();

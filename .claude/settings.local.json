@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find /Users/fly/Documents/develop/project/private/taobao/maserati -type d -name *collect*)",
+      "Bash(ls -la /Users/fly/Documents/develop/project/private/taobao/maserati/client/webview/src/app/\\\\\\(console\\\\\\)/collection/api/)",
+      "Bash(ls -la /Users/fly/Documents/develop/project/private/taobao/maserati/client/webview/src/app/\\\\\\(console\\\\\\)/collection/hooks/)",
+      "Bash(grep -E \"\\\\.ts$|\\\\.go$\")",
+      "Bash(npx tsc:*)"
+    ]
+  }
+}

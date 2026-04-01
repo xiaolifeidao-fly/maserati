@@ -26,6 +26,12 @@ type LoginResponse struct {
 	Token string `json:"token"`
 }
 
+type AuthStateResponse struct {
+	Authenticated bool   `json:"authenticated"`
+	Username      string `json:"username"`
+	DisplayName   string `json:"displayName"`
+}
+
 type LoginHandler struct {
 	*commonRouter.BaseHandler
 	authService *authService.AuthService
@@ -41,6 +47,7 @@ func NewLoginHandler() *LoginHandler {
 func (h *LoginHandler) RegisterHandler(engine *gin.RouterGroup) {
 	webAuth.PublicPOST(engine, "/login", h.login)
 	webAuth.PublicPOST(engine, "/register", h.register)
+	engine.GET("/auth-state", h.authState)
 	engine.POST("/logout", h.logout)
 }
 
@@ -76,6 +83,26 @@ func (h *LoginHandler) logout(context *gin.Context) {
 		return
 	}
 	commonRouter.ToJson(context, gin.H{"loggedOut": true}, nil)
+}
+
+func (h *LoginHandler) authState(context *gin.Context) {
+	value, ok := context.Get(webAuth.ContextUserKey)
+	if !ok {
+		commonRouter.ToError(context, authService.ErrNotLogin.Error())
+		return
+	}
+
+	user, typeOK := value.(*authService.LoginUser)
+	if !typeOK || user == nil {
+		commonRouter.ToError(context, authService.ErrNotLogin.Error())
+		return
+	}
+
+	commonRouter.ToJson(context, &AuthStateResponse{
+		Authenticated: true,
+		Username:      user.Username,
+		DisplayName:   user.Name,
+	}, nil)
 }
 
 func (h *LoginHandler) register(context *gin.Context) {

@@ -604,6 +604,14 @@ export abstract class DoorEngine<T = any> {
     public async closeContext(){
         if(this.context){
             await this.context.close();
+            this.context = undefined;
+            // 清理缓存，防止下次调用拿到已关闭的 context
+            const storeBrowserPath = await this.getRealChromePath().catch(() => undefined);
+            let key = this.getKey();
+            if(storeBrowserPath){
+                key += "_" + storeBrowserPath;
+            }
+            contextMap.delete(key);
         }
     }
 
