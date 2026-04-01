@@ -11,6 +11,8 @@ import {
 import { CollectBatchRecord, CollectRecordPreview } from "@eleapi/collect/collect.api";
 import { type CollectSourceType } from "@eleapi/collect/collect.platform";
 import { getCollectionPlatformDriver } from "./platforms/registry";
+import { buildPlaceholderRecord, prependPlaceholder, applyRecordUpdate } from "./collect.notifier";
+import { saveCollectedToServer } from "./collect.saver";
 import { requestBackend } from "@src/impl/shared/backend";
 import { setGlobal, getGlobal } from "../../../common/utils/store/electron";
 
@@ -28,9 +30,10 @@ interface CollectionWorkspaceViews {
   right: BrowserView;
 }
 
-const LEFT_RATIO = 0.2;
-const CENTER_RATIO = 0.4;
-const RIGHT_RATIO = 0.4;
+const PXX_LEFT_RATIO = 0.2;
+const PXX_RIGHT_RATIO = 0.4;
+const TB_LEFT_RATIO = 0.2;
+const TB_RIGHT_RATIO = 0.4;
 const MIN_PANEL_WIDTH = 280;
 const LEFT_WORKSPACE_ROUTE = "/collection-workspace/left";
 const RIGHT_WORKSPACE_ROUTE = "/collection-workspace/right";
@@ -95,6 +98,7 @@ export function hasCollectedHtml(sourceProductId: string, sourceType: CollectSou
 let workspaceWindow: BrowserWindow | null = null;
 let workspaceViews: CollectionWorkspaceViews | null = null;
 let workspaceState = new CollectionWorkspaceState();
+let workspaceRightPanelVisible = true;
 let isScrapingRecord = false;
 let lastScrapedSourceProductId = "";
 let centerDebuggerBoundViewId = 0;
@@ -146,8 +150,23 @@ function createUtilityView(backgroundColor: string) {
 
 function getWorkspaceBounds(windowInstance: BrowserWindow) {
   const { width, height } = windowInstance.getContentBounds();
-  const leftWidth = Math.max(Math.floor(width * LEFT_RATIO), MIN_PANEL_WIDTH);
-  const rightWidth = Math.max(Math.floor(width * RIGHT_RATIO), MIN_PANEL_WIDTH);
+  const isTbWorkspace = workspaceState.sourceType === "tb";
+
+  if (isTbWorkspace) {
+    const leftWidth = Math.max(Math.floor(width * TB_LEFT_RATIO), MIN_PANEL_WIDTH);
+    const centerWidth = Math.max(width - leftWidth, MIN_PANEL_WIDTH);
+    const overlayWidth = Math.max(Math.floor(width * TB_RIGHT_RATIO), MIN_PANEL_WIDTH);
+    const rightWidth = workspaceRightPanelVisible ? Math.min(overlayWidth, centerWidth) : 0;
+
+    return {
+      left: { x: 0, y: 0, width: leftWidth, height },
+      center: { x: leftWidth, y: 0, width: centerWidth, height },
+      right: { x: leftWidth + centerWidth - rightWidth, y: 0, width: rightWidth, height },
+    };
+  }
+
+  const leftWidth = Math.max(Math.floor(width * PXX_LEFT_RATIO), MIN_PANEL_WIDTH);
+  const rightWidth = Math.max(Math.floor(width * PXX_RIGHT_RATIO), MIN_PANEL_WIDTH);
   const centerWidth = Math.max(width - leftWidth - rightWidth, MIN_PANEL_WIDTH);
 
   return {
@@ -349,6 +368,19 @@ async function handleCenterDebuggerMessage(view: BrowserView, method: string, pa
       const rawData = getCurrentDriver().extractRawDataFromResponse(meta.url, meta.mimeType, body);
       if (rawData) {
         saveRawDataToStore(parsed.sourceProductId, rawData, workspaceState.sourceType);
+
+        // DEBUG: 将原始 JSON 写到文件，方便排查属性解析问题
+        try {
+          const debugDir = path.join(app.getPath("userData"), "debug-rawdata");
+          if (!fs.existsSync(debugDir)) {
+            fs.mkdirSync(debugDir, { recursive: true });
+          }
+          const debugFilePath = path.join(debugDir, `${workspaceState.sourceType}_${parsed.sourceProductId}_rawdata.json`);
+          fs.writeFileSync(debugFilePath, JSON.stringify(rawData, null, 2), "utf8");
+          log.info("[collection workspace][DEBUG] raw data written to file", { path: debugFilePath });
+        } catch (debugErr) {
+          log.warn("[collection workspace][DEBUG] failed to write raw data file", debugErr);
+        }
       }
     }
 
@@ -399,95 +431,6 @@ async function pushRecordToTestingBridge(record: CollectRecordPreview) {
   }
 }
 
-async function upsertCollectRecord(record: CollectRecordPreview) {
-  const batchId = Number(record.collectBatchId || 0);
-  log.info("[collection workspace] upsertCollectRecord start", {
-    batchId,
-    sourceProductId: record.sourceProductId,
-    productName: record.productName,
-    status: record.status,
-  });
-
-  if (batchId <= 0) {
-    log.warn("[collection workspace] upsertCollectRecord skipped: invalid batchId", { batchId });
-    return record;
-  }
-
-  log.info("[collection workspace] fetching existing records for batch", { batchId });
-  const existingPage = await requestBackend<{ total: number; data: CollectRecordPreview[] }>(
-    "GET",
-    `/collect-batches/${batchId}/records`,
-    {
-      params: {
-        pageIndex: 1,
-        pageSize: 500,
-      },
-    },
-  );
-  log.info("[collection workspace] existing records fetched", {
-    batchId,
-    total: existingPage?.total,
-    count: Array.isArray(existingPage?.data) ? existingPage.data.length : 0,
-  });
-
-  const matchedRecord = (Array.isArray(existingPage.data) ? existingPage.data : []).find((item) => {
-    return String(item.sourceProductId || "").trim() === String(record.sourceProductId || "").trim();
-  });
-
-  if (matchedRecord?.id) {
-    log.info("[collection workspace] updating existing record", {
-      recordId: matchedRecord.id,
-      sourceProductId: record.sourceProductId,
-    });
-    return requestBackend<CollectRecordPreview>("PUT", `/collect-records/${matchedRecord.id}`, {
-      data: {
-        productName: record.productName,
-        sourceProductId: record.sourceProductId,
-        sourceSnapshotUrl: record.sourceSnapshotUrl,
-        isFavorite: record.isFavorite,
-        status: record.status,
-      },
-    });
-  }
-
-  log.info("[collection workspace] creating new record", {
-    sourceProductId: record.sourceProductId,
-    collectBatchId: record.collectBatchId,
-    appUserId: record.appUserId,
-  });
-  const createdRecord = await requestBackend<CollectRecordPreview>("POST", "/collect-records", {
-    data: {
-      appUserId: record.appUserId,
-      collectBatchId: record.collectBatchId,
-      productName: record.productName,
-      sourceProductId: record.sourceProductId,
-      sourceSnapshotUrl: record.sourceSnapshotUrl,
-      isFavorite: record.isFavorite,
-      status: record.status,
-    },
-  });
-  log.info("[collection workspace] record created", {
-    recordId: (createdRecord as CollectRecordPreview)?.id,
-    sourceProductId: record.sourceProductId,
-  });
-
-  const nextCollectedCount = Math.max(Number(workspaceState.batch.collectedCount || 0), workspaceState.records.length + 1);
-  try {
-    log.info("[collection workspace] updating batch collect count", { batchId, nextCollectedCount });
-    const updatedBatch = await requestBackend<CollectBatchRecord>("PUT", `/collect-batches/${batchId}`, {
-      data: {
-        collectedCount: nextCollectedCount,
-        status: "RUNNING",
-      },
-    });
-    workspaceState.batch = Object.assign(new CollectBatchRecord(), updatedBatch);
-  } catch (error) {
-    log.warn("[collection workspace] failed to update batch collect count", error);
-  }
-
-  return createdRecord;
-}
-
 async function collectCurrentGoods(url: string) {
   if (isScrapingRecord) {
     log.info("[collection workspace] collectCurrentGoods skipped: already scraping", { url });
@@ -515,8 +458,8 @@ async function collectCurrentGoods(url: string) {
   isScrapingRecord = true;
   const tempId = -(Date.now());
   try {
-    const parsed = await waitForCapturedGoodsSummary(sourceProductId);
-    if (!parsed) {
+    const summary = await waitForCapturedGoodsSummary(sourceProductId);
+    if (!summary) {
       log.warn("[collection workspace] skipped goods collect because no intercepted payload was captured", {
         sourceProductId,
         url,
@@ -525,53 +468,42 @@ async function collectCurrentGoods(url: string) {
     }
 
     log.info("[collection workspace] goods summary captured, pushing loading placeholder to left panel", {
-      sourceProductId: parsed.sourceProductId,
-      productName: parsed.productName,
-      status: parsed.status,
+      sourceProductId: summary.sourceProductId,
+      productName: summary.productName,
+      status: summary.status,
     });
 
-    // Step 1: Immediately push loading placeholder to left panel
-    const placeholderRecord = Object.assign(new CollectRecordPreview(), {
-      id: tempId,
+    const notifyCtx = {
+      batchId: workspaceState.batch.id,
       appUserId: workspaceState.batch.appUserId,
-      collectBatchId: workspaceState.batch.id,
-      productName: parsed.productName,
-      sourceProductId: parsed.sourceProductId,
-      sourceSnapshotUrl: url,
-      isFavorite: false,
-      status: parsed.status,
-      isLoading: true,
+      sourceUrl: url,
+    };
+
+    // Step 1: 通知左侧面板 — 插入加载占位
+    const placeholder = buildPlaceholderRecord(summary, notifyCtx, tempId);
+    workspaceState.records = prependPlaceholder(workspaceState.records, placeholder);
+    await renderSidePanes();
+
+    // Step 2: 存储到服务端（平台无关，由 summary 公共结构承载数据）
+    log.info("[collection workspace] saving to server", { sourceProductId: summary.sourceProductId });
+    const { record: savedRecord, updatedBatch } = await saveCollectedToServer(summary, {
+      ...notifyCtx,
+      currentBatch: workspaceState.batch,
+      currentRecordsCount: workspaceState.records.length,
     });
-    workspaceState.records = [
-      placeholderRecord,
-      ...workspaceState.records.filter((item) => String(item.sourceProductId) !== String(parsed.sourceProductId)),
-    ];
-    await renderSidePanes();
 
-    // Step 2: Call server API
-    log.info("[collection workspace] upserting record via server", { sourceProductId: parsed.sourceProductId });
-    const savedRecord = await upsertCollectRecord(Object.assign(new CollectRecordPreview(), {
-      appUserId: workspaceState.batch.appUserId,
-      collectBatchId: workspaceState.batch.id,
-      productName: parsed.productName,
-      sourceProductId: parsed.sourceProductId,
-      sourceSnapshotUrl: url,
-      isFavorite: false,
-      status: parsed.status,
-    }));
+    if (updatedBatch) {
+      workspaceState.batch = updatedBatch;
+    }
 
-    // Step 3: Replace placeholder with real record
-    const normalizedRecord = Object.assign(new CollectRecordPreview(), savedRecord);
-    workspaceState.records = [
-      normalizedRecord,
-      ...workspaceState.records.filter((item) => item.id !== tempId && item.id !== normalizedRecord.id),
-    ];
-    workspaceState.selectedRecordId = normalizedRecord.id || workspaceState.selectedRecordId;
-    lastScrapedSourceProductId = parsed.sourceProductId;
+    // Step 3: 通知左侧面板 — 用真实 record 替换占位
+    workspaceState.records = applyRecordUpdate(workspaceState.records, savedRecord, tempId);
+    workspaceState.selectedRecordId = savedRecord.id || workspaceState.selectedRecordId;
+    lastScrapedSourceProductId = summary.sourceProductId;
     await renderSidePanes();
-    await pushRecordToTestingBridge(normalizedRecord);
+    await pushRecordToTestingBridge(savedRecord);
   } catch (error) {
-    // Clean up placeholder on error
+    // 出错时移除占位 record，避免 UI 卡住
     workspaceState.records = workspaceState.records.filter((item) => item.id !== tempId);
     await renderSidePanes();
     log.warn("[collection workspace] failed to collect current goods", error);
@@ -625,6 +557,7 @@ export async function openCollectionWorkspace(options: OpenCollectionWorkspaceOp
     selectedRecordId: options.records[0]?.id || 0,
     sourceType: options.sourceType || "unknown",
   };
+  workspaceRightPanelVisible = workspaceState.sourceType !== "tb";
 
   if (!workspaceWindow || workspaceWindow.isDestroyed()) {
     workspaceWindow = new BrowserWindow({
@@ -668,6 +601,7 @@ export async function openCollectionWorkspace(options: OpenCollectionWorkspaceOp
       workspaceWindow = null;
       workspaceViews = null;
       workspaceState = new CollectionWorkspaceState();
+      workspaceRightPanelVisible = true;
       isScrapingRecord = false;
       lastScrapedSourceProductId = "";
       centerDebuggerBoundViewId = 0;
@@ -762,6 +696,23 @@ export async function selectCollectionWorkspaceRecord(recordId: number) {
     }
   }
 
+  return cloneState();
+}
+
+export async function previewCollectionWorkspaceRecord(recordId: number) {
+  const nextState = await selectCollectionWorkspaceRecord(recordId);
+  if (workspaceState.sourceType === "tb") {
+    workspaceRightPanelVisible = true;
+    syncViewBounds();
+    await renderSidePanes();
+  }
+  return nextState;
+}
+
+export async function setCollectionWorkspaceRightPanelVisible(visible: boolean) {
+  workspaceRightPanelVisible = Boolean(visible);
+  syncViewBounds();
+  await renderSidePanes();
   return cloneState();
 }
 

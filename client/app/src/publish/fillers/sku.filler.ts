@@ -1,6 +1,11 @@
 import type { IFiller, FillerContext } from './filler.interface';
-import type { TbSaleProp, TbSalePropValue } from '../types/draft';
-import type { NormalizedSku, NormalizedSkuAttr } from '../types/source-data';
+import type { TbSaleProp } from '../types/draft';
+import type { NormalizedSku } from '../types/source-data';
+
+function parseYuanPrice(value: string): number {
+  const numeric = Number(String(value || '').replace(/[^\d.]/g, ''));
+  return Number.isFinite(numeric) ? numeric : 0;
+}
 
 /**
  * SkuFiller — SKU 填充器
@@ -26,16 +31,10 @@ export class SkuFiller implements IFiller {
 
     const salePropList = categoryInfo.salePropList ?? [];
 
-    // 构建销售属性映射: attrName → TbSaleProp
-    const salePropMap = new Map<string, TbSaleProp>();
-    for (const sp of salePropList) {
-      salePropMap.set(sp.name, sp);
-    }
-
     // 收集所有使用到的属性名（去重）
     const attrNames = new Set<string>();
     for (const sku of skuList) {
-      for (const attr of sku.attributes) {
+      for (const attr of sku.specs ?? []) {
         attrNames.add(attr.name);
       }
     }
@@ -74,9 +73,9 @@ export class SkuFiller implements IFiller {
         skuId: entry.skuId,
         specId: entry.specId,
         // 淘宝价格单位：分
-        price: Math.round((skuList[idx]?.price ?? 0) * 100),
+        price: Math.round(parseYuanPrice(skuList[idx]?.price ?? '') * 100),
         quantity: skuList[idx]?.stock ?? 0,
-        outerSkuId: skuList[idx]?.skuCode ?? '',
+        outerSkuId: skuList[idx]?.skuId ?? '',
       })),
     };
   }
@@ -87,7 +86,7 @@ export class SkuFiller implements IFiller {
     valuVidMap: Map<string, string>,
   ): Record<string, unknown> | null {
     const specParts: string[] = [];
-    for (const attr of sku.attributes) {
+    for (const attr of sku.specs ?? []) {
       const pid = attrPidMap.get(attr.name);
       if (!pid) continue;
       const vid =
@@ -103,7 +102,7 @@ export class SkuFiller implements IFiller {
     return {
       skuId: specId,
       specId,
-      imageUrl: sku.imageUrl ?? '',
+      imageUrl: sku.imgUrl ?? '',
     };
   }
 

@@ -1,5 +1,10 @@
 import type { IFiller, FillerContext } from './filler.interface';
 
+function parseYuanPrice(value: string): number {
+  const numeric = Number(String(value || '').replace(/[^\d.]/g, ''));
+  return Number.isFinite(numeric) ? numeric : 0;
+}
+
 /**
  * BasicInfoFiller — 基本信息填充器
  *
@@ -40,13 +45,13 @@ export class BasicInfoFiller implements IFiller {
     };
 
     // 外部商品 ID（可选，用于对接 ERP）
-    if (product.originalItemId) {
-      draftPayload['outerSkuId'] = product.originalItemId;
+    if (product.sourceId) {
+      draftPayload['outerSkuId'] = product.sourceId;
     }
 
     // 价格区间（从 SKU 列表中计算 min/max）
     if (product.skuList.length > 0) {
-      const prices = product.skuList.map(s => s.price).filter(p => p > 0);
+      const prices = product.skuList.map(s => parseYuanPrice(s.price)).filter(p => p > 0);
       if (prices.length > 0) {
         const minPrice = Math.min(...prices);
         const maxPrice = Math.max(...prices);

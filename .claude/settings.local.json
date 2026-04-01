@@ -5,7 +5,10 @@
       "Bash(ls -la /Users/fly/Documents/develop/project/private/taobao/maserati/client/webview/src/app/\\\\\\(console\\\\\\)/collection/api/)",
       "Bash(ls -la /Users/fly/Documents/develop/project/private/taobao/maserati/client/webview/src/app/\\\\\\(console\\\\\\)/collection/hooks/)",
       "Bash(grep -E \"\\\\.ts$|\\\\.go$\")",
-      "Bash(npx tsc:*)"
+      "Bash(npx tsc:*)",
+      "Bash(find /Users/fly/Documents/develop/project/private/taobao/maserati/client/app/src/publish -type f -name *.ts -o -name *.tsx)",
+      "Bash(find /Users/fly/Documents/develop/project/private/taobao/maserati/client/app/src -path *publish* -type f)",
+      "Bash(grep -E \"\\\\.go$\")"
     ]
   }
 }

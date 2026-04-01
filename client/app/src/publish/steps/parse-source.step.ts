@@ -5,6 +5,7 @@ import type { StepContext } from '../core/step-context';
 import { PublishError } from '../core/errors';
 import { ParserFactory } from '../parsers/parser-factory';
 import type { RawSourceData } from '../types/source-data';
+import type { SourceType } from '../types/publish-task';
 
 /**
  * ParseSourceStep — 解析源数据（Step 1）
@@ -24,11 +25,15 @@ export class ParseSourceStep extends PublishStep {
 
   protected async doExecute(ctx: StepContext): Promise<StepResult> {
     const rawSource = ctx.get('rawSource') as RawSourceData | undefined;
+    const sourceType = ctx.get('sourceType') as SourceType | undefined;
     if (!rawSource) {
       throw new PublishError(this.stepCode, '源数据为空，无法解析');
     }
+    if (!sourceType) {
+      throw new PublishError(this.stepCode, '源数据类型为空，无法解析');
+    }
 
-    const parser = ParserFactory.getParser(rawSource.type as any);
+    const parser = ParserFactory.getParser(sourceType);
     const product = parser.parse(rawSource);
 
     if (!product.title) {

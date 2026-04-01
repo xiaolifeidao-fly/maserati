@@ -85,6 +85,7 @@ export class PublishRunner {
   async run(taskId: number): Promise<void> {
     const task = await this.persister.getTask(taskId);
     const ctx = new StepContext(taskId, task.shopId);
+    ctx.set('sourceType', task.sourceType);
 
     // 恢复上下文（将已完成步骤的 outputData 反序列化注入 ctx）
     await this.restoreContext(ctx, task);
@@ -180,6 +181,7 @@ export class PublishRunner {
       case StepCode.SEARCH_CATEGORY:
         if (output.categoryId)   ctx.set('categoryId', output.categoryId as string);
         if (output.categoryInfo) ctx.set('categoryInfo', output.categoryInfo as any);
+        if (output.product)      ctx.set('product', output.product as any);
         break;
       case StepCode.FILL_DRAFT:
       case StepCode.EDIT_DRAFT:

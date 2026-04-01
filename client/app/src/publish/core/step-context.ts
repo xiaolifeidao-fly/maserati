@@ -1,6 +1,7 @@
 import type { TbCategoryInfo, TbDraftContext } from '../types/draft';
 import type { NormalizedProduct } from '../types/source-data';
 import type { RawSourceData } from '../types/source-data';
+import type { SourceType } from '../types/publish-task';
 
 /**
  * StepContext 保存整个发布流程中步骤间共享的中间状态。
@@ -9,6 +10,7 @@ import type { RawSourceData } from '../types/source-data';
 export interface StepContextSnapshot {
   taskId: number;
   shopId: number;
+  sourceType?: SourceType;
   // ── Step 1: ParseSource 产出 ──────────────────────────────────
   rawSource?: RawSourceData;
   product?: NormalizedProduct;

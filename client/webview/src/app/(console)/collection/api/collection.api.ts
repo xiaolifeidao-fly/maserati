@@ -67,6 +67,14 @@ export async function selectCollectionWorkspaceRecord(recordId: number) {
   return getCollectionWorkspaceApi().selectRecord(recordId);
 }
 
+export async function previewCollectionWorkspaceRecord(recordId: number) {
+  return getCollectionWorkspaceApi().previewRecord(recordId);
+}
+
+export async function setCollectionWorkspaceRightPanelVisible(visible: boolean) {
+  return getCollectionWorkspaceApi().setRightPanelVisible(visible);
+}
+
 export async function updateWorkspaceRecord(recordId: number, payload: { isFavorite?: boolean }) {
   return getCollectionWorkspaceApi().updateRecord(recordId, payload);
 }

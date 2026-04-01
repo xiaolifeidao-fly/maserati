@@ -11,6 +11,7 @@ import {
   EyeOutlined,
   LeftOutlined,
   RightOutlined,
+  CloseOutlined,
   InboxOutlined,
 } from "@ant-design/icons";
 import { Button, Empty, Input, Select, Space, Spin, Tag, Tooltip, message } from "antd";
@@ -27,7 +28,9 @@ import {
   fetchCollectBatchTestingOptions,
   fetchCollectionShopOptions,
   navigateCollectionWorkspace,
+  previewCollectionWorkspaceRecord,
   selectCollectionWorkspaceRecord,
+  setCollectionWorkspaceRightPanelVisible,
   updateCollectRecord,
   updateWorkspaceRecord,
   getCollectedProductRawData,
@@ -253,6 +256,23 @@ export function CollectionWorkspaceLeftPanel({
       await selectCollectionWorkspaceRecord(recordId);
     } catch (error) {
       message.error(error instanceof Error ? error.message : "切换采集商品失败");
+    }
+  };
+
+  const handlePreviewRecord = async (record: CollectRecordPreview, event: React.MouseEvent) => {
+    event.stopPropagation();
+    if (record.isLoading) return;
+    if (propOnSelectRecord) {
+      propOnSelectRecord(record.id);
+      if (propOnPreviewRecord) {
+        await propOnPreviewRecord(record);
+      }
+      return;
+    }
+    try {
+      await previewCollectionWorkspaceRecord(record.id);
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "打开商品详情失败");
     }
   };
 
@@ -589,7 +609,7 @@ export function CollectionWorkspaceLeftPanel({
                       </button>
                       <button
                         type="button"
-                        onClick={(e) => { e.stopPropagation(); void handleSelectRecord(record.id); }}
+                        onClick={(e) => void handlePreviewRecord(record, e)}
                         style={{
                           width: 28,
                           height: 28,
@@ -647,6 +667,8 @@ export function CollectionWorkspaceRightPanel({
   const [rawData, setRawData] = useState<Record<string, unknown> | null>(null);
   const [dataLoading, setDataLoading] = useState(false);
   const [editedData, setEditedData] = useState<import("./standard-product.types").StandardProductData | null>(null);
+  const [closingPanel, setClosingPanel] = useState(false);
+  const isTbWorkspace = workspaceState.sourceType === "tb";
 
   const selectedRecord = useMemo(() => {
     return workspaceState.records.find((item) => item.id === workspaceState.selectedRecordId) || null;
@@ -699,6 +721,20 @@ export function CollectionWorkspaceRightPanel({
   const handleSave = () => {
     if (!selectedRecord || !editedData) return;
     message.info("保存逻辑待接入");
+  };
+
+  const handleClosePanel = async () => {
+    if (isControlled) {
+      return;
+    }
+    setClosingPanel(true);
+    try {
+      await setCollectionWorkspaceRightPanelVisible(false);
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "收起详情面板失败");
+    } finally {
+      setClosingPanel(false);
+    }
   };
 
   return (
@@ -755,6 +791,19 @@ export function CollectionWorkspaceRightPanel({
 
         {selectedRecord && (
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+            {!isControlled && isTbWorkspace && (
+              <Button
+                size="small"
+                onClick={() => void handleClosePanel()}
+                loading={closingPanel}
+                style={{
+                  border: "none",
+                  boxShadow: "0 8px 24px rgba(15,23,42,0.12)",
+                }}
+              >
+                <CloseOutlined />
+              </Button>
+            )}
             <Button
               type="primary"
               size="small"

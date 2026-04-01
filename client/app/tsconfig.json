@@ -26,6 +26,9 @@
       "@model/*": [
         "../common/model/*"
       ],
+      "@product/*": [
+        "../common/product/*"
+      ],
       "@eleapi/*": [
         "../common/eleapi/*"
       ],

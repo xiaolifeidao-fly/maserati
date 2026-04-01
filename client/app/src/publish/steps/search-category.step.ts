@@ -12,13 +12,13 @@ import type { TbCategoryInfo } from '../types/draft';
  * 职责：
  *  - 根据商品标题和属性在淘宝类目库中搜索最匹配的类目
  *  - 获取该类目的完整属性列表（用于后续草稿填充）
- *  - 将商品的 props[].name 映射到类目属性的 pid
+ *  - 将商品的 attributes[].name 映射到类目属性的 pid
  *  - 将结果写回 ctx
  *
  * 输出到 ctx：
  *  - categoryId: string        — 淘宝类目 ID
  *  - categoryInfo: TbCategoryInfo — 类目完整信息
- *  - product.props[].pid/vid   — 属性匹配后填充
+ *  - product.attributes[].pid/vid   — 属性匹配后填充
  *
  * 扩展建议：
  *  - 可接入 AI 辅助类目推荐（替换 searchCategory 实现）
@@ -42,7 +42,7 @@ export class SearchCategoryStep extends PublishStep {
     // 搜索类目
     const categoryInfo = await this.searchCategory(ctx.taskId, {
       title: product.title,
-      props: product.props.map(p => ({ name: p.name, value: p.value })),
+      props: product.attributes.map(p => ({ name: p.name, value: p.value })),
     });
 
     if (!categoryInfo?.catId) {
@@ -51,7 +51,7 @@ export class SearchCategoryStep extends PublishStep {
 
     // 将商品属性映射到类目属性 pid/vid
     const updatedProduct = { ...product };
-    updatedProduct.props = product.props.map(prop => {
+    updatedProduct.attributes = product.attributes.map(prop => {
       const matched = this.matchCategoryProp(prop.name, prop.value, categoryInfo);
       return { ...prop, ...matched };
     });
@@ -63,7 +63,7 @@ export class SearchCategoryStep extends PublishStep {
     return {
       status: StepStatus.SUCCESS,
       message: `类目匹配成功: ${categoryInfo.catName}（${categoryInfo.catId}）`,
-      outputData: { categoryId: categoryInfo.catId, categoryInfo },
+      outputData: { categoryId: categoryInfo.catId, categoryInfo, product: updatedProduct },
     };
   }
 

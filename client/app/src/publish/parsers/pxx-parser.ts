@@ -1,12 +1,6 @@
+import { convertPxxToStandard } from '@product/standard-product';
 import { SourceType } from '../types/publish-task';
-import type {
-  RawSourceData,
-  PxxSourceData,
-  NormalizedProduct,
-  NormalizedProp,
-  NormalizedSku,
-  NormalizedLogistics,
-} from '../types/source-data';
+import type { RawSourceData, NormalizedProduct } from '../types/source-data';
 import type { ISourceParser } from './parser.interface';
 
 /**
@@ -21,47 +15,6 @@ export class PxxSourceParser implements ISourceParser {
   readonly sourceType = SourceType.PXX;
 
   parse(raw: RawSourceData): NormalizedProduct {
-    if (raw.type !== SourceType.PXX) {
-      throw new Error(`PxxSourceParser: 不支持的源类型 ${raw.type}`);
-    }
-    const src = raw as PxxSourceData;
-
-    if (!src.title?.trim()) {
-      throw new Error('PXX 源数据缺少必填字段: title');
-    }
-
-    const props: NormalizedProp[] = (src.props ?? []).map(p => ({
-      name: p.key?.trim() ?? '',
-      value: p.value?.trim() ?? '',
-    })).filter(p => p.name && p.value);
-
-    const skuList: NormalizedSku[] = (src.skuList ?? []).map(sku => ({
-      attributes: (sku.skuSpecs ?? []).map(spec => ({
-        name: spec.specKey?.trim() ?? '',
-        value: spec.specValue?.trim() ?? '',
-        imageUrl: spec.imageUrl,
-      })),
-      // PXX 价格单位为分，转换为元，保留两位小数
-      price: Math.round((Number(sku.price) || 0) / 100 * 100) / 100,
-      stock: Math.max(0, Number(sku.stock) || 0),
-      skuCode: sku.skuCode,
-      imageUrl: sku.imageUrl,
-    }));
-
-    const logistics: NormalizedLogistics = {
-      weight: src.logistics?.weight,
-      templateId: src.logistics?.freightTemplateId,
-    };
-
-    return {
-      title: src.title.trim(),
-      subTitle: src.subTitle?.trim(),
-      originalItemId: src.outerItemId,
-      mainImages: (src.mainImages ?? []).filter(Boolean),
-      detailImages: (src.detailImages ?? []).filter(Boolean),
-      props,
-      skuList,
-      logistics,
-    };
+    return convertPxxToStandard(raw);
   }
 }

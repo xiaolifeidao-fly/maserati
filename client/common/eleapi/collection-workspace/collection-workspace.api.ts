@@ -33,6 +33,16 @@ export class CollectionWorkspaceApi extends ElectronApi {
   }
 
   @InvokeType(Protocols.INVOKE)
+  async previewRecord(recordId: number): Promise<CollectionWorkspaceState> {
+    return this.invokeApi("previewRecord", recordId);
+  }
+
+  @InvokeType(Protocols.INVOKE)
+  async setRightPanelVisible(visible: boolean): Promise<CollectionWorkspaceState> {
+    return this.invokeApi("setRightPanelVisible", visible);
+  }
+
+  @InvokeType(Protocols.INVOKE)
   async updateRecord(recordId: number, payload: { isFavorite?: boolean }): Promise<CollectionWorkspaceState> {
     return this.invokeApi("updateRecord", recordId, payload);
   }

@@ -3,6 +3,8 @@ import { type CollectSourceType } from "@eleapi/collect/collect.platform";
 import {
   getCollectionWorkspaceState,
   selectCollectionWorkspaceRecord,
+  previewCollectionWorkspaceRecord,
+  setCollectionWorkspaceRightPanelVisible,
   updateWorkspaceRecord,
   previewCollectedRecord,
   getCollectedProductStoreData,
@@ -17,6 +19,14 @@ export class CollectionWorkspaceImpl extends CollectionWorkspaceApi {
 
   async selectRecord(recordId: number) {
     return selectCollectionWorkspaceRecord(recordId);
+  }
+
+  async previewRecord(recordId: number) {
+    return previewCollectionWorkspaceRecord(recordId);
+  }
+
+  async setRightPanelVisible(visible: boolean) {
+    return setCollectionWorkspaceRightPanelVisible(visible);
   }
 
   async updateRecord(recordId: number, payload: { isFavorite?: boolean }) {

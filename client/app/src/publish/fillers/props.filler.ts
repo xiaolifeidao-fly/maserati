@@ -23,7 +23,7 @@ export class PropsFiller implements IFiller {
     const { product, categoryInfo, draftPayload } = ctx;
 
     const catProps = categoryInfo.props ?? [];
-    const productProps = product.props ?? [];
+    const productProps = product.attributes ?? [];
 
     const filledProps: Array<{
       pid: string;

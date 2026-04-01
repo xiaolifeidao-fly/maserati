@@ -66,59 +66,71 @@ export class CollectImpl extends CollectApi {
         pageSize: 100,
       },
     });
+    const normalizedRecords = Array.isArray(records.data) ? records.data : [];
+    let workspaceUrl = driver.homeUrl;
 
-    if (driver.sourceType !== "pxx") {
-      throw new Error(`采集平台 ${shop.platform || sourceType || "unknown"} 暂未接入，当前仅支持 pxx`);
+    if (driver.sourceType === "pxx") {
+      const engine = new PxxEngine(String(batch.shopId), true);
+      const openedPage = await engine.openCollectionWorkspace(batch, normalizedRecords);
+      if (!openedPage) {
+        throw new Error("采集引擎初始化失败");
+      }
+
+      const context = engine.getContext();
+      const cookies = context ? await context.cookies() : [];
+      const cookieDetails = cookies
+        .map((cookie) => {
+          const host = cookie.domain.replace(/^\./, "");
+          if (!host) {
+            return null;
+          }
+          return {
+            url: `${cookie.secure ? "https" : "http"}://${host}${cookie.path || "/"}`,
+            name: cookie.name,
+            value: cookie.value,
+            domain: cookie.domain,
+            path: cookie.path,
+            secure: cookie.secure,
+            httpOnly: cookie.httpOnly,
+            sameSite: mapCookieSameSite(cookie.sameSite),
+            expirationDate: cookie.expires > 0 ? cookie.expires : undefined,
+          };
+        })
+        .filter((item): item is NonNullable<typeof item> => Boolean(item));
+
+      workspaceUrl = await openCollectionWorkspace({
+        batch,
+        records: normalizedRecords,
+        sourceType,
+        initialUrl: driver.homeUrl,
+        cookies: cookieDetails,
+      });
+
+      if (!openedPage.isClosed()) {
+        await openedPage.close().catch(() => null);
+      }
+      await engine.closeContext().catch(() => null);
+      await engine.closeBrowser().catch(() => null);
+    } else if (driver.sourceType === "tb") {
+      workspaceUrl = await openCollectionWorkspace({
+        batch,
+        records: normalizedRecords,
+        sourceType,
+        initialUrl: driver.homeUrl,
+      });
+    } else {
+      throw new Error(`采集平台 ${shop.platform || sourceType || "unknown"} 暂未接入`);
     }
-
-    const engine = new PxxEngine(String(batch.shopId), true);
-    const openedPage = await engine.openCollectionWorkspace(batch, Array.isArray(records.data) ? records.data : []);
-    if (!openedPage) {
-      throw new Error("采集引擎初始化失败");
-    }
-
-    const context = engine.getContext();
-    const cookies = context ? await context.cookies() : [];
-    const cookieDetails = cookies
-      .map((cookie) => {
-        const host = cookie.domain.replace(/^\./, "");
-        if (!host) {
-          return null;
-        }
-        return {
-          url: `${cookie.secure ? "https" : "http"}://${host}${cookie.path || "/"}`,
-          name: cookie.name,
-          value: cookie.value,
-          domain: cookie.domain,
-          path: cookie.path,
-          secure: cookie.secure,
-          httpOnly: cookie.httpOnly,
-          sameSite: mapCookieSameSite(cookie.sameSite),
-          expirationDate: cookie.expires > 0 ? cookie.expires : undefined,
-        };
-      })
-      .filter((item): item is NonNullable<typeof item> => Boolean(item));
-
-    const workspaceUrl = await openCollectionWorkspace({
-      batch,
-      records: Array.isArray(records.data) ? records.data : [],
-      sourceType,
-      initialUrl: driver.homeUrl,
-      cookies: cookieDetails,
-    });
-
-    if (!openedPage.isClosed()) {
-      await openedPage.close().catch(() => null);
-    }
-    await engine.closeContext().catch(() => null);
-    await engine.closeBrowser().catch(() => null);
 
     return Object.assign(new CollectStartResult(), {
       success: true,
       batchId,
       pageUrl: workspaceUrl,
       sourceType,
-      message: `采集工作台已打开：${batch.name || `批次 #${batchId}`}`,
+      message:
+        driver.sourceType === "tb"
+          ? `淘宝采集工作台已打开：${batch.name || `批次 #${batchId}`}`
+          : `采集工作台已打开：${batch.name || `批次 #${batchId}`}`,
     });
   }
 

@@ -2,7 +2,7 @@ import type { CollectionPlatformDriver } from "./types";
 
 export const tbCollectionDriver: CollectionPlatformDriver = {
   sourceType: "tb",
-  homeUrl: "https://market.m.taobao.com/",
+  homeUrl: "https://www.taobao.com/",
   storeKeyPrefix: "tb_product",
   extractSourceProductId(_url: string) {
     return "";

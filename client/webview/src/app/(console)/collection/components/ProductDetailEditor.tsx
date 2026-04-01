@@ -10,7 +10,7 @@ import {
   SwapOutlined,
   UpOutlined,
 } from "@ant-design/icons";
-import { Button, Input, Modal, Spin, message } from "antd";
+import { AutoComplete, Button, Input, Modal, Spin, message } from "antd";
 import type { AttributeItem, SkuItem, StandardProductData } from "./standard-product.types";
 
 const { TextArea } = Input;
@@ -189,120 +189,206 @@ function ImageActionButton({
 
 function MainImagePanel({
   images,
+  allImages,
   onChange,
   onPreview,
 }: {
   images: string[];
+  allImages?: string[];
   onChange: (next: string[]) => void;
   onPreview: (url: string) => void;
 }) {
   const slots = normalizeMainImages(images);
+  const selectedImages = images.filter(Boolean);
+  const selectedSet = new Set(selectedImages);
+  const hasCandidates = Array.isArray(allImages) && allImages.length > 5;
+
+  const toggleCandidate = (url: string) => {
+    if (selectedSet.has(url)) {
+      onChange(selectedImages.filter((u) => u !== url));
+    } else {
+      if (selectedImages.length >= 5) {
+        void message.warning("最多选择 5 张主图");
+        return;
+      }
+      onChange([...selectedImages, url]);
+    }
+  };
 
   return (
-    <div style={{ display: "flex", flexWrap: "wrap", gap: 16 }}>
-      {slots.map((url, index) => {
-        const hasImage = Boolean(url);
-        return (
-          <div
-            key={`main-image-${index}`}
-            style={{
-              width: 150,
-              height: 150,
-              borderRadius: 14,
-              border: "1px dashed rgba(148,163,184,0.45)",
-              background: hasImage
-                ? "linear-gradient(180deg, rgba(255,255,255,0.98), rgba(248,250,252,0.98))"
-                : "linear-gradient(180deg, rgba(248,250,252,0.95), rgba(241,245,249,0.95))",
-              position: "relative",
-              overflow: "hidden",
-              flexShrink: 0,
-            }}
-          >
-            {hasImage ? (
-              <button
-                type="button"
-                onClick={() => onPreview(url)}
-                style={{
-                  width: "100%",
-                  height: "100%",
-                  padding: 0,
-                  border: "none",
-                  background: "transparent",
-                  cursor: "zoom-in",
-                }}
-                title="预览大图"
-              >
-                <img
-                  src={url}
-                  alt={`主图${index + 1}`}
-                  style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
-                />
-              </button>
-            ) : (
-              <div
-                style={{
-                  width: "100%",
-                  height: "100%",
-                  display: "flex",
-                  flexDirection: "column",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  gap: 10,
-                  color: "#94a3b8",
-                  fontSize: 12,
-                }}
-              >
-                <PictureOutlined style={{ fontSize: 28 }} />
-                <span>主图 {index + 1}</span>
-                <span>暂未设置</span>
-              </div>
-            )}
+    <div>
+      {hasCandidates ? (
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ fontSize: 12, color: "#64748b", marginBottom: 8 }}>
+            共 {allImages!.length} 张候选图，已选 {selectedImages.length}/5，点击选择/取消
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+            {allImages!.map((url, index) => {
+              const isSelected = selectedSet.has(url);
+              const order = isSelected ? selectedImages.indexOf(url) + 1 : 0;
+              const maxReached = !isSelected && selectedImages.length >= 5;
+              return (
+                <div
+                  key={`candidate-${index}`}
+                  title={isSelected ? `已选为第 ${order} 张主图，点击取消` : maxReached ? "已选满 5 张" : "点击选为主图"}
+                  onClick={() => !maxReached && toggleCandidate(url)}
+                  style={{
+                    width: 80,
+                    height: 80,
+                    borderRadius: 8,
+                    border: isSelected ? "2.5px solid #3b82f6" : "1.5px solid #e2e8f0",
+                    position: "relative",
+                    overflow: "hidden",
+                    cursor: maxReached ? "not-allowed" : "pointer",
+                    flexShrink: 0,
+                    opacity: maxReached ? 0.45 : 1,
+                    transition: "border-color 0.15s, opacity 0.15s",
+                  }}
+                >
+                  <img
+                    src={url}
+                    alt={`候选图${index + 1}`}
+                    style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+                  />
+                  {isSelected ? (
+                    <div
+                      style={{
+                        position: "absolute",
+                        top: 4,
+                        right: 4,
+                        width: 18,
+                        height: 18,
+                        borderRadius: "50%",
+                        background: "#3b82f6",
+                        color: "#fff",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        fontSize: 10,
+                        fontWeight: 700,
+                        lineHeight: 1,
+                      }}
+                    >
+                      {order}
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
+          <div style={{ marginTop: 14, borderTop: "1px solid #f1f5f9", paddingTop: 14, fontSize: 12, color: "#94a3b8" }}>
+            已选主图预览
+          </div>
+        </div>
+      ) : null}
 
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 16 }}>
+        {slots.map((url, index) => {
+          const hasImage = Boolean(url);
+          return (
             <div
+              key={`main-image-${index}`}
               style={{
-                position: "absolute",
-                top: 8,
-                right: 8,
-                display: "flex",
-                gap: 6,
+                width: 150,
+                height: 150,
+                borderRadius: 14,
+                border: "1px dashed rgba(148,163,184,0.45)",
+                background: hasImage
+                  ? "linear-gradient(180deg, rgba(255,255,255,0.98), rgba(248,250,252,0.98))"
+                  : "linear-gradient(180deg, rgba(248,250,252,0.95), rgba(241,245,249,0.95))",
+                position: "relative",
+                overflow: "hidden",
+                flexShrink: 0,
               }}
             >
               {hasImage ? (
-                <>
-                  <ImageActionButton icon={<EyeOutlined />} title="预览大图" onClick={() => onPreview(url)} />
-                  <ImageActionButton
-                    icon={<DeleteOutlined />}
-                    title="删除图片"
-                    danger
-                    onClick={() => {
-                      const next = [...slots];
-                      next[index] = "";
-                      onChange(next.filter(Boolean));
-                    }}
+                <button
+                  type="button"
+                  onClick={() => onPreview(url)}
+                  style={{
+                    width: "100%",
+                    height: "100%",
+                    padding: 0,
+                    border: "none",
+                    background: "transparent",
+                    cursor: "zoom-in",
+                  }}
+                  title="预览大图"
+                >
+                  <img
+                    src={url}
+                    alt={`主图${index + 1}`}
+                    style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
                   />
-                </>
+                </button>
+              ) : (
+                <div
+                  style={{
+                    width: "100%",
+                    height: "100%",
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 10,
+                    color: "#94a3b8",
+                    fontSize: 12,
+                  }}
+                >
+                  <PictureOutlined style={{ fontSize: 28 }} />
+                  <span>主图 {index + 1}</span>
+                  <span>暂未设置</span>
+                </div>
+              )}
+
+              <div
+                style={{
+                  position: "absolute",
+                  top: 8,
+                  right: 8,
+                  display: "flex",
+                  gap: 6,
+                }}
+              >
+                {hasImage ? (
+                  <>
+                    <ImageActionButton icon={<EyeOutlined />} title="预览大图" onClick={() => onPreview(url)} />
+                    <ImageActionButton
+                      icon={<DeleteOutlined />}
+                      title="删除图片"
+                      danger
+                      onClick={() => {
+                        const next = [...slots];
+                        next[index] = "";
+                        onChange(next.filter(Boolean));
+                      }}
+                    />
+                  </>
+                ) : null}
+              </div>
+
+              {!hasCandidates ? (
+                <div
+                  style={{
+                    position: "absolute",
+                    right: 8,
+                    bottom: 8,
+                  }}
+                >
+                  <Button
+                    size="small"
+                    type={hasImage ? "default" : "primary"}
+                    icon={hasImage ? <SwapOutlined /> : <PlusOutlined />}
+                    onClick={() => message.info(TODO_ACTION_TEXT)}
+                  >
+                    {hasImage ? "替换" : "上传"}
+                  </Button>
+                </div>
               ) : null}
             </div>
-
-            <div
-              style={{
-                position: "absolute",
-                right: 8,
-                bottom: 8,
-              }}
-            >
-              <Button
-                size="small"
-                type={hasImage ? "default" : "primary"}
-                icon={hasImage ? <SwapOutlined /> : <PlusOutlined />}
-                onClick={() => message.info(TODO_ACTION_TEXT)}
-              >
-                {hasImage ? "替换" : "上传"}
-              </Button>
-            </div>
-          </div>
-        );
-      })}
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -464,20 +550,34 @@ function AttributeRows({
     return <div style={{ padding: "16px 0", textAlign: "center", color: "#cbd5e1", fontSize: 12 }}>暂无属性数据</div>;
   }
 
+  const updateValue = (idx: number, value: string) => {
+    onChange(attributes.map((item, index) => (index === idx ? { ...item, value } : item)));
+  };
+
   return (
     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "8px 16px" }}>
       {attributes.map((attr, idx) => (
         <div key={idx}>
           <div style={{ fontSize: 11, color: "#64748b", marginBottom: 3 }}>{attr.name}</div>
-          <Input
-            size="small"
-            value={attr.value}
-            onChange={(e) => {
-              const next = attributes.map((item, index) => (index === idx ? { ...item, value: e.target.value } : item));
-              onChange(next);
-            }}
-            style={{ fontSize: 12 }}
-          />
+          {attr.options && attr.options.length > 1 ? (
+            <AutoComplete
+              size="small"
+              value={attr.value}
+              options={attr.options.map((opt) => ({ value: opt }))}
+              onChange={(value) => updateValue(idx, value)}
+              filterOption={(input, option) =>
+                String(option?.value ?? "").toLowerCase().includes(input.toLowerCase())
+              }
+              style={{ width: "100%", fontSize: 12 }}
+            />
+          ) : (
+            <Input
+              size="small"
+              value={attr.value}
+              onChange={(e) => updateValue(idx, e.target.value)}
+              style={{ fontSize: 12 }}
+            />
+          )}
         </div>
       ))}
     </div>
@@ -495,6 +595,31 @@ function SkuTable({
     return <div style={{ padding: "16px 0", textAlign: "center", color: "#cbd5e1", fontSize: 12 }}>暂无规格数据</div>;
   }
 
+  const specColumns = Array.from(
+    skuList.reduce((map, sku) => {
+      const specs = Array.isArray(sku.specs) && sku.specs.length > 0
+        ? sku.specs
+        : [{ name: "规格", value: sku.spec, propId: undefined, valueId: undefined, imageUrl: sku.imgUrl }];
+
+      specs.forEach((spec, index) => {
+        const key = spec.propId || `index-${index}`;
+        if (!map.has(key)) {
+          map.set(key, {
+            key,
+            index,
+            name: spec.name || `规格${index + 1}`,
+          });
+          return;
+        }
+        const current = map.get(key);
+        if (current && !current.name && spec.name) {
+          current.name = spec.name;
+        }
+      });
+      return map;
+    }, new Map<string, { key: string; index: number; name: string }>()).values(),
+  ).sort((left, right) => left.index - right.index);
+
   const colStyle: CSSProperties = {
     fontSize: 11,
     fontWeight: 700,
@@ -504,6 +629,70 @@ function SkuTable({
     borderBottom: "1px solid #e8ecf0",
   };
 
+  const gridTemplateColumns = `${specColumns.map(() => "minmax(140px, 1.2fr)").join(" ")} minmax(110px, 0.9fr) minmax(110px, 0.9fr)`;
+
+  const updateColumnName = (columnKey: string, nextName: string) => {
+    const nextList = skuList.map((sku) => {
+      const specs = Array.isArray(sku.specs) && sku.specs.length > 0
+        ? sku.specs
+        : [{ name: "规格", value: sku.spec, propId: undefined, valueId: undefined, imageUrl: sku.imgUrl }];
+
+      const nextSpecs = specs.map((spec, index) => {
+        const specKey = spec.propId || `index-${index}`;
+        return specKey === columnKey ? { ...spec, name: nextName } : spec;
+      });
+
+      return {
+        ...sku,
+        specs: nextSpecs,
+      };
+    });
+    onChange(nextList);
+  };
+
+  const updateSpecValue = (rowIndex: number, columnKey: string, nextValue: string) => {
+    const nextList = skuList.map((sku, index) => {
+      if (index !== rowIndex) {
+        return sku;
+      }
+      const fallbackSpecs = specColumns.map((column, columnIndex) => {
+        const currentSpec = sku.specs?.find((item, itemIndex) => (item.propId || `index-${itemIndex}`) === column.key);
+        if (currentSpec) {
+          return currentSpec;
+        }
+        if (columnIndex === 0 && !sku.specs?.length) {
+          return {
+            name: column.name,
+            value: sku.spec,
+            propId: undefined,
+            valueId: undefined,
+            imageUrl: sku.imgUrl,
+          };
+        }
+        return {
+          name: column.name,
+          value: "",
+          propId: column.key.startsWith("index-") ? undefined : column.key,
+          valueId: undefined,
+          imageUrl: undefined,
+        };
+      });
+
+      const nextSpecs = fallbackSpecs.map((spec, specIndex) => {
+        const specKey = spec.propId || `index-${specIndex}`;
+        return specKey === columnKey ? { ...spec, name: spec.name || specColumns[specIndex]?.name || "规格", value: nextValue } : spec;
+      });
+
+      return {
+        ...sku,
+        spec: nextSpecs.map((item) => item.value).filter(Boolean).join(" / "),
+        specs: nextSpecs,
+      };
+    });
+
+    onChange(nextList);
+  };
+
   return (
     <div style={{ overflowX: "auto" }}>
       <div
@@ -511,11 +700,20 @@ function SkuTable({
           border: "1px solid #e8ecf0",
           borderRadius: 8,
           overflow: "hidden",
-          minWidth: 320,
+          minWidth: Math.max(360, specColumns.length * 150 + 220),
         }}
       >
-        <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr" }}>
-          <div style={colStyle}>颜色分类 / 规格</div>
+        <div style={{ display: "grid", gridTemplateColumns }}>
+          {specColumns.map((column) => (
+            <div key={`header-${column.key}`} style={colStyle}>
+              <Input
+                size="small"
+                value={column.name}
+                onChange={(event) => updateColumnName(column.key, event.target.value)}
+                style={{ fontSize: 12 }}
+              />
+            </div>
+          ))}
           <div style={{ ...colStyle, textAlign: "center" }}>价格（元）</div>
           <div style={{ ...colStyle, textAlign: "center" }}>数量（件）</div>
         </div>
@@ -525,37 +723,43 @@ function SkuTable({
             key={idx}
             style={{
               display: "grid",
-              gridTemplateColumns: "2fr 1fr 1fr",
+              gridTemplateColumns,
               alignItems: "center",
               borderBottom: idx < skuList.length - 1 ? "1px solid #f1f5f9" : "none",
               background: idx % 2 === 0 ? "#fff" : "#fafbfc",
             }}
           >
-            <div style={{ display: "flex", alignItems: "center", gap: 7, padding: "8px 8px", minWidth: 0 }}>
-              {sku.imgUrl ? (
-                <img
-                  src={sku.imgUrl}
-                  alt=""
-                  style={{
-                    width: 28,
-                    height: 28,
-                    borderRadius: 4,
-                    objectFit: "cover",
-                    flexShrink: 0,
-                    background: "#f1f5f9",
-                  }}
-                />
-              ) : null}
-              <Input
-                size="small"
-                value={sku.spec}
-                onChange={(e) => {
-                  const next = skuList.map((item, index) => (index === idx ? { ...item, spec: e.target.value } : item));
-                  onChange(next);
-                }}
-                style={{ fontSize: 12, flex: 1, minWidth: 0 }}
-              />
-            </div>
+            {specColumns.map((column, columnIndex) => {
+              const matchedSpec = sku.specs?.find((item, specIndex) => (item.propId || `index-${specIndex}`) === column.key);
+              const fallbackValue = !sku.specs?.length && columnIndex === 0 ? sku.spec : "";
+              const currentValue = matchedSpec?.value ?? fallbackValue;
+              const currentImage = matchedSpec?.imageUrl || (columnIndex === 0 ? sku.imgUrl : undefined);
+
+              return (
+                <div key={`${idx}-${column.key}`} style={{ display: "flex", alignItems: "center", gap: 7, padding: "8px 8px", minWidth: 0 }}>
+                  {currentImage ? (
+                    <img
+                      src={currentImage}
+                      alt=""
+                      style={{
+                        width: 28,
+                        height: 28,
+                        borderRadius: 4,
+                        objectFit: "cover",
+                        flexShrink: 0,
+                        background: "#f1f5f9",
+                      }}
+                    />
+                  ) : null}
+                  <Input
+                    size="small"
+                    value={currentValue}
+                    onChange={(event) => updateSpecValue(idx, column.key, event.target.value)}
+                    style={{ fontSize: 12, flex: 1, minWidth: 0 }}
+                  />
+                </div>
+              );
+            })}
             <div style={{ padding: "8px 6px" }}>
               <Input
                 size="small"
@@ -684,9 +888,18 @@ export function ProductDetailEditor({ data, loading = false, onChange }: Product
           </div>
         </CollapsibleSection>
 
-        <CollapsibleSection title="商品主图" count={`${local.mainImages.filter(Boolean).length}/5 张`} defaultOpen>
+        <CollapsibleSection
+          title="商品主图"
+          count={
+            local.viewImages && local.viewImages.length > 5
+              ? `已选 ${local.mainImages.filter(Boolean).length}/5，共 ${local.viewImages.length} 张候选`
+              : `${local.mainImages.filter(Boolean).length}/5 张`
+          }
+          defaultOpen
+        >
           <MainImagePanel
             images={local.mainImages}
+            allImages={local.viewImages}
             onChange={(next) => patch({ mainImages: next.filter(Boolean).slice(0, 5) })}
             onPreview={(url) => setPreviewImage(url)}
           />
