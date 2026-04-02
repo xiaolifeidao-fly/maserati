@@ -7,11 +7,11 @@ import {
   type ProductRecord,
   type ShopRecord,
 } from "@eleapi/commerce/commerce.api";
-import { type CollectBatchRecord } from "@eleapi/collect/collect.api";
+import { type CollectBatchRecord, type CollectRecordPreview } from "@eleapi/collect/collect.api";
 import { getCommerceApi } from "@/utils/commerce";
 import { getCollectApi } from "@/utils/collect";
 
-export type { ProductListQuery, ProductPayload, ProductRecord, CategoryRecord, ShopRecord, CollectBatchRecord };
+export type { ProductListQuery, ProductPayload, ProductRecord, CategoryRecord, ShopRecord, CollectBatchRecord, CollectRecordPreview };
 
 export async function fetchProducts(query: ProductListQuery) {
   return getCommerceApi().listProducts(query);
@@ -39,4 +39,9 @@ export async function fetchCategoryOptions() {
 
 export async function fetchCollectBatchOptions() {
   return getCollectApi().listCollectBatches({ pageIndex: 1, pageSize: 200 });
+}
+
+export async function fetchCollectBatchFavoriteRecords(batchId: number): Promise<CollectRecordPreview[]> {
+  const result = await getCollectApi().listCollectRecords(batchId, { pageIndex: 1, pageSize: 1000 });
+  return (result.data ?? []).filter((r) => r.isFavorite);
 }

@@ -21,10 +21,12 @@ import {
 import type { ColumnsType } from "antd/es/table";
 import {
   createProduct,
+  fetchCollectBatchFavoriteRecords,
   fetchCollectBatchOptions,
   fetchShopOptions,
   updateProduct,
   type CollectBatchRecord,
+  type CollectRecordPreview,
   type ShopRecord,
 } from "../api/product.api";
 
@@ -72,6 +74,7 @@ interface PublishQueueItem {
   shopId: number;
   categoryId: number;
   sourceBatchId: number;
+  sourceRecordId: number;
   status: PublishQueueStatus;
   productId?: number;
   error?: string;
@@ -112,6 +115,7 @@ export function ProductPublishModal({
   const [priceSettings, setPriceSettings] = useState<PriceSettings>(loadPriceSettings);
   const [publishQueue, setPublishQueue] = useState<PublishQueueItem[]>([]);
   const [publishRunning, setPublishRunning] = useState(false);
+  const [fetchingFavorites, setFetchingFavorites] = useState(false);
   // Step 3 内部阶段：preview = 预览待发布数据，running = 发布任务执行中
   const [step3Phase, setStep3Phase] = useState<"preview" | "running">("preview");
 
@@ -174,26 +178,38 @@ export function ProductPublishModal({
     };
   }, [publishQueue]);
 
-  // 第二步 → 第三步：保存价格设置并生成预览队列
-  const handleConfirmPriceAndNext = () => {
+  // 第二步 → 第三步：保存价格设置，拉取喜欢的采集记录并生成预览队列
+  const handleConfirmPriceAndNext = async () => {
     if (!selectedBatch) {
       message.warning("请先选择采集批次");
       return;
     }
     savePriceSettings(priceSettings);
-    const count = Math.max(Number(selectedBatch.collectedCount ?? 0), 1);
-    const queue: PublishQueueItem[] = Array.from({ length: count }).map((_, index) => ({
-      key: `batch-${selectedBatch.id}-${index + 1}`,
-      title: `${selectedBatch.name} 商品 ${index + 1}`,
-      outerProductId: `BATCH-${selectedBatch.id}-${String(index + 1).padStart(3, "0")}`,
-      shopId: selectedBatch.shopId,
-      categoryId: 0,
-      sourceBatchId: selectedBatch.id,
-      status: "PENDING",
-    }));
-    setPublishQueue(queue);
-    setStep3Phase("preview");
-    setCurrentStep(2);
+    setFetchingFavorites(true);
+    try {
+      const favorites: CollectRecordPreview[] = await fetchCollectBatchFavoriteRecords(selectedBatch.id);
+      if (favorites.length === 0) {
+        message.warning("该批次暂无关注（喜欢）的采集记录，请先在采集页面标记喜欢后再发布");
+        return;
+      }
+      const queue: PublishQueueItem[] = favorites.map((record, index) => ({
+        key: `batch-${selectedBatch.id}-record-${record.id}`,
+        title: record.productName || `${selectedBatch.name} 商品 ${index + 1}`,
+        outerProductId: record.sourceProductId || `BATCH-${selectedBatch.id}-${String(index + 1).padStart(3, "0")}`,
+        shopId: selectedBatch.shopId,
+        categoryId: 0,
+        sourceBatchId: selectedBatch.id,
+        sourceRecordId: record.id,
+        status: "PENDING",
+      }));
+      setPublishQueue(queue);
+      setStep3Phase("preview");
+      setCurrentStep(2);
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "加载采集记录失败");
+    } finally {
+      setFetchingFavorites(false);
+    }
   };
 
   // 确认发布：从预览切换到任务执行
@@ -337,7 +353,7 @@ export function ProductPublishModal({
                 <div className="publish-info-card" style={{ marginTop: 20 }}>
                   <Descriptions size="small" column={2} colon>
                     <Descriptions.Item label="批次名称">{selectedBatch.name}</Descriptions.Item>
-                    <Descriptions.Item label="采集数量">{selectedBatch.collectedCount ?? 0} 条</Descriptions.Item>
+                    <Descriptions.Item label="采集数量">{selectedBatch.collectedCount ?? 0} 条（仅发布已关注）</Descriptions.Item>
                     <Descriptions.Item label="所属店铺">
                       {shopNameMap.get(selectedBatch.shopId) ?? `#${selectedBatch.shopId}`}
                     </Descriptions.Item>
@@ -419,7 +435,8 @@ export function ProductPublishModal({
                   type="primary"
                   size="large"
                   icon={<ArrowRightOutlined />}
-                  onClick={handleConfirmPriceAndNext}
+                  loading={fetchingFavorites}
+                  onClick={() => void handleConfirmPriceAndNext()}
                 >
                   下一步
                 </Button>
