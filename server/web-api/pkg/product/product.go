@@ -14,8 +14,8 @@ import (
 
 type ProductHandler struct {
 	*commonRouter.BaseHandler
-	productService     *productService.ProductService
-	skuService         *productService.SkuService
+	productService      *productService.ProductService
+	skuService          *productService.SkuService
 	productDraftService *productService.ProductDraftService
 	productFileService  *productService.ProductFileService
 }
@@ -52,13 +52,16 @@ func (h *ProductHandler) RegisterHandler(engine *gin.RouterGroup) {
 	engine.DELETE("/skus/:id", h.deleteSku)
 
 	engine.GET("/product-drafts", h.listProductDrafts)
+	engine.GET("/product-drafts/tb/:tbDraftId", h.getProductDraftByTbDraftID)
 	engine.GET("/product-drafts/:id", h.getProductDraftByID)
+	engine.GET("/product-drafts/count/shop-cat", h.countDraftsByShopAndCat)
 	engine.POST("/product-drafts", h.createProductDraft)
 	engine.PUT("/product-drafts/:id", h.updateProductDraft)
 	engine.DELETE("/product-drafts/:id", h.deleteProductDraft)
 
 	engine.GET("/product-files", h.listProductFiles)
 	engine.GET("/product-files/:id", h.getProductFileByID)
+	engine.GET("/product-files/biz/:bizUniqueId", h.getProductFileByBizUniqueID)
 	engine.POST("/product-files", h.createProductFile)
 	engine.PUT("/product-files/:id", h.updateProductFile)
 	engine.DELETE("/product-files/:id", h.deleteProductFile)
@@ -238,6 +241,22 @@ func (h *ProductHandler) deleteSku(c *gin.Context) {
 
 // ProductDraft handlers
 
+func (h *ProductHandler) countDraftsByShopAndCat(c *gin.Context) {
+	shopIDStr := c.Query("shopId")
+	tbCatID := c.Query("tbCatId")
+	shopID, err := strconv.ParseUint(shopIDStr, 10, 64)
+	if err != nil || shopID == 0 {
+		commonRouter.ToError(c, "shopId 参数错误")
+		return
+	}
+	if tbCatID == "" {
+		commonRouter.ToError(c, "tbCatId 参数错误")
+		return
+	}
+	count, e := h.productDraftService.CountDraftsByShopAndCat(shopID, tbCatID)
+	commonRouter.ToJson(c, gin.H{"count": count}, e)
+}
+
 func (h *ProductHandler) listProductDrafts(c *gin.Context) {
 	var q productDTO.ProductDraftQueryDTO
 	if c.ShouldBindQuery(&q) != nil {
@@ -254,6 +273,20 @@ func (h *ProductHandler) getProductDraftByID(c *gin.Context) {
 		return
 	}
 	r, e := h.productDraftService.GetProductDraftByID(id)
+	if e == gorm.ErrRecordNotFound {
+		commonRouter.ToError(c, "product draft not found")
+		return
+	}
+	commonRouter.ToJson(c, r, e)
+}
+
+func (h *ProductHandler) getProductDraftByTbDraftID(c *gin.Context) {
+	tbDraftID := c.Param("tbDraftId")
+	if tbDraftID == "" {
+		commonRouter.ToError(c, "tbDraftId 参数错误")
+		return
+	}
+	r, e := h.productDraftService.GetProductDraftByTbDraftID(tbDraftID)
 	if e == gorm.ErrRecordNotFound {
 		commonRouter.ToError(c, "product draft not found")
 		return
@@ -303,6 +336,20 @@ func (h *ProductHandler) deleteProductDraft(c *gin.Context) {
 }
 
 // ProductFile handlers
+
+func (h *ProductHandler) getProductFileByBizUniqueID(c *gin.Context) {
+	bizUniqueID := c.Param("bizUniqueId")
+	if bizUniqueID == "" {
+		commonRouter.ToError(c, "bizUniqueId 参数错误")
+		return
+	}
+	r, e := h.productFileService.GetProductFileByBizUniqueID(bizUniqueID)
+	if e == gorm.ErrRecordNotFound {
+		commonRouter.ToError(c, "product file not found")
+		return
+	}
+	commonRouter.ToJson(c, r, e)
+}
 
 func (h *ProductHandler) listProductFiles(c *gin.Context) {
 	var q productDTO.ProductFileQueryDTO

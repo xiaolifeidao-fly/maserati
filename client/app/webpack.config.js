@@ -7,6 +7,7 @@ const sharedConfig = {
     alias: {
       "@src": path.resolve(__dirname, './src'),
       "@model": path.resolve(__dirname, '../common/model'),
+      "@product": path.resolve(__dirname, '../common/product'),
       "@api": path.resolve(__dirname, '../common/api'),
       "@utils": path.resolve(__dirname, '../common/utils'),
       "@eleapi": path.resolve(__dirname, '../common/eleapi'),

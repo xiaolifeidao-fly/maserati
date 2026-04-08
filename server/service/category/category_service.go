@@ -212,9 +212,10 @@ func (s *CategoryService) CreatePxxMapper(req *categoryDTO.CreatePxxMapperCatego
 		return nil, fmt.Errorf("tbCatId is required")
 	}
 	entity, err := s.pxxMapperRepository.Create(&categoryRepository.PxxMapperCategory{
-		PddCatID:  strings.TrimSpace(req.PddCatID),
-		TbCatID:   strings.TrimSpace(req.TbCatID),
-		TbCatName: strings.TrimSpace(req.TbCatName),
+		PddCatID:     strings.TrimSpace(req.PddCatID),
+		TbCatID:      strings.TrimSpace(req.TbCatID),
+		TbCatName:    strings.TrimSpace(req.TbCatName),
+		CategoryInfo: req.CategoryInfo,
 	})
 	if err != nil {
 		return nil, err
@@ -241,6 +242,9 @@ func (s *CategoryService) UpdatePxxMapper(id uint, req *categoryDTO.UpdatePxxMap
 	}
 	if req.TbCatName != nil {
 		entity.TbCatName = strings.TrimSpace(*req.TbCatName)
+	}
+	if req.CategoryInfo != nil {
+		entity.CategoryInfo = *req.CategoryInfo
 	}
 	saved, err := s.pxxMapperRepository.SaveOrUpdate(entity)
 	if err != nil {
@@ -309,6 +313,7 @@ func (s *CategoryService) CreateSourceProductTbCategory(req *categoryDTO.CreateS
 	entity, err := s.sourceProductTbCatRepository.Create(&categoryRepository.SourceProductTbCategory{
 		SourceProductID: strings.TrimSpace(req.SourceProductID),
 		TbCatID:         strings.TrimSpace(req.TbCatID),
+		CategoryInfo:    req.CategoryInfo,
 	})
 	if err != nil {
 		return nil, err
@@ -329,6 +334,9 @@ func (s *CategoryService) UpdateSourceProductTbCategory(id uint, req *categoryDT
 	}
 	if req.TbCatID != nil {
 		entity.TbCatID = strings.TrimSpace(*req.TbCatID)
+	}
+	if req.CategoryInfo != nil {
+		entity.CategoryInfo = *req.CategoryInfo
 	}
 	if entity.TbCatID == "" {
 		return nil, fmt.Errorf("tbCatId is required")

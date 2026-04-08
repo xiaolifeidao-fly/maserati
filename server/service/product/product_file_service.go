@@ -75,38 +75,18 @@ func (s *ProductFileService) CreateProductFile(req *productDTO.CreateProductFile
 	if bizUniqueID == "" {
 		return nil, fmt.Errorf("bizUniqueId is required")
 	}
-	fileName := strings.TrimSpace(req.FileName)
-	if fileName == "" {
+	if req.FileName == "" {
 		return nil, fmt.Errorf("fileName is required")
 	}
-	filePath := strings.TrimSpace(req.FilePath)
-	if filePath == "" {
+	if req.FilePath == "" {
 		return nil, fmt.Errorf("filePath is required")
-	}
-	if req.ProductID > 0 {
-		p, err := s.productRepository.FindById(uint(req.ProductID))
-		if err != nil {
-			return nil, err
-		}
-		if p.Active == 0 {
-			return nil, fmt.Errorf("product not found")
-		}
-	}
-	if req.SourceProductID > 0 {
-		p, err := s.productRepository.FindById(uint(req.SourceProductID))
-		if err != nil {
-			return nil, err
-		}
-		if p.Active == 0 {
-			return nil, fmt.Errorf("source product not found")
-		}
 	}
 	entity, err := s.productFileRepository.Create(&productRepository.ProductFile{
 		BizUniqueID:     bizUniqueID,
-		FileName:        fileName,
-		FilePath:        filePath,
+		FileName:        req.FileName,
+		FilePath:        req.FilePath,
 		Sort:            req.Sort,
-		SourceProductID: req.SourceProductID,
+		SourceProductID: strings.TrimSpace(req.SourceProductID),
 		ProductID:       req.ProductID,
 	})
 	if err != nil {
@@ -130,37 +110,19 @@ func (s *ProductFileService) UpdateProductFile(id uint, req *productDTO.UpdatePr
 		entity.BizUniqueID = strings.TrimSpace(*req.BizUniqueID)
 	}
 	if req.FileName != nil {
-		entity.FileName = strings.TrimSpace(*req.FileName)
+		entity.FileName = *req.FileName
 	}
 	if req.FilePath != nil {
-		entity.FilePath = strings.TrimSpace(*req.FilePath)
+		entity.FilePath = *req.FilePath
 	}
 	if req.Sort != nil {
 		entity.Sort = *req.Sort
 	}
 	if req.ProductID != nil {
-		if *req.ProductID > 0 {
-			p, err := s.productRepository.FindById(uint(*req.ProductID))
-			if err != nil {
-				return nil, err
-			}
-			if p.Active == 0 {
-				return nil, fmt.Errorf("product not found")
-			}
-		}
 		entity.ProductID = *req.ProductID
 	}
 	if req.SourceProductID != nil {
-		if *req.SourceProductID > 0 {
-			p, err := s.productRepository.FindById(uint(*req.SourceProductID))
-			if err != nil {
-				return nil, err
-			}
-			if p.Active == 0 {
-				return nil, fmt.Errorf("source product not found")
-			}
-		}
-		entity.SourceProductID = *req.SourceProductID
+		entity.SourceProductID = strings.TrimSpace(*req.SourceProductID)
 	}
 	if entity.BizUniqueID == "" {
 		return nil, fmt.Errorf("bizUniqueId is required")
@@ -176,6 +138,15 @@ func (s *ProductFileService) UpdateProductFile(id uint, req *productDTO.UpdatePr
 		return nil, err
 	}
 	return db.ToDTO[productDTO.ProductFileDTO](saved), nil
+}
+
+// GetProductFileByBizUniqueID 通过业务唯一ID查找文件（上传幂等检查）
+func (s *ProductFileService) GetProductFileByBizUniqueID(bizUniqueID string) (*productDTO.ProductFileDTO, error) {
+	entity, err := s.productFileRepository.FindByBizUniqueID(bizUniqueID)
+	if err != nil {
+		return nil, err
+	}
+	return db.ToDTO[productDTO.ProductFileDTO](entity), nil
 }
 
 func (s *ProductFileService) DeleteProductFile(id uint) error {

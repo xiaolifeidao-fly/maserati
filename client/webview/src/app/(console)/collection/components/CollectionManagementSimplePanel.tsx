@@ -16,8 +16,8 @@ import { Button, Form, Input, Modal, Popconfirm, Select, Space, Table, Tag, mess
 import type { ColumnsType } from "antd/es/table";
 import { type CollectBatchRecord, normalizeCollectSourceType, startCollection as startCollectionByRoute, type CollectSourceType } from "../api/collection.api";
 import { useCollectionManagement } from "../hooks/useCollectionManagement";
-import { ProductPublishModal } from "../../product/components/ProductPublishModal";
 import { BatchDetailModal } from "./BatchDetailModal";
+import { getPublishWindowApi } from "@/utils/publish-window";
 import { formatDateTime } from "@/utils/format";
 
 interface CollectionFormValues {
@@ -41,8 +41,6 @@ export function CollectionManagementSimplePanel() {
     shopId: 0,
   });
   const [modalOpen, setModalOpen] = useState(false);
-  const [publishModalOpen, setPublishModalOpen] = useState(false);
-  const [selectedPublishBatchId, setSelectedPublishBatchId] = useState(0);
   const [detailModalOpen, setDetailModalOpen] = useState(false);
   const [detailBatch, setDetailBatch] = useState<CollectBatchRecord | null>(null);
   const [detailSourceType, setDetailSourceType] = useState<CollectSourceType>("unknown");
@@ -111,8 +109,7 @@ export function CollectionManagementSimplePanel() {
   };
 
   const openPublishModal = (record: CollectBatchRecord) => {
-    setSelectedPublishBatchId(record.id);
-    setPublishModalOpen(true);
+    void getPublishWindowApi().openPublishWindow(record.id);
   };
 
   const openDetailModal = (record: CollectBatchRecord) => {
@@ -328,11 +325,6 @@ export function CollectionManagementSimplePanel() {
         onClose={() => setDetailModalOpen(false)}
       />
 
-      <ProductPublishModal
-        open={publishModalOpen}
-        onCancel={() => setPublishModalOpen(false)}
-        initialBatchId={selectedPublishBatchId}
-      />
     </div>
   );
 }

@@ -82,27 +82,12 @@ func (s *ProductDraftService) CreateProductDraft(req *productDTO.CreateProductDr
 	if req == nil {
 		return nil, fmt.Errorf("request is nil")
 	}
-	if req.ProductID > 0 {
-		p, err := s.productRepository.FindById(uint(req.ProductID))
-		if err != nil {
-			return nil, err
-		}
-		if p.Active == 0 {
-			return nil, fmt.Errorf("product not found")
-		}
-	}
-	if req.SourceProductID > 0 {
-		p, err := s.productRepository.FindById(uint(req.SourceProductID))
-		if err != nil {
-			return nil, err
-		}
-		if p.Active == 0 {
-			return nil, fmt.Errorf("source product not found")
-		}
-	}
 	entity, err := s.productDraftRepository.Create(&productRepository.ProductDraft{
 		ProductID:       req.ProductID,
-		SourceProductID: req.SourceProductID,
+		SourceProductID: strings.TrimSpace(req.SourceProductID),
+		ShopID:          req.ShopID,
+		TbCatID:         strings.TrimSpace(req.TbCatID),
+		TbDraftID:       strings.TrimSpace(req.TbDraftID),
 		Status:          normalizeProductDraftStatus(req.Status),
 	})
 	if err != nil {
@@ -123,28 +108,19 @@ func (s *ProductDraftService) UpdateProductDraft(id uint, req *productDTO.Update
 		return nil, gorm.ErrRecordNotFound
 	}
 	if req.ProductID != nil {
-		if *req.ProductID > 0 {
-			p, err := s.productRepository.FindById(uint(*req.ProductID))
-			if err != nil {
-				return nil, err
-			}
-			if p.Active == 0 {
-				return nil, fmt.Errorf("product not found")
-			}
-		}
 		entity.ProductID = *req.ProductID
 	}
 	if req.SourceProductID != nil {
-		if *req.SourceProductID > 0 {
-			p, err := s.productRepository.FindById(uint(*req.SourceProductID))
-			if err != nil {
-				return nil, err
-			}
-			if p.Active == 0 {
-				return nil, fmt.Errorf("source product not found")
-			}
-		}
-		entity.SourceProductID = *req.SourceProductID
+		entity.SourceProductID = strings.TrimSpace(*req.SourceProductID)
+	}
+	if req.ShopID != nil {
+		entity.ShopID = *req.ShopID
+	}
+	if req.TbCatID != nil {
+		entity.TbCatID = strings.TrimSpace(*req.TbCatID)
+	}
+	if req.TbDraftID != nil {
+		entity.TbDraftID = strings.TrimSpace(*req.TbDraftID)
 	}
 	if req.Status != nil {
 		entity.Status = normalizeProductDraftStatus(*req.Status)
@@ -154,6 +130,31 @@ func (s *ProductDraftService) UpdateProductDraft(id uint, req *productDTO.Update
 		return nil, err
 	}
 	return db.ToDTO[productDTO.ProductDraftDTO](saved), nil
+}
+
+// CountDraftsByShopAndCat 查询指定店铺+分类下草稿数量
+func (s *ProductDraftService) CountDraftsByShopAndCat(shopID uint64, tbCatID string) (int64, error) {
+	return s.productDraftRepository.CountByShopAndCat(shopID, tbCatID)
+}
+
+// ListOldestDraftsByShopAndCat 获取最旧的N个草稿（用于超限时删除）
+func (s *ProductDraftService) ListOldestDraftsByShopAndCat(shopID uint64, tbCatID string, limit int) ([]*productDTO.ProductDraftDTO, error) {
+	entities, err := s.productDraftRepository.ListOldestByShopAndCat(shopID, tbCatID, limit)
+	if err != nil {
+		return nil, err
+	}
+	return db.ToDTOs[productDTO.ProductDraftDTO](entities), nil
+}
+
+func (s *ProductDraftService) GetProductDraftByTbDraftID(tbDraftID string) (*productDTO.ProductDraftDTO, error) {
+	entity, err := s.productDraftRepository.FindByTbDraftID(strings.TrimSpace(tbDraftID))
+	if err != nil {
+		return nil, err
+	}
+	if entity.Active == 0 {
+		return nil, gorm.ErrRecordNotFound
+	}
+	return db.ToDTO[productDTO.ProductDraftDTO](entity), nil
 }
 
 func (s *ProductDraftService) DeleteProductDraft(id uint) error {

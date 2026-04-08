@@ -87,19 +87,28 @@ type SkuQueryDTO struct {
 type ProductDraftDTO struct {
 	baseDTO.BaseDTO
 	ProductID       uint64 `json:"productId"`
-	SourceProductID uint64 `json:"sourceProductId"`
+	SourceProductID string `json:"sourceProductId"`
+	ShopID          uint64 `json:"shopId"`
+	TbCatID         string `json:"tbCatId"`
+	TbDraftID       string `json:"tbDraftId"`
 	Status          string `json:"status"`
 }
 
 type CreateProductDraftDTO struct {
 	ProductID       uint64 `json:"productId"`
-	SourceProductID uint64 `json:"sourceProductId"`
+	SourceProductID string `json:"sourceProductId"`
+	ShopID          uint64 `json:"shopId"`
+	TbCatID         string `json:"tbCatId"`
+	TbDraftID       string `json:"tbDraftId"`
 	Status          string `json:"status"`
 }
 
 type UpdateProductDraftDTO struct {
 	ProductID       *uint64 `json:"productId,omitempty"`
-	SourceProductID *uint64 `json:"sourceProductId,omitempty"`
+	SourceProductID *string `json:"sourceProductId,omitempty"`
+	ShopID          *uint64 `json:"shopId,omitempty"`
+	TbCatID         *string `json:"tbCatId,omitempty"`
+	TbDraftID       *string `json:"tbDraftId,omitempty"`
 	Status          *string `json:"status,omitempty"`
 }
 
@@ -108,7 +117,10 @@ type ProductDraftQueryDTO struct {
 	PageIndex       int    `form:"pageIndex"`
 	PageSize        int    `form:"pageSize"`
 	ProductID       uint64 `form:"productId"`
-	SourceProductID uint64 `form:"sourceProductId"`
+	SourceProductID string `form:"sourceProductId"`
+	ShopID          uint64 `form:"shopId"`
+	TbCatID         string `form:"tbCatId"`
+	TbDraftID       string `form:"tbDraftId"`
 	Status          string `form:"status"`
 }
 
@@ -120,7 +132,7 @@ type ProductFileDTO struct {
 	FileName        string `json:"fileName"`
 	FilePath        string `json:"filePath"`
 	Sort            int    `json:"sort"`
-	SourceProductID uint64 `json:"sourceProductId"`
+	SourceProductID string `json:"sourceProductId"`
 	ProductID       uint64 `json:"productId"`
 }
 
@@ -129,7 +141,7 @@ type CreateProductFileDTO struct {
 	FileName        string `json:"fileName"`
 	FilePath        string `json:"filePath"`
 	Sort            int    `json:"sort"`
-	SourceProductID uint64 `json:"sourceProductId"`
+	SourceProductID string `json:"sourceProductId"`
 	ProductID       uint64 `json:"productId"`
 }
 
@@ -138,7 +150,7 @@ type UpdateProductFileDTO struct {
 	FileName        *string `json:"fileName,omitempty"`
 	FilePath        *string `json:"filePath,omitempty"`
 	Sort            *int    `json:"sort,omitempty"`
-	SourceProductID *uint64 `json:"sourceProductId,omitempty"`
+	SourceProductID *string `json:"sourceProductId,omitempty"`
 	ProductID       *uint64 `json:"productId,omitempty"`
 }
 
@@ -147,6 +159,6 @@ type ProductFileQueryDTO struct {
 	PageIndex       int    `form:"pageIndex"`
 	PageSize        int    `form:"pageSize"`
 	ProductID       uint64 `form:"productId"`
-	SourceProductID uint64 `form:"sourceProductId"`
+	SourceProductID string `form:"sourceProductId"`
 	BizUniqueID     string `form:"bizUniqueId"`
 }

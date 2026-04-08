@@ -199,7 +199,7 @@ export function LoginFormCard() {
             style={{
               height: 54,
               color: "#ffffff",
-              background: "linear-gradient(135deg, #5d7df6 0%, #6d8cff 100%)",
+              background: "linear-gradient(135deg, #2f6fec 0%, #5e98f1 100%)",
               border: "none",
               fontWeight: 800,
             }}

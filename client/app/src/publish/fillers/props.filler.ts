@@ -1,6 +1,7 @@
 import type { IFiller, FillerContext } from './filler.interface';
 import type { TbCategoryProp } from '../types/draft';
 import type { NormalizedProp } from '../types/source-data';
+import type { TbWindowJsonCatProp } from '../types/tb-window-json';
 
 /**
  * PropsFiller — 商品属性填充器
@@ -20,10 +21,16 @@ export class PropsFiller implements IFiller {
   readonly fillerName = 'PropsFiller';
 
   async fill(ctx: FillerContext): Promise<void> {
-    const { product, categoryInfo, draftPayload } = ctx;
+    const { product, categoryInfo, tbWindowJson, draftPayload } = ctx;
 
     const catProps = categoryInfo.props ?? [];
     const productProps = product.attributes ?? [];
+
+    // 以 name 为 key 建立 tbWindowJson.catProps 索引，用于获取页面实际 dataSource 选项
+    const windowCatPropMap = new Map<string, TbWindowJsonCatProp>();
+    for (const p of tbWindowJson?.catProps ?? []) {
+      windowCatPropMap.set(p.name, p);
+    }
 
     const filledProps: Array<{
       pid: string;
@@ -36,15 +43,17 @@ export class PropsFiller implements IFiller {
       if (!matched) continue;
 
       if (catProp.uiType === 'input' || !catProp.dataSource?.length) {
-        // 文本输入类型
         filledProps.push({ pid: catProp.pid, value: matched.value });
       } else {
-        // 下拉选择类型：优先使用已匹配的 vid
-        const vid = matched.vid ?? this.matchVid(matched.value, catProp);
+        // 优先从 window.Json catProps 的 dataSource 中匹配 vid（页面实际选项）
+        const windowProp = windowCatPropMap.get(catProp.name);
+        const vid =
+          matched.vid ??
+          this.matchVidFromWindow(matched.value, windowProp) ??
+          this.matchVid(matched.value, catProp);
         if (vid) {
           filledProps.push({ pid: catProp.pid, vid });
         } else {
-          // 无法匹配 vid，降级为文本值
           filledProps.push({ pid: catProp.pid, value: matched.value });
         }
       }
@@ -53,6 +62,27 @@ export class PropsFiller implements IFiller {
     if (filledProps.length > 0) {
       draftPayload['props'] = filledProps;
     }
+  }
+
+  /**
+   * 从 tbWindowJson.catProps 的 dataSource 中匹配 vid
+   * window.Json 中选项格式为 { value, text }，value 即 vid
+   */
+  private matchVidFromWindow(
+    value: string,
+    windowProp: TbWindowJsonCatProp | undefined,
+  ): string | undefined {
+    if (!windowProp?.dataSource) return undefined;
+    const options = Array.isArray(windowProp.dataSource)
+      ? (windowProp.dataSource as Array<{ value?: unknown; text?: string }>)
+      : [];
+    const entry = options.find(
+      opt =>
+        String(opt.text ?? '') === value ||
+        String(opt.text ?? '').includes(value) ||
+        value.includes(String(opt.text ?? '')),
+    );
+    return entry?.value != null ? String(entry.value) : undefined;
   }
 
   private findMatchingProductProp(

@@ -5,22 +5,31 @@ import type { StepContext } from '../core/step-context';
 import { PublishError } from '../core/errors';
 import { CaptchaChecker } from './captcha.step';
 import { requestBackend } from '@src/impl/shared/backend';
+import { getPublishPage } from './fill-draft.step';
+import { parseTbWindowJsonForDraft } from '../parsers/tb-window-json.parser';
+import { PropsFiller } from '../fillers/props.filler';
+import { SkuFiller } from '../fillers/sku.filler';
+import type { FillerContext } from '../fillers/filler.interface';
+import type { TbWindowJsonCatProp, TbWindowJsonDraftData } from '../types/tb-window-json';
+import log from 'electron-log';
+
+declare const window: any;
+
+const TB_WINDOW_JSON_TIMEOUT = 20_000;
+/** 校验时跳过的组件 key（参考旧代码 filterKey） */
+const SKIP_VALIDATE_KEYS = new Set(['descType', 'category']);
 
 /**
  * EditDraftStep — 二次编辑草稿（Step 5）
  *
- * 职责：
- *  - 在 FillDraft 基础上进行二次修正
- *  - 重新加载草稿页面，获取平台最新的字段状态
- *  - 修正首次填充中遗漏或不符合平台规则的字段
- *    （例如：品牌校验、属性值精确匹配、必填项补全）
- *  - 二次提交草稿
+ * 流程：
+ *  1. 重新加载草稿页面，获取平台最新的 window.Json
+ *  2. 以最新 window.Json 重新执行 Props / SKU 填充，修正 pid/vid 匹配
+ *  3. 补全必填 catProp 的缺省值（品类属性默认值兜底）
+ *  4. 校验 components 中所有 required 字段
+ *  5. 提交修正载荷（调用淘宝 draftOp/update.json）
  *
- * 输出到 ctx：
- *  - draftContext（更新 draftId / itemId）
- *
- * 扩展建议：
- *  - 如果需要 AI 补全属性，在此步骤中调用 AI 接口
+ * 参考旧代码：UpdateDraftStep (update.draft.ts)
  */
 export class EditDraftStep extends PublishStep {
   readonly stepCode = StepCode.EDIT_DRAFT;
@@ -39,84 +48,148 @@ export class EditDraftStep extends PublishStep {
       throw new PublishError(this.stepCode, '产品或类目数据为空');
     }
 
-    // 重新加载草稿页获取最新状态（用于修正平台对字段的处理结果）
-    const refreshed = await this.refreshDraftState(ctx.taskId, draftCtx);
-    CaptchaChecker.check(this.stepCode, refreshed as unknown as Record<string, unknown>);
+    // ── Step 1: 重新加载草稿页面，获取最新 window.Json ────────────────────────
+    const pageEntry = getPublishPage(ctx.taskId);
+    if (!pageEntry) {
+      throw new PublishError(this.stepCode, '草稿页面未找到，请重新执行草稿填充步骤');
+    }
+    const { page } = pageEntry;
 
-    // 执行二次修正逻辑（品牌、属性值等）
-    const corrections = await this.computeCorrections(ctx, refreshed);
+    log.info('[EditDraftStep] reloading draft page for fresh window.Json');
+    await page.reload();
+    await page.waitForFunction(() => Boolean(window?.Json), { timeout: TB_WINDOW_JSON_TIMEOUT });
 
-    if (Object.keys(corrections).length === 0) {
-      return {
-        status: StepStatus.SUCCESS,
-        message: '草稿状态良好，无需二次修正',
-        outputData: { draftContext: draftCtx },
-      };
+    const rawWindowJson = await page.evaluate(() => window?.Json);
+    const tbWindowJson = parseTbWindowJsonForDraft(rawWindowJson);
+
+    // 更新 draftContext 中的 pageJsonData 与 catId（平台可能调整类目）
+    draftCtx.pageJsonData = rawWindowJson as Record<string, unknown>;
+    if (tbWindowJson.meta.catId) {
+      draftCtx.catId = tbWindowJson.meta.catId;
+    }
+    ctx.set('draftContext', draftCtx);
+
+    // ── Step 2: 以最新 window.Json 重新执行属性/SKU 填充 ─────────────────────
+    const correctionPayload: Record<string, unknown> = {
+      catId: draftCtx.catId,
+      startTraceId: draftCtx.startTraceId,
+    };
+
+    const fillerCtx: FillerContext = {
+      product,
+      categoryInfo,
+      uploadedMainImages: ctx.get('uploadedMainImages') ?? product.mainImages,
+      uploadedDetailImages: ctx.get('uploadedDetailImages') ?? product.detailImages,
+      draftContext: draftCtx,
+      tbWindowJson,
+      draftPayload: correctionPayload,
+    };
+
+    await new PropsFiller().fill(fillerCtx);
+    await new SkuFiller().fill(fillerCtx);
+
+    // ── Step 3: 补全必填 catProp 缺省值 ──────────────────────────────────────
+    this.fillRequiredCatProps(tbWindowJson.catProps, correctionPayload);
+
+    // ── Step 4: 校验必填字段（记录缺失，由平台接口最终拦截） ────────────────
+    const missing = this.validateRequiredComponents(tbWindowJson, correctionPayload);
+    if (missing.length > 0) {
+      log.warn('[EditDraftStep] missing required fields:', missing.join(', '));
     }
 
-    // 提交修正数据
+    // ── Step 5: 提交修正载荷（调用淘宝 draftOp/update.json） ─────────────────
     const response = await requestBackend<Record<string, unknown>>(
       'POST',
       '/publish-tasks/submit-draft',
-      {
-        data: {
-          taskId: ctx.taskId,
-          draftContext: draftCtx,
-          payload: {
-            catId: draftCtx.catId,
-            startTraceId: draftCtx.startTraceId,
-            ...corrections,
-          },
-        },
-      },
+      { data: { taskId: ctx.taskId, draftContext: draftCtx, payload: correctionPayload } },
     );
     CaptchaChecker.check(this.stepCode, response);
 
-    if (response.draftId) draftCtx.draftId = response.draftId as string;
-    if (response.itemId) draftCtx.itemId = response.itemId as string;
+    if (typeof response.draftId === 'string' && response.draftId) {
+      draftCtx.draftId = response.draftId;
+    }
+    if (typeof response.itemId === 'string' && response.itemId) {
+      draftCtx.itemId = response.itemId;
+    }
     ctx.set('draftContext', draftCtx);
 
+    const missingNote = missing.length > 0 ? `（缺失字段：${missing.join(', ')}）` : '';
     return {
       status: StepStatus.SUCCESS,
-      message: `草稿二次修正完成，修正字段数: ${Object.keys(corrections).length}`,
+      message: `草稿二次修正完成${missingNote}`,
       outputData: { draftContext: draftCtx },
     };
   }
 
-  private async refreshDraftState(
-    taskId: number,
-    draftCtx: { draftId?: string; catId: string; startTraceId: string },
-  ): Promise<Record<string, unknown>> {
-    return requestBackend<Record<string, unknown>>(
-      'POST',
-      '/publish-tasks/refresh-draft',
-      { data: { taskId, draftContext: draftCtx } },
-    );
+  /**
+   * 补全必填 catProp 的缺省值
+   * 参考旧代码 UpdateDraftStep.fillRequiredData
+   */
+  private fillRequiredCatProps(
+    catProps: TbWindowJsonCatProp[],
+    payload: Record<string, unknown>,
+  ): void {
+    const catPropData = (payload['catProp'] as Record<string, unknown> | undefined) ?? {};
+
+    for (const prop of catProps) {
+      if (!prop.required) continue;
+
+      const existing = catPropData[prop.name];
+      if (existing != null) {
+        if (Array.isArray(existing) && existing.length > 0) continue;
+        if (String(existing).length > 0) continue;
+      }
+
+      // 净含量：默认填 "1g"
+      if (String(prop.label ?? '').includes('净含量')) {
+        catPropData[prop.name] = '1g';
+        continue;
+      }
+
+      // taoSirProp：取第一个单位拼默认值（如 "1g"、"1ml"）
+      if (prop.uiType === 'taoSirProp') {
+        const units = prop.units;
+        if (units?.length) {
+          catPropData[prop.name] = '1' + (units[0].text ?? '');
+        }
+        continue;
+      }
+
+      // 有 dataSource 的下拉类属性：取第一个选项
+      const dataSource = Array.isArray(prop.dataSource)
+        ? (prop.dataSource as Array<{ value?: unknown; text?: string }>)
+        : undefined;
+      if (dataSource?.length) {
+        catPropData[prop.name] = dataSource[0];
+      }
+    }
+
+    payload['catProp'] = catPropData;
   }
 
   /**
-   * 根据刷新后的草稿状态计算需要修正的字段
-   * 实际逻辑依赖平台返回的错误/警告信息
+   * 校验 window.Json components 中 required 组件在 payload 中是否有值
+   * 参考旧代码 UpdateDraftStep.validateDraftData
    */
-  private async computeCorrections(
-    ctx: StepContext,
-    refreshedState: Record<string, unknown>,
-  ): Promise<Record<string, unknown>> {
-    const errors = (refreshedState.errors as Array<{ field: string; msg: string }>) ?? [];
-    if (!errors.length) return {};
+  private validateRequiredComponents(
+    tbWindowJson: TbWindowJsonDraftData,
+    payload: Record<string, unknown>,
+  ): string[] {
+    const missing: string[] = [];
 
-    // 通过服务端接口计算修正方案（可接入 AI 辅助）
-    return requestBackend<Record<string, unknown>>(
-      'POST',
-      '/publish-tasks/compute-corrections',
-      {
-        data: {
-          taskId: ctx.taskId,
-          product: ctx.get('product'),
-          categoryInfo: ctx.get('categoryInfo'),
-          errors,
-        },
-      },
-    );
+    for (const [key, component] of Object.entries(tbWindowJson.components)) {
+      if (SKIP_VALIDATE_KEYS.has(key)) continue;
+      if (!component.props?.required) continue;
+
+      const value = payload[key];
+      if (value == null) { missing.push(key); continue; }
+      if (typeof value === 'string' && value.trim() === '') { missing.push(key); continue; }
+      if (typeof value === 'number' && value === 0) { missing.push(key); continue; }
+      if (typeof value === 'object' && Object.keys(value as object).length === 0) {
+        missing.push(key);
+      }
+    }
+
+    return missing;
   }
 }

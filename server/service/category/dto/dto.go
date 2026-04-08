@@ -34,21 +34,24 @@ type CategoryQueryDTO struct {
 
 type PxxMapperCategoryDTO struct {
 	baseDTO.BaseDTO
-	PddCatID  string `json:"pddCatId"`
-	TbCatID   string `json:"tbCatId"`
-	TbCatName string `json:"tbCatName"`
+	PddCatID     string `json:"pddCatId"`
+	TbCatID      string `json:"tbCatId"`
+	TbCatName    string `json:"tbCatName"`
+	CategoryInfo string `json:"categoryInfo"`
 }
 
 type CreatePxxMapperCategoryDTO struct {
-	PddCatID  string `json:"pddCatId"`
-	TbCatID   string `json:"tbCatId"`
-	TbCatName string `json:"tbCatName"`
+	PddCatID     string `json:"pddCatId"`
+	TbCatID      string `json:"tbCatId"`
+	TbCatName    string `json:"tbCatName"`
+	CategoryInfo string `json:"categoryInfo"`
 }
 
 type UpdatePxxMapperCategoryDTO struct {
-	PddCatID  *string `json:"pddCatId,omitempty"`
-	TbCatID   *string `json:"tbCatId,omitempty"`
-	TbCatName *string `json:"tbCatName,omitempty"`
+	PddCatID     *string `json:"pddCatId,omitempty"`
+	TbCatID      *string `json:"tbCatId,omitempty"`
+	TbCatName    *string `json:"tbCatName,omitempty"`
+	CategoryInfo *string `json:"categoryInfo,omitempty"`
 }
 
 type PxxMapperCategoryQueryDTO struct {
@@ -65,15 +68,18 @@ type SourceProductTbCategoryDTO struct {
 	baseDTO.BaseDTO
 	SourceProductID string `json:"sourceProductId"`
 	TbCatID         string `json:"tbCatId"`
+	CategoryInfo    string `json:"categoryInfo"`
 }
 
 type CreateSourceProductTbCategoryDTO struct {
 	SourceProductID string `json:"sourceProductId"`
 	TbCatID         string `json:"tbCatId"`
+	CategoryInfo    string `json:"categoryInfo"`
 }
 
 type UpdateSourceProductTbCategoryDTO struct {
-	TbCatID *string `json:"tbCatId,omitempty"`
+	TbCatID      *string `json:"tbCatId,omitempty"`
+	CategoryInfo *string `json:"categoryInfo,omitempty"`
 }
 
 type SourceProductTbCategoryQueryDTO struct {

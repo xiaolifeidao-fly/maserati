@@ -37,5 +37,11 @@
       ]
     }
   },
-  "include": ["src/**/*","../common/utils/**/*", "../common/utils/store/web.ts", "../common/utils/store/local.ts"]
+  "include": [
+    "src/**/*",
+    "../common/product/**/*",
+    "../common/utils/**/*",
+    "../common/utils/store/web.ts",
+    "../common/utils/store/local.ts"
+  ]
 }

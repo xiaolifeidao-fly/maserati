@@ -209,6 +209,24 @@ function extractCategory(detailRes) {
   return { categoryId: rootCatId, categoryName, categoryPath };
 }
 
+function mergeCategory(detailRes, categoryOverride) {
+  const fallbackCategory = extractCategory(detailRes);
+
+  if (!categoryOverride || typeof categoryOverride !== "object") {
+    return fallbackCategory;
+  }
+
+  return {
+    categoryId: trimString(categoryOverride.categoryId) || fallbackCategory.categoryId,
+    categoryName:
+      trimString(categoryOverride.categoryName) || fallbackCategory.categoryName,
+    categoryPath:
+      trimString(categoryOverride.categoryPath) ||
+      trimString(categoryOverride.categoryName) ||
+      fallbackCategory.categoryPath,
+  };
+}
+
 function extractAnchorArea(anchorPoint, scaleX, scaleY) {
   if (!anchorPoint || typeof anchorPoint !== "object") {
     return null;
@@ -374,7 +392,7 @@ function buildDescHtml(blocks) {
   return `<div style="width: 750.0px;height: auto;overflow: hidden;"><div style="width: 750.0px;height: auto;overflow: hidden;">${imagesHtml}</div></div>`;
 }
 
-export function convertDetailData(detailData, descData) {
+export function convertDetailData(detailData, descData, options = {}) {
   const detailRes = detailData?.res || detailData || {};
   const item = detailRes?.item || {};
   const seller = detailRes?.seller || {};
@@ -383,7 +401,10 @@ export function convertDetailData(detailData, descData) {
   const priceVO = componentsVO?.priceVO || {};
   const rateVO = componentsVO?.rateVO || {};
   const headImageVO = componentsVO?.headImageVO || {};
-  const { categoryId, categoryName, categoryPath } = extractCategory(detailRes);
+  const { categoryId, categoryName, categoryPath } = mergeCategory(
+    detailRes,
+    options.category
+  );
   const attribute = extractAttributes(detailRes);
   const { propsName, specs } = buildPropsNameAndSpecs(detailRes?.skuBase?.props);
   const skus = buildSkus(detailRes);

@@ -1,7 +1,7 @@
 "use client";
 
 import type { CSSProperties, ReactNode } from "react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   DeleteOutlined,
   EyeOutlined,
@@ -41,7 +41,7 @@ const SECTION_ACCENT: CSSProperties = {
   width: 3,
   height: 15,
   borderRadius: 2,
-  background: "linear-gradient(180deg, #3b82f6 0%, #1d4ed8 100%)",
+  background: "linear-gradient(180deg, #2f6fec 0%, #5e98f1 100%)",
   flexShrink: 0,
 };
 
@@ -76,7 +76,6 @@ const BADGE_COUNT: CSSProperties = {
   fontWeight: 400,
 };
 
-const TODO_ACTION_TEXT = "上传/替换能力稍后接入";
 const SECTION_MAX_HEIGHT = 500;
 const SECTION_HEADER_HEIGHT = 52;
 const SECTION_BODY_MAX_HEIGHT = SECTION_MAX_HEIGHT - SECTION_HEADER_HEIGHT;
@@ -192,18 +191,29 @@ function MainImagePanel({
   allImages,
   onChange,
   onPreview,
+  onUpload,
+  onReplace,
 }: {
   images: string[];
   allImages?: string[];
   onChange: (next: string[]) => void;
   onPreview: (url: string) => void;
+  onUpload: (index: number) => void;
+  onReplace: (index: number, url: string) => void;
 }) {
   const slots = normalizeMainImages(images);
   const selectedImages = images.filter(Boolean);
   const selectedSet = new Set(selectedImages);
   const hasCandidates = Array.isArray(allImages) && allImages.length > 5;
+  const [replaceTargetIndex, setReplaceTargetIndex] = useState<number | null>(null);
 
   const toggleCandidate = (url: string) => {
+    if (replaceTargetIndex !== null) {
+      onReplace(replaceTargetIndex, url);
+      setReplaceTargetIndex(null);
+      return;
+    }
+
     if (selectedSet.has(url)) {
       onChange(selectedImages.filter((u) => u !== url));
     } else {
@@ -220,23 +230,38 @@ function MainImagePanel({
       {hasCandidates ? (
         <div style={{ marginBottom: 16 }}>
           <div style={{ fontSize: 12, color: "#64748b", marginBottom: 8 }}>
-            共 {allImages!.length} 张候选图，已选 {selectedImages.length}/5，点击选择/取消
+            {replaceTargetIndex === null
+              ? `共 ${allImages!.length} 张候选图，已选 ${selectedImages.length}/5，点击选择/取消`
+              : `请选择候选图替换第 ${replaceTargetIndex + 1} 张主图`}
           </div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
             {allImages!.map((url, index) => {
               const isSelected = selectedSet.has(url);
               const order = isSelected ? selectedImages.indexOf(url) + 1 : 0;
-              const maxReached = !isSelected && selectedImages.length >= 5;
+              const maxReached = replaceTargetIndex === null && !isSelected && selectedImages.length >= 5;
               return (
                 <div
                   key={`candidate-${index}`}
-                  title={isSelected ? `已选为第 ${order} 张主图，点击取消` : maxReached ? "已选满 5 张" : "点击选为主图"}
+                  title={
+                    replaceTargetIndex !== null
+                      ? `点击替换第 ${replaceTargetIndex + 1} 张主图`
+                      : isSelected
+                        ? `已选为第 ${order} 张主图，点击取消`
+                        : maxReached
+                          ? "已选满 5 张"
+                          : "点击选为主图"
+                  }
                   onClick={() => !maxReached && toggleCandidate(url)}
                   style={{
                     width: 80,
                     height: 80,
                     borderRadius: 8,
-                    border: isSelected ? "2.5px solid #3b82f6" : "1.5px solid #e2e8f0",
+                    border:
+                      replaceTargetIndex !== null
+                        ? "2px solid rgba(59,130,246,0.35)"
+                        : isSelected
+                          ? "2.5px solid #3b82f6"
+                          : "1.5px solid #e2e8f0",
                     position: "relative",
                     overflow: "hidden",
                     cursor: maxReached ? "not-allowed" : "pointer",
@@ -276,6 +301,13 @@ function MainImagePanel({
               );
             })}
           </div>
+          {replaceTargetIndex !== null ? (
+            <div style={{ marginTop: 10 }}>
+              <Button size="small" onClick={() => setReplaceTargetIndex(null)}>
+                取消替换
+              </Button>
+            </div>
+          ) : null}
           <div style={{ marginTop: 14, borderTop: "1px solid #f1f5f9", paddingTop: 14, fontSize: 12, color: "#94a3b8" }}>
             已选主图预览
           </div>
@@ -292,7 +324,10 @@ function MainImagePanel({
                 width: 150,
                 height: 150,
                 borderRadius: 14,
-                border: "1px dashed rgba(148,163,184,0.45)",
+                border:
+                  replaceTargetIndex === index
+                    ? "2px solid rgba(59,130,246,0.9)"
+                    : "1px dashed rgba(148,163,184,0.45)",
                 background: hasImage
                   ? "linear-gradient(180deg, rgba(255,255,255,0.98), rgba(248,250,252,0.98))"
                   : "linear-gradient(180deg, rgba(248,250,252,0.95), rgba(241,245,249,0.95))",
@@ -341,6 +376,28 @@ function MainImagePanel({
                 </div>
               )}
 
+              {replaceTargetIndex === index ? (
+                <div
+                  style={{
+                    position: "absolute",
+                    left: 8,
+                    right: 8,
+                    bottom: 8,
+                    borderRadius: 8,
+                    background: "rgba(59,130,246,0.92)",
+                    color: "#fff",
+                    fontSize: 11,
+                    fontWeight: 600,
+                    textAlign: "center",
+                    padding: "6px 8px",
+                    zIndex: 1,
+                    pointerEvents: "none",
+                  }}
+                >
+                  正在替换，点击上方候选图完成
+                </div>
+              ) : null}
+
               <div
                 style={{
                   position: "absolute",
@@ -353,6 +410,13 @@ function MainImagePanel({
                 {hasImage ? (
                   <>
                     <ImageActionButton icon={<EyeOutlined />} title="预览大图" onClick={() => onPreview(url)} />
+                    {hasCandidates ? (
+                      <ImageActionButton
+                        icon={<SwapOutlined />}
+                        title="从候选图替换"
+                        onClick={() => setReplaceTargetIndex(index)}
+                      />
+                    ) : null}
                     <ImageActionButton
                       icon={<DeleteOutlined />}
                       title="删除图片"
@@ -361,13 +425,16 @@ function MainImagePanel({
                         const next = [...slots];
                         next[index] = "";
                         onChange(next.filter(Boolean));
+                        if (replaceTargetIndex === index) {
+                          setReplaceTargetIndex(null);
+                        }
                       }}
                     />
                   </>
                 ) : null}
               </div>
 
-              {!hasCandidates ? (
+              {!hasCandidates || hasImage ? (
                 <div
                   style={{
                     position: "absolute",
@@ -379,7 +446,10 @@ function MainImagePanel({
                     size="small"
                     type={hasImage ? "default" : "primary"}
                     icon={hasImage ? <SwapOutlined /> : <PlusOutlined />}
-                    onClick={() => message.info(TODO_ACTION_TEXT)}
+                    onClick={() => {
+                      setReplaceTargetIndex(null);
+                      onUpload(index);
+                    }}
                   >
                     {hasImage ? "替换" : "上传"}
                   </Button>
@@ -397,10 +467,14 @@ function DetailImagePanel({
   images,
   onChange,
   onPreview,
+  onReplace,
+  onAdd,
 }: {
   images: string[];
   onChange: (next: string[]) => void;
   onPreview: (url: string) => void;
+  onReplace: (index: number) => void;
+  onAdd: () => void;
 }) {
   const [draggingIndex, setDraggingIndex] = useState<number | null>(null);
 
@@ -472,7 +546,7 @@ function DetailImagePanel({
               height: 24,
               borderRadius: 999,
               padding: "0 8px",
-              background: "rgba(15,23,42,0.72)",
+              background: "rgba(26,53,82,0.68)",
               color: "#fff",
               display: "inline-flex",
               alignItems: "center",
@@ -506,7 +580,7 @@ function DetailImagePanel({
               bottom: 8,
             }}
           >
-            <Button size="small" icon={<SwapOutlined />} onClick={() => message.info(TODO_ACTION_TEXT)}>
+            <Button size="small" icon={<SwapOutlined />} onClick={() => onReplace(index)}>
               替换
             </Button>
           </div>
@@ -515,7 +589,7 @@ function DetailImagePanel({
 
       <button
         type="button"
-        onClick={() => message.info(TODO_ACTION_TEXT)}
+        onClick={onAdd}
         style={{
           width: 150,
           height: 150,
@@ -801,6 +875,8 @@ export interface ProductDetailEditorProps {
 export function ProductDetailEditor({ data, loading = false, onChange }: ProductDetailEditorProps) {
   const [local, setLocal] = useState<StandardProductData | null>(data);
   const [previewImage, setPreviewImage] = useState("");
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const pendingUploadRef = useRef<{ type: "main" | "detail"; index: number } | null>(null);
 
   useEffect(() => {
     setLocal(data);
@@ -811,6 +887,40 @@ export function ProductDetailEditor({ data, loading = false, onChange }: Product
     const next = { ...local, ...partial };
     setLocal(next);
     onChange?.(next);
+  }
+
+  function triggerUpload(type: "main" | "detail", index: number) {
+    pendingUploadRef.current = { type, index };
+    fileInputRef.current?.click();
+  }
+
+  function handleFileSelected(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    const pending = pendingUploadRef.current;
+    if (!file || !pending || !local) {
+      e.target.value = "";
+      return;
+    }
+    const filePath = (file as File & { path?: string }).path;
+    if (!filePath) {
+      void message.error("无法获取文件路径，请确认在 Electron 环境下运行");
+      e.target.value = "";
+      return;
+    }
+    const localUrl = `localfile://${filePath}`;
+    if (pending.type === "main") {
+      const slots = normalizeMainImages(local.mainImages);
+      slots[pending.index] = localUrl;
+      patch({ mainImages: slots.filter(Boolean) });
+    } else if (pending.index === -1) {
+      patch({ detailImages: [...local.detailImages, localUrl] });
+    } else {
+      const next = [...local.detailImages];
+      next[pending.index] = localUrl;
+      patch({ detailImages: next });
+    }
+    pendingUploadRef.current = null;
+    e.target.value = "";
   }
 
   if (loading) {
@@ -840,6 +950,13 @@ export function ProductDetailEditor({ data, loading = false, onChange }: Product
 
   return (
     <>
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        style={{ display: "none" }}
+        onChange={handleFileSelected}
+      />
       <div
         style={{
           flex: 1,
@@ -902,6 +1019,12 @@ export function ProductDetailEditor({ data, loading = false, onChange }: Product
             allImages={local.viewImages}
             onChange={(next) => patch({ mainImages: next.filter(Boolean).slice(0, 5) })}
             onPreview={(url) => setPreviewImage(url)}
+            onUpload={(index) => triggerUpload("main", index)}
+            onReplace={(index, url) => {
+              const slots = normalizeMainImages(local.mainImages);
+              slots[index] = url;
+              patch({ mainImages: slots.filter(Boolean).slice(0, 5) });
+            }}
           />
         </CollapsibleSection>
 
@@ -914,6 +1037,8 @@ export function ProductDetailEditor({ data, loading = false, onChange }: Product
             images={local.detailImages}
             onChange={(next) => patch({ detailImages: next })}
             onPreview={(url) => setPreviewImage(url)}
+            onReplace={(index) => triggerUpload("detail", index)}
+            onAdd={() => triggerUpload("detail", -1)}
           />
         </CollapsibleSection>
 

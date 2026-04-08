@@ -8,7 +8,14 @@
       "Bash(npx tsc:*)",
       "Bash(find /Users/fly/Documents/develop/project/private/taobao/maserati/client/app/src/publish -type f -name *.ts -o -name *.tsx)",
       "Bash(find /Users/fly/Documents/develop/project/private/taobao/maserati/client/app/src -path *publish* -type f)",
-      "Bash(grep -E \"\\\\.go$\")"
+      "Bash(grep -E \"\\\\.go$\")",
+      "Bash(ls -la /Users/fly/Documents/develop/project/private/taobao/maserati/client/webview/src/app/\\\\\\(console\\\\\\)/product/)",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(''''version:'''', d.get\\(''''version''''\\)\\); print\\(''''exports:'''', list\\(d.get\\(''''exports'''',{}\\).keys\\(\\)\\)[:5]\\)\")",
+      "Bash(find /Users/fly/Documents/develop/project/private/taobao/maserati/old_client_code -name *category* -o -name *search*)",
+      "Bash(./node_modules/.bin/tsc --noEmit)",
+      "Bash(/Users/fly/.nvm/versions/node/v22.14.0/bin/node /Users/fly/.nvm/versions/node/v22.14.0/lib/node_modules/typescript/bin/tsc --noEmit)",
+      "Bash(/Users/fly/.nvm/versions/node/v22.6.0/bin/tsc --noEmit)",
+      "Bash(/Users/fly/.nvm/versions/node/v22.6.0/bin/node node_modules/.bin/tsc --noEmit)"
     ]
   }
 }

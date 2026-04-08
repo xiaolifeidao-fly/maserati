@@ -1,0 +1,322 @@
+{
+  "frontDataLog": {
+    "identityId": "general-taobao-100",
+    "mainCategoryId": 50022703,
+    "fromSmart": false,
+    "fromStandardSpuPublish": false,
+    "fromSearch": false,
+    "fromSpuMatch": false,
+    "fromImageSearch": false,
+    "fromSuggestion": false,
+    "fromStandardCategory": false,
+    "fromSpuBasePublish": false,
+    "fromAIPublish": false,
+    "fromAICategory": false,
+    "fromAIImage": false,
+    "traceId": "213e03b517755711543832569e0fa4",
+    "gpfRenderTraceId": "213e03b517755711543832569e0fa4",
+    "trueItemId": 1042143640990,
+    "isEdit": false,
+    "pageUniqueId": "pc",
+    "newPublish": true
+  },
+  "auctionType": "b",
+  "sevenDayDefaultValue": 1,
+  "id": 1042143640990,
+  "copyItemMode": 0,
+  "postCouponPromotionId": null,
+  "spuMatch": null,
+  "croRule": "{\"url\":\"asyncOpt.htm?optType=croRuleAsyncCheck&catId=50019790\",\"input\":[\"id\",\"userId\",\"catId\",\"title\",\"desc\",\"descForShenbiPc\",\"sku\",\"price\",\"catProp\",\"saleProp\",\"descType\",\"shopping_title\",\"skuPublishSuggest\"]}",
+  "abSalePropEnable": "true",
+  "itemWithScProductItem": null,
+  "multiDiscountPromotionId": null,
+  "batchInventoryTemplateId": null,
+  "guideMaterialEnable": 1,
+  "afterSaleVideo_videoId": null,
+  "guaranteeService": null,
+  "sevenDayGray": -1,
+  "catSuggest": {
+    "empty": false
+  },
+  "fakeCreditSubmit": null,
+  "ifdWarningSubmit": null,
+  "riskWarningSubmit": false,
+  "feedbackSubmit_catErrorWarningSubmit": false,
+  "taobaoMarketTransform": null,
+  "taobaoMarketClean": null,
+  "snapshotId": null,
+  "showDraft": 1,
+  "newDescVersion": 1,
+  "descRepublicEnable": 1,
+  "skyLightRule": null,
+  "recommendInfo": "{\"fromAiPublish\":false,\"fromNewImagePublish\":false,\"hasStructTitle\":false,\"algoScene\":1,\"preItemRender\":false}",
+  "dbDraftId": 1571454642,
+  "draftIdKey": "dbDraftId",
+  "firstStartTime": null,
+  "itemdiagnoseInfo": null,
+  "diagnoseInvokeId": null,
+  "diagnoseSource": null,
+  "aliColorEnable": "p-1627207",
+  "mediaCenterEnable": null,
+  "newMaterialEnable": null,
+  "catId": 50019790,
+  "userId": 695637589,
+  "newDesc-card": {},
+  "base-card": {},
+  "sale-card": {},
+  "deliver-card": {},
+  "post-sale-service-card": {},
+  "icmp_global": {
+    "frontDataLog": {
+      "identityId": "general-taobao-100",
+      "mainCategoryId": 50022703,
+      "fromSmart": false,
+      "fromStandardSpuPublish": false,
+      "fromSearch": false,
+      "fromSpuMatch": false,
+      "fromImageSearch": false,
+      "fromSuggestion": false,
+      "fromStandardCategory": false,
+      "fromSpuBasePublish": false,
+      "fromAIPublish": false,
+      "fromAICategory": false,
+      "fromAIImage": false,
+      "traceId": "213e03b517755711543832569e0fa4",
+      "gpfRenderTraceId": "213e03b517755711543832569e0fa4",
+      "trueItemId": 1042143640990,
+      "isEdit": false,
+      "pageUniqueId": "pc",
+      "newPublish": true
+    },
+    "auctionType": "b",
+    "sevenDayDefaultValue": 1,
+    "id": 1042143640990,
+    "copyItemMode": 0,
+    "postCouponPromotionId": null,
+    "spuMatch": null,
+    "croRule": "{\"url\":\"asyncOpt.htm?optType=croRuleAsyncCheck&catId=50019790\",\"input\":[\"id\",\"userId\",\"catId\",\"title\",\"desc\",\"descForShenbiPc\",\"sku\",\"price\",\"catProp\",\"saleProp\",\"descType\",\"shopping_title\",\"skuPublishSuggest\"]}",
+    "abSalePropEnable": "true",
+    "itemWithScProductItem": null,
+    "multiDiscountPromotionId": null,
+    "batchInventoryTemplateId": null,
+    "guideMaterialEnable": 1,
+    "afterSaleVideo_videoId": null,
+    "guaranteeService": null,
+    "sevenDayGray": -1,
+    "catSuggest": {
+      "empty": false
+    },
+    "fakeCreditSubmit": null,
+    "ifdWarningSubmit": null,
+    "riskWarningSubmit": null,
+    "feedbackSubmit_catErrorWarningSubmit": null,
+    "taobaoMarketTransform": null,
+    "taobaoMarketClean": null,
+    "snapshotId": null,
+    "showDraft": 1,
+    "newDescVersion": 1,
+    "descRepublicEnable": 1,
+    "skyLightRule": null,
+    "recommendInfo": "{\"fromAiPublish\":false,\"fromNewImagePublish\":false,\"hasStructTitle\":false,\"algoScene\":1,\"preItemRender\":false}",
+    "dbDraftId": "",
+    "draftIdKey": "dbDraftId",
+    "firstStartTime": null,
+    "itemdiagnoseInfo": null,
+    "diagnoseInvokeId": null,
+    "diagnoseSource": null,
+    "aliColorEnable": "p-1627207",
+    "mediaCenterEnable": null,
+    "newMaterialEnable": null,
+    "catId": 50019790,
+    "userId": 695637589
+  },
+  "catPath": "当前类目：大家电>>平板电视",
+  "stuffStatus": {
+    "value": 5
+  },
+  "catProp": {},
+  "globalStock": {
+    "value": "globalStock_0"
+  },
+  "saleProp": {},
+  "customSaleProp": [
+    {
+      "name": "custom_-1",
+      "value": "custom_-1",
+      "text": "商品规格",
+      "uiType": "skuUniqueTitle",
+      "showUploadImage": true,
+      "maxPropItems": 1,
+      "maxValueItems": 1000,
+      "maxValueLength": 128,
+      "uploadConfig": {
+        "mediaLocalUpload": false,
+        "mediaType": "newSucaiSelector",
+        "aspectRatio": "1:1",
+        "maxUpload": "20MB",
+        "picMaxSize": "20MB",
+        "needCrop": true
+      },
+      "items": [],
+      "asyncOverlay": {
+        "url": "/sell/v2/asyncOpt.htm?optType=skuQualityRecommendAsyncRender&catId=50019790&itemId=1042143640990",
+        "method": "post"
+      }
+    }
+  ],
+  "tmDeliveryTime": {
+    "type": "0",
+    "value": null,
+    "setBySku": false,
+    "newVersion": null
+  },
+  "sku": [],
+  "quantity": 1,
+  "mainImagesGroup": {},
+  "auctionVideos": [],
+  "descRepublicOfSell": {
+    "descPageCommitParam": {
+      "opt": 2,
+      "clientType": 1,
+      "bizSource": "sell",
+      "userId": 695637589,
+      "itemId": 1042143640990,
+      "templateId": 0,
+      "version": 0,
+      "freeTry": 0,
+      "needServerComposite": false,
+      "batchPut": false,
+      "detailHeight": 0,
+      "params": "params",
+      "maxHeight": 100000,
+      "articleId": 0,
+      "smart": false,
+      "sell": false,
+      "newItem": true,
+      "bsellerBack2OldVersion": false,
+      "fliggyItem": false,
+      "changed": true,
+      "detailParam": "",
+      "templateContent": "{\"groups\":[],\"sellergroups\":[]}",
+      "catId": 50019790,
+      "descDomain": "//g.alicdn.com",
+      "descVersion": "1.1.53",
+      "bseller": false,
+      "editType": "lite"
+    },
+    "descPageRenderParam": {
+      "userId": 695637589,
+      "itemId": 1042143640990,
+      "templateId": 0,
+      "clientType": 1,
+      "catId": 50019790,
+      "bizSource": "sell",
+      "descDomain": "//g.alicdn.com",
+      "descVersion": "1.1.53",
+      "smart": false,
+      "newItem": true,
+      "bseller": false
+    },
+    "descPageRenderModel": {
+      "wholeConfigBO": {
+        "width": 620,
+        "maxHeight": 100000,
+        "splitHeight": 1240,
+        "ratio": 2,
+        "canCoverFromTmall": false,
+        "userId": 695637589,
+        "useCdnCrop": true,
+        "imgCropTool": true,
+        "liteCannotEdit": false,
+        "fontFamilyOptions": [
+          {
+            "name": "阿里巴巴普惠体",
+            "value": "ali-webfont"
+          },
+          {
+            "name": "思源黑体-light",
+            "value": "SiYuanHei"
+          }
+        ],
+        "renderWhite": false
+      },
+      "extendFields": "{}",
+      "extendConfig": {
+        "wangpuEditorConfig": {
+          "type": "iframe",
+          "params": {
+            "isAdescription": 1,
+            "catId": 0,
+            "itemId": 1042143640990,
+            "clientType": 1,
+            "isV3": "true"
+          },
+          "url": "https://sell.xiangqing.taobao.com/new_user_panel.htm"
+        },
+        "httpRequestUrlConfig": {
+          "imageSelectUrl": "//market.m.taobao.com/app/crs-qn/sucai-selector-ng/index",
+          "tokenUrl": "https://xiangqing.wangpu.taobao.com/GetToken.do",
+          "mtopHost": "h5api.m.taobao.com",
+          "mediaUploadUrl": [
+            "stream.xiangqing.taobao.com",
+            "stream-xiangqing.taobao.com"
+          ],
+          "httpHost": "sell.xiangqing.taobao.com",
+          "url": "https://xiangqing.wangpu.taobao.com/template/ajax/commit_item_description.do"
+        },
+        "functionConfig": {
+          "showPreview": true,
+          "seniorEditDisabled": false,
+          "showDistinguish": false,
+          "backOldDiscardDraft": false,
+          "showBackOldVersion": true,
+          "showTemplate": true,
+          "showFastAddText": true,
+          "bSeller": false,
+          "foreverDisableEdit": false,
+          "showWangpuEditor": true
+        },
+        "imagePluginConfig": {
+          "autoSelect": true,
+          "picMaxSize": "5MB",
+          "appkey": "tu",
+          "url": "https://market.m.taobao.com/app/crs-qn/sucai-selector-ng/index"
+        },
+        "imageConfig": {
+          "usePreDraw": true,
+          "mustCutImage": false,
+          "useCutThreshold": true,
+          "cutImageConfig": {
+            "cutWidthThreshold": 1500,
+            "cutHeightThreshold": 2000,
+            "cutMinWidth": 620,
+            "cutMinHeight": 0
+          }
+        },
+        "uploadConfig": {
+          "localFile": false,
+          "picUploadApi": "picUploadApi",
+          "params": {
+            "folderId": "folderId"
+          }
+        }
+      }
+    }
+  },
+  "shopcat": [],
+  "subStock": {
+    "value": 1
+  },
+  "tbExtractWay": {
+    "template": null
+  },
+  "regionLimitSale": {
+    "value": "regionLimitSale_0"
+  },
+  "sevenDaySupport": 1,
+  "startTime": {
+    "type": 0
+  },
+  "diagnoseViolationWarning": {},
+  "draft-btn": 1571454642
+}

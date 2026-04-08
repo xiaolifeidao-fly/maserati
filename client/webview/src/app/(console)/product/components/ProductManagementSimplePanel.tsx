@@ -6,8 +6,8 @@ import { Button, Drawer, Descriptions, Form, Input, Modal, Popconfirm, Select, S
 import type { ColumnsType } from "antd/es/table";
 import { type ProductPayload, type ProductRecord } from "../api/product.api";
 import { useProductManagement } from "../hooks/useProductManagement";
-import { ProductPublishModal } from "./ProductPublishModal";
 import { formatDateTime } from "@/utils/format";
+import { getPublishWindowApi } from "@/utils/publish-window";
 
 interface ProductFormValues extends ProductPayload {}
 
@@ -23,7 +23,6 @@ export function ProductManagementSimplePanel() {
     status: "",
   });
   const [modalOpen, setModalOpen] = useState(false);
-  const [publishModalOpen, setPublishModalOpen] = useState(false);
   const [previewRecord, setPreviewRecord] = useState<ProductRecord | null>(null);
   const [editingRecord, setEditingRecord] = useState<ProductRecord | null>(null);
 
@@ -188,7 +187,7 @@ export function ProductManagementSimplePanel() {
             <Button icon={<ReloadOutlined />} onClick={() => void refresh()}>
               刷新
             </Button>
-            <Button icon={<PlayCircleOutlined />} onClick={() => setPublishModalOpen(true)}>
+            <Button icon={<PlayCircleOutlined />} onClick={() => void getPublishWindowApi().openPublishWindow()}>
               发布
             </Button>
           </Space>
@@ -308,11 +307,6 @@ export function ProductManagementSimplePanel() {
         ) : null}
       </Drawer>
 
-      <ProductPublishModal
-        open={publishModalOpen}
-        onCancel={() => setPublishModalOpen(false)}
-        onPublished={refresh}
-      />
     </div>
   );
 }

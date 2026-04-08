@@ -1,5 +1,6 @@
 import type { NormalizedProduct } from '../types/source-data';
 import type { TbCategoryInfo, TbDraftContext } from '../types/draft';
+import type { TbWindowJsonDraftData } from '../types/tb-window-json';
 
 /**
  * FillerContext — 填充器共享上下文
@@ -18,6 +19,8 @@ export interface FillerContext {
   readonly uploadedDetailImages: string[];
   /** 草稿上下文（含 catId / startTraceId / draftId 等） */
   readonly draftContext: TbDraftContext;
+  /** 发布页面 window.Json 解析结果（含实际表单字段、类目属性、SKU 选项等） */
+  readonly tbWindowJson?: TbWindowJsonDraftData;
   /**
    * 草稿提交载荷（可写）
    * 各填充器向此对象追加需要提交给淘宝的字段

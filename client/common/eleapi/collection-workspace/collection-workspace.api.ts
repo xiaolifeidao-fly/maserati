@@ -1,6 +1,7 @@
 import { ElectronApi, InvokeType, Protocols } from "../base";
 import { CollectBatchRecord, CollectRecordPreview } from "../collect/collect.api";
 import { type CollectSourceType } from "../collect/collect.platform";
+import type { StandardProductData } from "../../product/standard-product";
 
 export class CollectionWorkspaceState {
   batch: CollectBatchRecord = new CollectBatchRecord();
@@ -65,5 +66,10 @@ export class CollectionWorkspaceApi extends ElectronApi {
   @InvokeType(Protocols.INVOKE)
   async hasCollectedHtml(sourceProductId: string, sourceType?: CollectSourceType): Promise<boolean> {
     return this.invokeApi("hasCollectedHtml", sourceProductId, sourceType);
+  }
+
+  @InvokeType(Protocols.INVOKE)
+  async saveStandardProductData(sourceProductId: string, sourceType: CollectSourceType, data: StandardProductData): Promise<void> {
+    return this.invokeApi("saveStandardProductData", sourceProductId, sourceType, data);
   }
 }

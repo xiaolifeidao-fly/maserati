@@ -16,6 +16,18 @@ func (r *ProductFileRepository) EnsureTable() error {
 	return r.Db.AutoMigrate(&ProductFile{})
 }
 
+// FindByBizUniqueID 通过业务唯一ID查找文件记录（用于上传幂等检查）
+func (r *ProductFileRepository) FindByBizUniqueID(bizUniqueID string) (*ProductFile, error) {
+	if r.Db == nil {
+		return nil, fmt.Errorf("database is not initialized")
+	}
+	var entity ProductFile
+	if err := r.Db.Where("biz_unique_id = ? AND active = ?", bizUniqueID, 1).First(&entity).Error; err != nil {
+		return nil, err
+	}
+	return &entity, nil
+}
+
 func (r *ProductFileRepository) CountByQuery(query productDTO.ProductFileQueryDTO) (int64, error) {
 	if r.Db == nil {
 		return 0, fmt.Errorf("database is not initialized")
@@ -24,8 +36,8 @@ func (r *ProductFileRepository) CountByQuery(query productDTO.ProductFileQueryDT
 	if query.ProductID > 0 {
 		dbQuery = dbQuery.Where("product_id = ?", query.ProductID)
 	}
-	if query.SourceProductID > 0 {
-		dbQuery = dbQuery.Where("source_product_id = ?", query.SourceProductID)
+	if value := strings.TrimSpace(query.SourceProductID); value != "" {
+		dbQuery = dbQuery.Where("source_product_id = ?", value)
 	}
 	if value := strings.TrimSpace(query.BizUniqueID); value != "" {
 		dbQuery = dbQuery.Where("biz_unique_id = ?", value)
@@ -45,8 +57,8 @@ func (r *ProductFileRepository) ListByQuery(query productDTO.ProductFileQueryDTO
 	if query.ProductID > 0 {
 		dbQuery = dbQuery.Where("product_id = ?", query.ProductID)
 	}
-	if query.SourceProductID > 0 {
-		dbQuery = dbQuery.Where("source_product_id = ?", query.SourceProductID)
+	if value := strings.TrimSpace(query.SourceProductID); value != "" {
+		dbQuery = dbQuery.Where("source_product_id = ?", value)
 	}
 	if value := strings.TrimSpace(query.BizUniqueID); value != "" {
 		dbQuery = dbQuery.Where("biz_unique_id = ?", value)

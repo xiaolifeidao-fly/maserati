@@ -29,7 +29,10 @@ func (s *Sku) TableName() string { return "sku" }
 type ProductDraft struct {
 	db.BaseEntity
 	ProductID       uint64 `gorm:"column:product_id;type:bigint unsigned;index:idx_product_id" description:"关联商品ID"`
-	SourceProductID uint64 `gorm:"column:source_product_id;type:bigint unsigned;index:idx_source_product_id" description:"原商品ID"`
+	SourceProductID string `gorm:"column:source_product_id;type:varchar(128);index:idx_source_product_id" description:"原商品ID"`
+	ShopID          uint64 `gorm:"column:shop_id;type:bigint unsigned;index:idx_draft_shop_id" description:"店铺ID"`
+	TbCatID         string `gorm:"column:tb_cat_id;type:varchar(50);index:idx_draft_tb_cat_id" description:"淘宝分类ID"`
+	TbDraftID       string `gorm:"column:tb_draft_id;type:varchar(128);index:idx_draft_tb_draft_id" description:"淘宝草稿ID"`
 	Status          string `gorm:"column:status;type:varchar(32)" description:"草稿状态"`
 }
 
@@ -37,11 +40,11 @@ func (p *ProductDraft) TableName() string { return "product_draft" }
 
 type ProductFile struct {
 	db.BaseEntity
-	BizUniqueID     string `gorm:"column:biz_unique_id;type:varchar(128);index:idx_biz_unique_id" description:"上传后的业务唯一ID"`
-	FileName        string `gorm:"column:file_name;type:varchar(255)" description:"文件名称"`
-	FilePath        string `gorm:"column:file_path;type:varchar(512)" description:"文件路径"`
+	BizUniqueID     string `gorm:"column:biz_unique_id;type:varchar(128);index:idx_biz_unique_id" description:"业务唯一ID(原始URL的SHA256 hash)"`
+	FileName        string `gorm:"column:file_name;type:text" description:"原始文件URL/名称"`
+	FilePath        string `gorm:"column:file_path;type:text" description:"云端文件路径/URL"`
 	Sort            int    `gorm:"column:sort;type:int;default:0" description:"排序"`
-	SourceProductID uint64 `gorm:"column:source_product_id;type:bigint unsigned;index:idx_source_product_id" description:"源商品ID"`
+	SourceProductID string `gorm:"column:source_product_id;type:varchar(128);index:idx_source_product_id" description:"源商品ID"`
 	ProductID       uint64 `gorm:"column:product_id;type:bigint unsigned;index:idx_product_id" description:"关联商品ID"`
 }
 

@@ -12,13 +12,14 @@ import {
 } from "@eleapi/collect/collect.api";
 import { normalizeCollectSourceType, type CollectSourceType } from "@eleapi/collect/collect.platform";
 import { CollectionWorkspaceApi, CollectionWorkspaceState, type CollectedProductData } from "@eleapi/collection-workspace/collection-workspace.api";
+import type { StandardProductData } from "@product/standard-product";
 import { type ShopRecord } from "@eleapi/commerce/commerce.api";
 import { getCollectApi } from "@/utils/collect";
 import { getCommerceApi } from "@/utils/commerce";
 
 export { CollectBatchRecord, CollectRecordPreview, CollectionWorkspaceState };
 export { normalizeCollectSourceType };
-export type { CollectBatchListQuery, CollectBatchPayload, CollectRecordListQuery, CollectRecordUpdatePayload, ShopRecord, CollectedProductData, CollectSourceType, CollectStartResult };
+export type { CollectBatchListQuery, CollectBatchPayload, CollectRecordListQuery, CollectRecordUpdatePayload, ShopRecord, CollectedProductData, CollectSourceType, CollectStartResult, StandardProductData };
 
 export async function fetchCollectBatches(query: CollectBatchListQuery) {
   return getCollectApi().listCollectBatches(query);
@@ -93,6 +94,14 @@ export async function getCollectedProductRawData(sourceProductId: string, source
 
 export async function hasCollectedHtml(sourceProductId: string, sourceType?: CollectSourceType): Promise<boolean> {
   return getCollectionWorkspaceApi().hasCollectedHtml(sourceProductId, sourceType);
+}
+
+export async function saveStandardProductData(
+  sourceProductId: string,
+  sourceType: CollectSourceType,
+  data: StandardProductData,
+): Promise<void> {
+  return getCollectionWorkspaceApi().saveStandardProductData(sourceProductId, sourceType, data);
 }
 
 export async function fetchCollectionShopOptions() {

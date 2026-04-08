@@ -1,6 +1,7 @@
 import { PublishApi } from '@eleapi/publish/publish.api';
 import { requestBackend } from '../shared/backend';
 import { PublishRunner } from '@src/publish/core/publish-runner';
+import { showCaptchaPanel } from '@src/publish/publish-window';
 import type { IPublishPersister } from '@src/publish/core/publish-runner';
 import type {
   PublishTaskRecord,
@@ -124,6 +125,10 @@ export class PublishImpl extends PublishApi {
     runner.onProgress((event: PublishProgressEvent) => {
       // 通过 IPC 推送进度到渲染进程
       this.send('onPublishProgress', event);
+      // 检测到验证码时，自动在发布窗口右侧抽屉展示验证码
+      if (event.captchaUrl) {
+        showCaptchaPanel(event.captchaUrl);
+      }
     });
 
     this.runnerMap.set(taskId, runner);

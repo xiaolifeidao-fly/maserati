@@ -135,8 +135,8 @@ export function ManagerShell({ children }: ManagerShellProps) {
                         style={{
                           width: 42,
                           height: 42,
-                          background: "linear-gradient(135deg, #ff9151, #ff5d47)",
-                          color: "#fff7f2",
+                          background: "linear-gradient(135deg, #2f6fec, #5e98f1)",
+                          color: "#fdfefe",
                           fontWeight: 700,
                         }}
                       >

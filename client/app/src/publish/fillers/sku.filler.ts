@@ -1,6 +1,7 @@
 import type { IFiller, FillerContext } from './filler.interface';
 import type { TbSaleProp } from '../types/draft';
 import type { NormalizedSku } from '../types/source-data';
+import type { TbWindowJsonSalePropSubItem } from '../types/tb-window-json';
 
 function parseYuanPrice(value: string): number {
   const numeric = Number(String(value || '').replace(/[^\d.]/g, ''));
@@ -24,7 +25,7 @@ export class SkuFiller implements IFiller {
   readonly fillerName = 'SkuFiller';
 
   async fill(ctx: FillerContext): Promise<void> {
-    const { product, categoryInfo, draftPayload } = ctx;
+    const { product, categoryInfo, tbWindowJson, draftPayload } = ctx;
     const { skuList } = product;
 
     if (!skuList.length) return;
@@ -53,6 +54,12 @@ export class SkuFiller implements IFiller {
         if (val.alias) {
           valuVidMap.set(`${saleProp.pid}:${val.alias}`, val.vid);
         }
+      }
+
+      // 用 tbWindowJson.salePropSubItems 补充 vid 映射（页面实际可选值）
+      const windowSubItem = tbWindowJson?.salePropSubItems?.[saleProp.pid];
+      if (windowSubItem) {
+        this.extractVidsFromSubItem(saleProp.pid, windowSubItem, valuVidMap);
       }
     }
 
@@ -111,6 +118,27 @@ export class SkuFiller implements IFiller {
       salePropList.find(sp => sp.name === attrName) ??
       salePropList.find(sp => sp.name.includes(attrName) || attrName.includes(sp.name))
     );
+  }
+
+  /**
+   * 从 tbWindowJson.salePropSubItems 中递归提取 vid 映射
+   * subItem.dataSource[].options[].value 即 vid，options[].text 即展示名
+   */
+  private extractVidsFromSubItem(
+    pid: string,
+    subItem: TbWindowJsonSalePropSubItem,
+    vidMap: Map<string, string>,
+  ): void {
+    for (const group of subItem.dataSource ?? []) {
+      for (const opt of group.options ?? []) {
+        if (opt.value != null && opt.text) {
+          vidMap.set(`${pid}:${opt.text}`, String(opt.value));
+        }
+      }
+    }
+    for (const child of subItem.subItems ?? []) {
+      this.extractVidsFromSubItem(pid, child, vidMap);
+    }
   }
 
   /** 模糊匹配 vid（包含关系） */

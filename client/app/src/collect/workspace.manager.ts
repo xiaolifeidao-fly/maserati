@@ -8,6 +8,7 @@ import {
   CollectionWorkspaceState,
   type CollectedProductData,
 } from "@eleapi/collection-workspace/collection-workspace.api";
+import type { StandardProductData } from "@product/standard-product";
 import { CollectBatchRecord, CollectRecordPreview } from "@eleapi/collect/collect.api";
 import { type CollectSourceType } from "@eleapi/collect/collect.platform";
 import { getCollectionPlatformDriver } from "./platforms/registry";
@@ -22,6 +23,10 @@ interface OpenCollectionWorkspaceOptions {
   sourceType: CollectSourceType;
   initialUrl: string;
   cookies?: CookiesSetDetails[];
+  originStorage?: Array<{
+    origin: string;
+    localStorage: Array<{ name: string; value: string }>;
+  }>;
 }
 
 interface CollectionWorkspaceViews {
@@ -93,6 +98,29 @@ export function getCollectedProductRawData(sourceProductId: string, sourceType: 
 
 export function hasCollectedHtml(sourceProductId: string, sourceType: CollectSourceType = workspaceState.sourceType || "unknown"): boolean {
   return fs.existsSync(getCollectedHtmlPath(sourceProductId, sourceType));
+}
+
+function getStandardProductStoreKey(sourceProductId: string, sourceType: CollectSourceType) {
+  return `standard_product_${sourceType}_${sourceProductId}`;
+}
+
+export function saveStandardProductToStore(sourceProductId: string, data: StandardProductData, sourceType: CollectSourceType): void {
+  try {
+    setGlobal(getStandardProductStoreKey(sourceProductId, sourceType), data);
+    log.info("[collection workspace] saved standard product data to store", { sourceProductId, sourceType });
+  } catch (error) {
+    log.warn("[collection workspace] failed to save standard product data to store", { sourceProductId, sourceType, error });
+  }
+}
+
+export function getStandardProductFromStore(sourceProductId: string, sourceType: CollectSourceType): StandardProductData | null {
+  try {
+    const data = getGlobal(getStandardProductStoreKey(sourceProductId, sourceType));
+    return data && typeof data === "object" ? (data as StandardProductData) : null;
+  } catch (error) {
+    log.warn("[collection workspace] failed to read standard product data from store", { sourceProductId, sourceType, error });
+    return null;
+  }
 }
 
 let workspaceWindow: BrowserWindow | null = null;
@@ -242,6 +270,38 @@ async function applyCookies(view: BrowserView, cookies: CookiesSetDetails[]) {
       await cookieStore.set(cookie);
     } catch (error) {
       log.warn("[collection workspace] failed to set cookie", { name: cookie.name, url: cookie.url }, error);
+    }
+  }
+}
+
+async function applyOriginStorage(
+  view: BrowserView,
+  originStorage: Array<{ origin: string; localStorage: Array<{ name: string; value: string }> }>,
+) {
+  for (const item of originStorage) {
+    const origin = String(item.origin || "").trim();
+    const entries = Array.isArray(item.localStorage) ? item.localStorage : [];
+    if (!origin || entries.length === 0) {
+      continue;
+    }
+
+    try {
+      await view.webContents.loadURL(origin);
+      const payload = JSON.stringify(entries);
+      await view.webContents.executeJavaScript(
+        `(function() {
+          const entries = ${payload};
+          for (const entry of entries) {
+            if (!entry || typeof entry.name !== "string") {
+              continue;
+            }
+            window.localStorage.setItem(entry.name, String(entry.value ?? ""));
+          }
+        })();`,
+        true,
+      );
+    } catch (error) {
+      log.warn("[collection workspace] failed to apply origin localStorage", { origin, error });
     }
   }
 }
@@ -545,6 +605,24 @@ function bindCenterViewEvents(view: BrowserView) {
   });
 }
 
+function bindCenterWindowOpenHandler(view: BrowserView) {
+  view.webContents.setWindowOpenHandler(({ url }) => {
+    const nextUrl = String(url || "").trim();
+    if (!nextUrl || nextUrl === "about:blank") {
+      return { action: "deny" };
+    }
+
+    void view.webContents.loadURL(nextUrl).catch((error) => {
+      log.warn("[collection workspace] failed to reuse center view for opened url", {
+        url: nextUrl,
+        error,
+      });
+    });
+
+    return { action: "deny" };
+  });
+}
+
 export async function openCollectionWorkspace(options: OpenCollectionWorkspaceOptions) {
   const display = electronScreen.getPrimaryDisplay();
   isScrapingRecord = false;
@@ -591,6 +669,7 @@ export async function openCollectionWorkspace(options: OpenCollectionWorkspaceOp
 
     workspaceViews = { left, center, right };
     bindCenterViewEvents(center);
+    bindCenterWindowOpenHandler(center);
 
     workspaceWindow.addBrowserView(left);
     workspaceWindow.addBrowserView(center);
@@ -655,6 +734,10 @@ export async function openCollectionWorkspace(options: OpenCollectionWorkspaceOp
 
   if (options.cookies?.length) {
     await applyCookies(workspaceViews.center, options.cookies);
+  }
+
+  if (options.originStorage?.length) {
+    await applyOriginStorage(workspaceViews.center, options.originStorage);
   }
 
   await workspaceViews.center.webContents.loadURL(normalizeWorkspaceUrl(options.initialUrl));

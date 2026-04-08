@@ -16,9 +16,9 @@
   ],
   "license": "MIT",
   "scripts": {
-    "dev": "next dev -p 9901",
+    "dev": "next dev -p 9101",
     "build": "next build",
-    "start": "next start -p 9901",
+    "start": "next start -p 9101",
     "lint": "next lint",
     "build:local": "APP_ENV=local next build",
     "build:dev": "APP_ENV=dev next build",

@@ -3,6 +3,8 @@ import { convertDetailData } from "./transform.js";
 const EXTRACTION_TIMEOUT_MS = 30000;
 const DESC_CAPTURE_TIMEOUT_MS = 5000;
 const DESC_CAPTURE_POLL_MS = 250;
+const CATEGORY_SEARCH_ENDPOINT =
+  "https://item.upload.taobao.com/router/asyncOpt.htm";
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type !== "extract-page-data") {
@@ -47,7 +49,10 @@ async function handleExtraction() {
     extracted.descData ||
     (await waitForDescCapture(tabId, DESC_CAPTURE_TIMEOUT_MS, DESC_CAPTURE_POLL_MS));
 
-  const converted = convertDetailData(extracted.detailData, descData);
+  const category = await fetchCategoryForTab(tab, extracted.detailData);
+  const converted = convertDetailData(extracted.detailData, descData, {
+    category,
+  });
   const productId = converted.productId || "unknown";
   const filename = `target_${productId}.json`;
   const dataUrl = `data:application/json;charset=utf-8,${encodeURIComponent(
@@ -61,6 +66,89 @@ async function handleExtraction() {
   });
 
   return { filename, productId };
+}
+
+async function fetchCategoryForTab(tab, detailData) {
+  const keyword = extractProductName(detailData);
+  if (!keyword) {
+    return null;
+  }
+
+  try {
+    const response = await fetchCategorySearch(keyword, tab?.url || "");
+    return normalizeCategory(response);
+  } catch (error) {
+    console.warn("Failed to fetch Taobao category info:", error);
+    return null;
+  }
+}
+
+function extractProductName(detailData) {
+  const detailRes = detailData?.res || detailData || {};
+  const candidateNames = [
+    detailRes?.item?.title,
+    detailRes?.title,
+    detailRes?.componentsVO?.item?.title,
+  ];
+
+  for (const value of candidateNames) {
+    const name = typeof value === "string" ? value.trim() : "";
+    if (name) {
+      return name;
+    }
+  }
+
+  return "";
+}
+
+async function fetchCategorySearch(keyword, refererUrl) {
+  const params = new URLSearchParams({
+    optType: "categorySearch",
+    keyword,
+  });
+
+  const response = await fetch(`${CATEGORY_SEARCH_ENDPOINT}?${params.toString()}`, {
+    method: "GET",
+    credentials: "include",
+    headers: {
+      accept: "application/json, text/plain, */*",
+      "x-requested-with": "XMLHttpRequest",
+    },
+    referrer: refererUrl || undefined,
+    referrerPolicy: "strict-origin-when-cross-origin",
+  });
+
+  if (!response.ok) {
+    throw new Error(`Category search failed with status ${response.status}`);
+  }
+
+  return response.json();
+}
+
+function normalizeCategory(payload) {
+  const firstItem = Array.isArray(payload?.data) ? payload.data[0] : null;
+  if (!firstItem) {
+    return null;
+  }
+
+  const categoryId =
+    firstItem.id == null || firstItem.id === "" ? "" : String(firstItem.id).trim();
+  const pathSegments = Array.isArray(firstItem.path)
+    ? firstItem.path
+        .map((segment) => (segment == null ? "" : String(segment).trim()))
+        .filter(Boolean)
+    : [];
+  const categoryName = pathSegments.join("/");
+
+  if (!categoryId && !categoryName) {
+    return null;
+  }
+
+  return {
+    categoryId,
+    categoryName,
+    categoryPath: categoryName,
+  };
 }
 
 async function getActiveTab() {

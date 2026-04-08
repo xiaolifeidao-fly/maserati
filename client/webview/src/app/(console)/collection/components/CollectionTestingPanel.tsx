@@ -34,6 +34,7 @@ import {
   updateCollectRecord,
   updateWorkspaceRecord,
   getCollectedProductRawData,
+  saveStandardProductData,
 } from "../api/collection.api";
 import { convertRawDataToStandard } from "./standard-product.types";
 import { normalizeCollectSourceType, type CollectSourceType } from "../api/collection.api";
@@ -321,11 +322,13 @@ export function CollectionWorkspaceLeftPanel({
           borderRadius: 16,
           padding: "14px 16px",
           marginBottom: 10,
-          background: "linear-gradient(135deg, #1e3a5f 0%, #1e40af 100%)",
-          color: "#fff",
+          background: "linear-gradient(135deg, rgba(241,247,255,0.98) 0%, rgba(228,238,252,0.98) 100%)",
+          border: "1px solid rgba(128,164,214,0.18)",
+          boxShadow: "0 12px 28px rgba(57,97,145,0.08)",
+          color: "#1a3552",
         }}
       >
-        <div style={{ fontSize: 11, letterSpacing: 1, opacity: 0.7, textTransform: "uppercase", marginBottom: 4 }}>
+        <div style={{ fontSize: 11, letterSpacing: 1, opacity: 0.72, textTransform: "uppercase", marginBottom: 4 }}>
           采集批次
         </div>
         <div style={{ fontSize: 15, fontWeight: 700, lineHeight: 1.4, marginBottom: 2 }}>
@@ -347,8 +350,8 @@ export function CollectionWorkspaceLeftPanel({
             style={{
               padding: "5px 10px",
               borderRadius: 999,
-              background: "rgba(255,255,255,0.14)",
-              border: "1px solid rgba(255,255,255,0.16)",
+              background: "rgba(255,255,255,0.82)",
+              border: "1px solid rgba(128,164,214,0.18)",
               fontSize: 12,
               fontWeight: 600,
             }}
@@ -359,9 +362,9 @@ export function CollectionWorkspaceLeftPanel({
             style={{
               padding: "5px 10px",
               borderRadius: 999,
-              background: "rgba(249,115,22,0.18)",
-              border: "1px solid rgba(251,146,60,0.24)",
-              color: "#ffedd5",
+              background: "rgba(216,161,47,0.12)",
+              border: "1px solid rgba(216,161,47,0.22)",
+              color: "#8a6a1d",
               fontSize: 12,
               fontWeight: 600,
             }}
@@ -407,7 +410,7 @@ export function CollectionWorkspaceLeftPanel({
                 gap: 4,
                 borderRadius: 8,
                 border: "1px solid rgba(226,232,240,0.9)",
-                background: navigatingAction === action ? "#3b82f6" : "rgba(248,250,252,0.9)",
+                background: navigatingAction === action ? "#2f6fec" : "rgba(248,250,252,0.9)",
                 color: navigatingAction === action ? "#fff" : "#475569",
                 fontSize: 12,
                 fontWeight: 500,
@@ -668,6 +671,7 @@ export function CollectionWorkspaceRightPanel({
   const [dataLoading, setDataLoading] = useState(false);
   const [editedData, setEditedData] = useState<import("./standard-product.types").StandardProductData | null>(null);
   const [closingPanel, setClosingPanel] = useState(false);
+  const [saving, setSaving] = useState(false);
   const isTbWorkspace = workspaceState.sourceType === "tb";
 
   const selectedRecord = useMemo(() => {
@@ -718,9 +722,17 @@ export function CollectionWorkspaceRightPanel({
     }
   };
 
-  const handleSave = () => {
-    if (!selectedRecord || !editedData) return;
-    message.info("保存逻辑待接入");
+  const handleSave = async () => {
+    if (!selectedRecord?.sourceProductId || !editedData || saving) return;
+    setSaving(true);
+    try {
+      await saveStandardProductData(selectedRecord.sourceProductId, workspaceState.sourceType, editedData);
+      void message.success("商品数据已保存");
+    } catch (error) {
+      void message.error(error instanceof Error ? error.message : "保存失败");
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleClosePanel = async () => {
@@ -757,8 +769,10 @@ export function CollectionWorkspaceRightPanel({
           borderRadius: 12,
           padding: "12px 16px",
           marginBottom: 10,
-          background: "linear-gradient(135deg, #1e3a5f 0%, #1e40af 100%)",
-          color: "#fff",
+          background: "linear-gradient(135deg, rgba(241,247,255,0.98) 0%, rgba(228,238,252,0.98) 100%)",
+          border: "1px solid rgba(128,164,214,0.18)",
+          boxShadow: "0 12px 28px rgba(57,97,145,0.08)",
+          color: "#1a3552",
           flexShrink: 0,
           display: "flex",
           alignItems: "center",
@@ -798,7 +812,7 @@ export function CollectionWorkspaceRightPanel({
                 loading={closingPanel}
                 style={{
                   border: "none",
-                  boxShadow: "0 8px 24px rgba(15,23,42,0.12)",
+                  boxShadow: "0 8px 24px rgba(57,97,145,0.12)",
                 }}
               >
                 <CloseOutlined />
@@ -807,11 +821,12 @@ export function CollectionWorkspaceRightPanel({
             <Button
               type="primary"
               size="small"
-              onClick={handleSave}
-              disabled={dataLoading}
+              onClick={() => void handleSave()}
+              loading={saving}
+              disabled={dataLoading || !editedData}
               style={{
                 border: "none",
-                boxShadow: "0 8px 24px rgba(15,23,42,0.18)",
+                boxShadow: "0 8px 24px rgba(47,111,236,0.14)",
               }}
             >
               保存
