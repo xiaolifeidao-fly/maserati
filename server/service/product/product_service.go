@@ -173,8 +173,10 @@ func (s *ProductService) CreateProduct(req *productDTO.CreateProductDTO) (*produ
 	if err := ensureProductCategory(s.categoryRepository, req.CategoryID); err != nil {
 		return nil, err
 	}
-	if err := ensureProductCollectRecord(s.collectRecordRepository, req.CollectRecordID); err != nil {
-		return nil, err
+	if req.CollectRecordID > 0 {
+		if err := ensureProductCollectRecord(s.collectRecordRepository, req.CollectRecordID); err != nil {
+			return nil, err
+		}
 	}
 	title := strings.TrimSpace(req.Title)
 	if title == "" {

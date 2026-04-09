@@ -4,8 +4,7 @@ import type { IFiller, FillerContext } from './filler.interface';
  * LogisticsFiller — 物流/运费填充器
  *
  * 填充内容：
- *  - freightInfo   运费模板 ID + 配送方式
- *  - postageInfo   邮费信息（重量等）
+ *  - tbExtractWay   运费模板
  *
  * 注意：
  *  - 运费模板 ID（templateId）需要提前在淘宝商家后台创建
@@ -18,21 +17,10 @@ export class LogisticsFiller implements IFiller {
     const { product, draftPayload } = ctx;
     const { logistics } = product;
 
-    const freightInfo: Record<string, unknown> = {};
-
-    // 运费模板
     if (logistics.templateId) {
-      freightInfo['freightTemplateId'] = logistics.templateId;
+      draftPayload['tbExtractWay'] = {
+        template: String(logistics.templateId),
+      };
     }
-
-    // 配送方式（默认快递）
-    freightInfo['postType'] = logistics.deliveryType ?? 'express';
-
-    // 商品重量（克）
-    if (logistics.weight != null && logistics.weight > 0) {
-      freightInfo['weight'] = Math.round(logistics.weight * 1000); // kg → g
-    }
-
-    draftPayload['freightInfo'] = freightInfo;
   }
 }

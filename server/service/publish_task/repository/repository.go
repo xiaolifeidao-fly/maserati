@@ -72,7 +72,21 @@ func (r *PublishStepRepository) EnsureTable() error {
 	if r.Db == nil {
 		return fmt.Errorf("database is not initialized")
 	}
-	return r.Db.AutoMigrate(&PublishStep{})
+	if err := r.Db.AutoMigrate(&PublishStep{}); err != nil {
+		return err
+	}
+	migrator := r.Db.Migrator()
+	if migrator.HasColumn(&PublishStep{}, "input_data") {
+		if err := migrator.DropColumn(&PublishStep{}, "input_data"); err != nil {
+			return err
+		}
+	}
+	if migrator.HasColumn(&PublishStep{}, "output_data") {
+		if err := migrator.DropColumn(&PublishStep{}, "output_data"); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (r *PublishStepRepository) ListByTaskID(taskID uint64) ([]*PublishStep, error) {

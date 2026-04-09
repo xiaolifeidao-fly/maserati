@@ -7,7 +7,7 @@ import { ParserFactory } from '../parsers/parser-factory';
 import type { RawSourceData } from '../types/source-data';
 import { getStandardProductFromStore } from '@src/collect/workspace.manager';
 import type { CollectSourceType } from '@eleapi/collect/collect.platform';
-import log from 'electron-log';
+import { publishInfo, summarizeForLog } from '../utils/publish-logger';
 
 function publishSourceTypeToCollect(sourceType: SourceType): CollectSourceType {
   switch (sourceType) {
@@ -47,17 +47,23 @@ export class ParseSourceStep extends PublishStep {
     const parser = ParserFactory.getParser(sourceType);
     const parsedProduct = parser.parse(rawSource);
 
+    // 若解析器未能从 raw 数据中提取 sourceId，则回退到任务记录注入的 sourceProductId
+    if (!parsedProduct.sourceId) {
+      const ctxSourceProductId = ctx.get('sourceProductId')?.trim();
+      if (ctxSourceProductId) {
+        parsedProduct.sourceId = ctxSourceProductId;
+      }
+    }
+
     // Step 2: 若 store 中存有该商品的标准化数据，优先使用
     let product = parsedProduct;
+    let dataSource: 'parsed' | 'stored' = 'parsed';
     if (parsedProduct.sourceId) {
       const collectSourceType = publishSourceTypeToCollect(sourceType);
       const storedProduct = getStandardProductFromStore(parsedProduct.sourceId, collectSourceType);
       if (storedProduct) {
-        log.info('[ParseSourceStep] using stored standard product data', {
-          sourceId: parsedProduct.sourceId,
-          sourceType: collectSourceType,
-        });
         product = storedProduct;
+        dataSource = 'stored';
       }
     }
 
@@ -69,6 +75,17 @@ export class ParseSourceStep extends PublishStep {
     }
 
     ctx.set('product', product);
+    publishInfo(`[task:${ctx.taskId}] [PARSE] 商品解析完成`, {
+      taskId: ctx.taskId,
+      sourceType,
+      sourceProductId: product.sourceId,
+      productTitle: product.title,
+      input: {
+        parser: parser.constructor.name,
+        dataSource,
+      },
+      output: summarizeForLog(product),
+    });
 
     return {
       status: StepStatus.SUCCESS,

@@ -134,6 +134,7 @@ export interface ProductListQuery extends Record<string, string | number | undef
 export interface ProductPayload {
   shopId: number;
   categoryId: number;
+  collectRecordId?: number;
   title: string;
   outerProductId: string;
   status: string;

@@ -16,7 +16,20 @@ import { v4 as uuidv4 } from 'uuid';
 import { parseTbWindowJsonForDraft } from '../parsers/tb-window-json.parser';
 import type { Page } from 'playwright';
 import { TbEngine } from '@src/browser/tb.engine';
-import log from 'electron-log';
+import {
+  publishInfo,
+  publishTaobaoResponseLog,
+  publishTaobaoRequestLog,
+  summarizeForLog,
+} from '../utils/publish-logger';
+import {
+  assertTbDraftSubmitSuccess,
+  buildDraftJsonBody,
+  normalizeTbDraftResponse,
+  parseTaobaoResponseText,
+  submitDraftToTaobao,
+} from '../utils/tb-publish-api';
+import { ensureTbShopLoggedIn, handleTbMaybeLoginRequired } from '../utils/tb-login-state';
 
 declare const window: any;
 
@@ -59,13 +72,16 @@ const TB_PROTOCOL_BTN_SELECTOR = '.next-dialog-btn';
 const TB_WINDOW_JSON_TIMEOUT = 20_000;
 /** 保存草稿接口特征 */
 const TB_DRAFT_ADD_API = 'draftOp/add.json';
+/** 编辑已有草稿时的保存接口特征 */
+const TB_DRAFT_UPDATE_API = 'draftOp/update.json';
 
 /**
  * FillDraftStep — 初始化并填充草稿（Step 4）
  *
  * 流程：
  *  1. 向服务端查询该商品是否已有草稿记录
- *  2. 若有草稿记录（tbDraftId）→ 直接打开淘宝草稿编辑页面，提取 window.Json
+ *  2. 若有有效草稿记录（tbDraftId）→ 直接打开淘宝草稿编辑页面，提取 window.Json，
+ *     并通过页面“保存草稿”按钮手动触发一次 draftOp/update.json 以抓取原始 jsonBody
  *     若无草稿记录 → 通过类别 ID 打开淘宝新建发布页面，提取 window.Json 并保存草稿获取 draftId
  *  3. 解析 window.Json，从 fakeCredit/ifdWarning 组件提取真实 startTraceId
  *  4. 利用多个填充器，结合原始商品信息 + window.Json，填充 draftPayload
@@ -105,7 +121,7 @@ export class FillDraftStep extends PublishStep {
 
     const catId = categoryInfo.catId;
     const shopId = ctx.shopId;
-    const sourceProductId = product.sourceId?.trim() ?? '';
+    const sourceProductId = product.sourceId?.trim() ?? ctx.get('sourceProductId')?.trim() ?? '';
 
     // ── Step 1: 查询服务端是否已有草稿记录 ────────────────────────────────────
     const serverDraft = await this.findExistingDraftRecord(sourceProductId, shopId, catId);
@@ -121,9 +137,9 @@ export class FillDraftStep extends PublishStep {
     if (existingCtx?.startTraceId && existingCtx?.pageJsonData) {
       // a) 重试场景：直接复用
       draftCtx = existingCtx;
-    } else if (serverDraft?.tbDraftId) {
+    } else if (serverDraft?.tbDraftId?.trim()) {
       // b) 有已有草稿：通过 draftId 打开草稿页面，获取 window.Json
-      draftCtx = await this.loadExistingDraft(ctx, serverDraft.tbDraftId);
+      draftCtx = await this.loadExistingDraft(ctx, serverDraft.tbDraftId.trim());
     } else {
       // c) 新建草稿
       await this.ensureDraftSlot(shopId, catId);
@@ -134,6 +150,7 @@ export class FillDraftStep extends PublishStep {
 
     // ── Step 3: 同步草稿记录到服务端 ─────────────────────────────────────────
     const draftRecord = await this.upsertDraftRecord({
+      taskId: ctx.taskId,
       existingId: serverDraft?.id,
       shopId,
       catId,
@@ -153,12 +170,14 @@ export class FillDraftStep extends PublishStep {
       categoryInfo,
       uploadedMainImages: ctx.get('uploadedMainImages') ?? product.mainImages,
       uploadedDetailImages: ctx.get('uploadedDetailImages') ?? product.detailImages,
+      uploadedDetailImageMetas: ctx.get('uploadedDetailImageMetas') ?? [],
       draftContext: draftCtx,
       tbWindowJson,
-      draftPayload: {
+      draftPayload: buildDraftJsonBody(draftCtx, {
+        ...(draftCtx.submitPayload ?? {}),
         catId: draftCtx.catId,
         startTraceId: draftCtx.startTraceId,
-      },
+      }),
     };
 
     // ── Step 6: 依次执行各填充器（源商品信息 + tbWindowJson 共同驱动构造 payload）
@@ -167,8 +186,10 @@ export class FillDraftStep extends PublishStep {
     }
 
     // ── Step 7: 提交草稿 ──────────────────────────────────────────────────────
-    const response = await this.submitDraft(ctx.taskId, draftCtx, fillerCtx.draftPayload);
+    const response = await this.submitDraft(ctx.taskId, ctx.shopId, draftCtx, fillerCtx.draftPayload);
     CaptchaChecker.check(this.stepCode, response);
+    assertTbDraftSubmitSuccess(this.stepCode, response, '填充草稿失败');
+    draftCtx.submitPayload = { ...fillerCtx.draftPayload };
 
     // 更新 draftContext（提交后可能有新的 draftId/itemId）
     if (typeof response.draftId === 'string' && response.draftId) {
@@ -182,6 +203,7 @@ export class FillDraftStep extends PublishStep {
     // ── Step 8: 提交后更新服务端草稿记录（写入最终 draftId） ──────────────────
     if (draftRecordId && draftCtx.draftId) {
       await this.updateDraftRecord(draftRecordId, {
+        taskId: ctx.taskId,
         tbDraftId: draftCtx.draftId,
         shopId,
         catId,
@@ -210,16 +232,21 @@ export class FillDraftStep extends PublishStep {
 
     const url = `${TB_PUBLISH_PAGE_URL}?catId=${catId}`;
     const engine = new TbEngine(String(ctx.shopId), true);
+    engine.bindPublishTask(ctx.taskId);
 
     const page = await engine.init(url);
     if (!page) {
       throw new PublishError(this.stepCode, '无法打开淘宝发布页面，请确认店铺登录状态');
     }
-
-    log.info('[FillDraftStep] createNewDraft: waiting for window.Json', { catId });
+    await ensureTbShopLoggedIn(page, this.stepCode, ctx.shopId);
 
     // 等待 window.Json 就绪
-    await page.waitForFunction(() => Boolean(window?.Json), { timeout: TB_WINDOW_JSON_TIMEOUT });
+    try {
+      await page.waitForFunction(() => Boolean(window?.Json), { timeout: TB_WINDOW_JSON_TIMEOUT });
+    } catch {
+      await ensureTbShopLoggedIn(page, this.stepCode, ctx.shopId);
+      throw new PublishError(this.stepCode, '无法打开淘宝发布页面，请确认店铺登录状态');
+    }
 
     // 处理可能弹出的协议确认对话框
     try {
@@ -231,7 +258,12 @@ export class FillDraftStep extends PublishStep {
       // 无弹窗，忽略
     }
 
-    // 提前挂钩保存草稿接口响应
+    // 提前挂钩保存草稿接口请求（拦截 jsonBody 原始数据）和响应（获取 draftId）
+    const saveDraftRequestPromise = page.waitForRequest(
+      (req) => req.url().includes(TB_DRAFT_ADD_API) && req.method() === 'POST',
+      { timeout: 15_000 },
+    ).catch(() => null);
+
     const saveDraftPromise = page.waitForResponse(
       (response) => response.url().includes(TB_DRAFT_ADD_API),
       { timeout: 15_000 },
@@ -239,23 +271,57 @@ export class FillDraftStep extends PublishStep {
 
     // 点击保存草稿按钮
     await page.locator(TB_SAVE_DRAFT_SELECTOR).click();
-    log.info('[FillDraftStep] createNewDraft: save draft button clicked');
 
     // 提取 window.Json
     const rawWindowJson = await page.evaluate(() => window?.Json);
     const tbWindowJson = parseTbWindowJsonForDraft(rawWindowJson);
+
+    // 从请求中提取 jsonBody（比 window.Json 重建更准确）
+    let addDraftJsonBody: Record<string, unknown> | undefined;
+    const savedRequest = await saveDraftRequestPromise;
+    if (savedRequest) {
+      try {
+        const postData = savedRequest.postData() ?? '';
+        const params = new URLSearchParams(postData);
+        const jsonBodyStr = params.get('jsonBody');
+        if (jsonBodyStr) {
+          addDraftJsonBody = JSON.parse(jsonBodyStr) as Record<string, unknown>;
+          publishTaobaoRequestLog(ctx.taskId, 'draft-add', {
+            url: savedRequest.url(),
+            method: savedRequest.method(),
+            catId,
+            input: summarizeForLog(addDraftJsonBody),
+          });
+        }
+      } catch {
+        // 解析失败时回退到 window.Json 重建
+      }
+    }
 
     // 尝试从接口响应中获取 draftId
     let draftId: string | undefined;
     const saveResponse = await saveDraftPromise;
     if (saveResponse) {
       try {
-        const saveData = await saveResponse.json() as Record<string, unknown>;
-        const data = saveData?.data as Record<string, unknown> | undefined;
-        if (data?.dbDraftId) {
-          draftId = String(data.dbDraftId);
+        const saveText = await saveResponse.text();
+        await handleTbMaybeLoginRequired(this.stepCode, ctx.shopId, saveText);
+        const saveData = parseTaobaoResponseText(saveText, '淘宝草稿初始化接口');
+        const normalizedSaveData = normalizeTbDraftResponse(saveData);
+        await handleTbMaybeLoginRequired(this.stepCode, ctx.shopId, normalizedSaveData);
+        publishTaobaoResponseLog(ctx.taskId, 'draft-add', {
+          url: saveResponse.url(),
+          status: saveResponse.status(),
+          output: {
+            rawData: summarizeForLog(saveData),
+            normalized: summarizeForLog(normalizedSaveData),
+          },
+        });
+        assertTbDraftSubmitSuccess(this.stepCode, normalizedSaveData, '初始化淘宝草稿失败');
+        draftId = normalizedSaveData.draftId;
+      } catch (error) {
+        if (error instanceof PublishError) {
+          throw error;
         }
-      } catch {
         // 解析失败，draftId 留空，由 submitDraft 步骤回填
       }
     }
@@ -263,7 +329,15 @@ export class FillDraftStep extends PublishStep {
     const startTraceId = tbWindowJson.meta.startTraceId ?? uuidv4();
     const resolvedCatId = tbWindowJson.meta.catId ?? catId;
 
-    log.info('[FillDraftStep] createNewDraft: done', { catId: resolvedCatId, draftId, startTraceId });
+    publishInfo(`[task:${ctx.taskId}] [TB] [draft-add] READY`, {
+      taskId: ctx.taskId,
+      catId: resolvedCatId,
+      draftId,
+      input: {
+        startTraceId,
+      },
+      output: summarizeForLog(tbWindowJson.meta),
+    });
 
     // page 保留供后续步骤（EditDraft / Publish）复用，不在此处关闭
     publishPageMap.set(ctx.taskId, { page, engine });
@@ -273,26 +347,35 @@ export class FillDraftStep extends PublishStep {
       startTraceId,
       draftId,
       pageJsonData: rawWindowJson as Record<string, unknown>,
+      addDraftJsonBody,
+      updateDraftJsonBody: undefined,
+      submitPayload: undefined,
     };
   }
 
   /**
    * 通过草稿 ID 打开淘宝草稿编辑页面，提取 window.Json。
-   * 对应旧逻辑：draft.htm?dbDraftId=xxx → 等待 window.Json 加载
+   * 对应旧逻辑：draft.htm?dbDraftId=xxx → 等待 window.Json 加载 →
+   * 点击“保存草稿”按钮，捕获 draftOp/update.json 的请求 jsonBody。
    */
   private async loadExistingDraft(ctx: StepContext, tbDraftId: string): Promise<TbDraftContext> {
     const fallbackCatId = ctx.get('categoryInfo')?.catId ?? '';
     const url = `${TB_DRAFT_PAGE_URL}?dbDraftId=${tbDraftId}`;
     const engine = new TbEngine(String(ctx.shopId), true);
+    engine.bindPublishTask(ctx.taskId);
 
     const page = await engine.init(url);
     if (!page) {
       throw new PublishError(this.stepCode, '无法打开淘宝草稿页面，请确认店铺登录状态');
     }
+    await ensureTbShopLoggedIn(page, this.stepCode, ctx.shopId);
 
-    log.info('[FillDraftStep] loadExistingDraft: waiting for window.Json', { tbDraftId });
-
-    await page.waitForFunction(() => Boolean(window?.Json), { timeout: TB_WINDOW_JSON_TIMEOUT });
+    try {
+      await page.waitForFunction(() => Boolean(window?.Json), { timeout: TB_WINDOW_JSON_TIMEOUT });
+    } catch {
+      await ensureTbShopLoggedIn(page, this.stepCode, ctx.shopId);
+      throw new PublishError(this.stepCode, '无法打开淘宝草稿页面，请确认店铺登录状态');
+    }
 
     // 处理可能弹出的协议确认对话框
     try {
@@ -304,13 +387,79 @@ export class FillDraftStep extends PublishStep {
       // 无弹窗，忽略
     }
 
+    const updateDraftRequestPromise = page.waitForRequest(
+      (req) => req.url().includes(TB_DRAFT_UPDATE_API) && req.method() === 'POST',
+      { timeout: 15_000 },
+    ).catch(() => null);
+
+    const updateDraftResponsePromise = page.waitForResponse(
+      (response) => response.url().includes(TB_DRAFT_UPDATE_API),
+      { timeout: 15_000 },
+    ).catch(() => null);
+
+    await page.locator(TB_SAVE_DRAFT_SELECTOR).click();
+
     const rawWindowJson = await page.evaluate(() => window?.Json);
     const tbWindowJson = parseTbWindowJsonForDraft(rawWindowJson);
+
+    let updateDraftJsonBody: Record<string, unknown> | undefined;
+    const updateRequest = await updateDraftRequestPromise;
+    if (updateRequest) {
+      try {
+        const postData = updateRequest.postData() ?? '';
+        const params = new URLSearchParams(postData);
+        const jsonBodyStr = params.get('jsonBody');
+        if (jsonBodyStr) {
+          updateDraftJsonBody = JSON.parse(jsonBodyStr) as Record<string, unknown>;
+          publishTaobaoRequestLog(ctx.taskId, 'draft-update-capture', {
+            url: updateRequest.url(),
+            method: updateRequest.method(),
+            catId: tbWindowJson.meta.catId ?? fallbackCatId,
+            draftId: tbDraftId,
+            input: summarizeForLog(updateDraftJsonBody),
+          });
+        }
+      } catch {
+        // 解析失败时回退到 window.Json 重建
+      }
+    }
+
+    const updateResponse = await updateDraftResponsePromise;
+    if (updateResponse) {
+      try {
+        const updateText = await updateResponse.text();
+        await handleTbMaybeLoginRequired(this.stepCode, ctx.shopId, updateText);
+        const updateData = parseTaobaoResponseText(updateText, '淘宝草稿加载接口');
+        const normalizedUpdateData = normalizeTbDraftResponse(updateData);
+        await handleTbMaybeLoginRequired(this.stepCode, ctx.shopId, normalizedUpdateData);
+        publishTaobaoResponseLog(ctx.taskId, 'draft-update-capture', {
+          url: updateResponse.url(),
+          status: updateResponse.status(),
+          output: {
+            rawData: summarizeForLog(updateData),
+            normalized: summarizeForLog(normalizedUpdateData),
+          },
+        });
+        assertTbDraftSubmitSuccess(this.stepCode, normalizedUpdateData, '初始化已有淘宝草稿失败');
+      } catch (error) {
+        if (error instanceof PublishError) {
+          throw error;
+        }
+      }
+    }
 
     const startTraceId = tbWindowJson.meta.startTraceId ?? uuidv4();
     const resolvedCatId = tbWindowJson.meta.catId ?? fallbackCatId;
 
-    log.info('[FillDraftStep] loadExistingDraft: done', { catId: resolvedCatId, tbDraftId, startTraceId });
+    publishInfo(`[task:${ctx.taskId}] [TB] [draft-open] READY`, {
+      taskId: ctx.taskId,
+      catId: resolvedCatId,
+      draftId: tbDraftId,
+      input: {
+        startTraceId,
+      },
+      output: summarizeForLog(tbWindowJson.meta),
+    });
 
     // page 保留供后续步骤（EditDraft / Publish）复用，不在此处关闭
     publishPageMap.set(ctx.taskId, { page, engine });
@@ -320,6 +469,9 @@ export class FillDraftStep extends PublishStep {
       startTraceId,
       draftId: tbDraftId,
       pageJsonData: rawWindowJson as Record<string, unknown>,
+      addDraftJsonBody: undefined,
+      updateDraftJsonBody,
+      submitPayload: undefined,
     };
   }
 
@@ -384,13 +536,18 @@ export class FillDraftStep extends PublishStep {
           pageSize: '1',
         },
       });
-      return result.items?.[0] ?? null;
+      const draft = result.items?.[0] ?? null;
+      if (!draft?.tbDraftId?.trim()) {
+        return draft ? { ...draft, tbDraftId: '' } : null;
+      }
+      return { ...draft, tbDraftId: draft.tbDraftId.trim() };
     } catch {
       return null;
     }
   }
 
   private async upsertDraftRecord(params: {
+    taskId: number;
     existingId?: number;
     shopId: number;
     catId: string;
@@ -431,6 +588,7 @@ export class FillDraftStep extends PublishStep {
   }
 
   private async updateDraftRecord(recordId: number, payload: {
+    taskId: number;
     tbDraftId: string;
     shopId: number;
     catId: string;
@@ -459,13 +617,15 @@ export class FillDraftStep extends PublishStep {
 
   private async submitDraft(
     taskId: number,
+    shopId: number,
     draftCtx: TbDraftContext,
     payload: Record<string, unknown>,
   ): Promise<Record<string, unknown>> {
-    return requestBackend<Record<string, unknown>>(
-      'POST',
-      '/publish-tasks/submit-draft',
-      { data: { taskId, draftContext: draftCtx, payload } },
-    );
+    const pageEntry = getPublishPage(taskId);
+    if (!pageEntry) {
+      throw new PublishError(this.stepCode, '发布页面未找到，无法提交草稿到淘宝');
+    }
+    pageEntry.engine.bindPublishTask(taskId);
+    return submitDraftToTaobao(taskId, shopId, pageEntry.page, draftCtx, payload);
   }
 }

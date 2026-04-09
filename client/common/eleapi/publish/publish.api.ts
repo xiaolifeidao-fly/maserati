@@ -8,6 +8,7 @@ import type {
   UpdatePublishStepPayload,
   PublishTaskQuery,
   PublishProgressEvent,
+  PublishCenterState,
 } from '../../../app/src/publish/types/publish-task';
 import type { PageResult } from '../commerce/commerce.api';
 
@@ -98,6 +99,11 @@ export class PublishApi extends ElectronApi {
     return this.invokeApi('cancelPublish', taskId);
   }
 
+  @InvokeType(Protocols.INVOKE)
+  async getPublishCenterState(): Promise<PublishCenterState> {
+    return this.invokeApi('getPublishCenterState');
+  }
+
   // ─── 进度监听（主进程 → 渲染进程推送）────────────────────────────────────
 
   /**
@@ -107,5 +113,10 @@ export class PublishApi extends ElectronApi {
   @InvokeType(Protocols.TRRIGER)
   async onPublishProgress(callback: (event: PublishProgressEvent) => void): Promise<void> {
     return this.onMessage('onPublishProgress', callback);
+  }
+
+  @InvokeType(Protocols.TRRIGER)
+  async onPublishCenterStateChanged(callback: (state: PublishCenterState) => void): Promise<void> {
+    return this.onMessage('onPublishCenterStateChanged', callback);
   }
 }

@@ -1,14 +1,26 @@
-
-let store: any = undefined;
-let currentPort: number = 0;
-
-/**
- * 初始化store
- */
-export function initStore(electronStore: any): void {
-    store = electronStore;
+export interface StoreAdapter {
+    get(key: string): any;
+    set(key: string, value: any): void;
+    delete(key: string): void;
+    clear(): void;
+    keys(): string[];
 }
 
+let store: StoreAdapter | undefined = undefined;
+
+function ensureStore(): StoreAdapter {
+    if (!store) {
+        throw new Error('store adapter not initialized');
+    }
+    return store;
+}
+
+/**
+ * 初始化 store adapter
+ */
+export function initStore(adapter: StoreAdapter): void {
+    store = adapter;
+}
 
 // ========== 全局存储函数 (不涉及端口) ==========
 
@@ -16,34 +28,33 @@ export function initStore(electronStore: any): void {
  * 获取全局配置 (不涉及端口)
  */
 export function getGlobal(key: string): any {
-    return store.get(key);
+    return ensureStore().get(key);
 }
 
 /**
  * 设置全局配置 (不涉及端口)
  */
 export function setGlobal(key: string, value: any): void {
-    store.set(key, value);
+    ensureStore().set(key, value);
 }
 
 /**
  * 删除全局配置 (不涉及端口)
  */
 export function removeGlobal(key: string): void {
-    store.delete(key);
+    ensureStore().delete(key);
 }
 
 /**
  * 清空所有全局配置 (不涉及端口)
  */
 export function clearGlobal(): void {
-    store.clear();
+    ensureStore().clear();
 }
-
 
 /**
  * 获取所有存储键名
  */
 export function getAllStoreKeys(): string[] {
-    return Object.keys(store.store);
+    return ensureStore().keys();
 }

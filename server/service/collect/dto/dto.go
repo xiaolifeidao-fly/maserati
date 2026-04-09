@@ -47,6 +47,7 @@ type CollectRecordDTO struct {
 	ProductName       string `json:"productName"`
 	SourceProductID   string `json:"sourceProductId"`
 	SourceSnapshotURL string `json:"sourceSnapshotUrl"`
+	RawDataURL        string `json:"rawDataUrl"`
 	IsFavorite        bool   `json:"isFavorite"`
 	Status            string `json:"status"`
 }
@@ -57,6 +58,8 @@ type CreateCollectRecordDTO struct {
 	ProductName       string `json:"productName"`
 	SourceProductID   string `json:"sourceProductId"`
 	SourceSnapshotURL string `json:"sourceSnapshotUrl"`
+	RawDataURL        string `json:"rawDataUrl"`
+	RawSourceData     string `json:"rawSourceData"`
 	IsFavorite        bool   `json:"isFavorite"`
 	Status            string `json:"status"`
 }
@@ -67,6 +70,8 @@ type UpdateCollectRecordDTO struct {
 	ProductName       *string `json:"productName,omitempty"`
 	SourceProductID   *string `json:"sourceProductId,omitempty"`
 	SourceSnapshotURL *string `json:"sourceSnapshotUrl,omitempty"`
+	RawDataURL        *string `json:"rawDataUrl,omitempty"`
+	RawSourceData     *string `json:"rawSourceData,omitempty"`
 	IsFavorite        *bool   `json:"isFavorite,omitempty"`
 	Status            *string `json:"status,omitempty"`
 }

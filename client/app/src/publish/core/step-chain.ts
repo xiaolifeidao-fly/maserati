@@ -1,9 +1,10 @@
-import { StepCode, StepStatus } from '../types/publish-task';
+import { StepCode, StepStatus, TaskStatus } from '../types/publish-task';
 import type { PublishProgressEvent } from '../types/publish-task';
 import type { PublishStep } from './publish-step';
 import type { StepContext } from './step-context';
-import { CaptchaRequiredError } from './errors';
+import { CaptchaRequiredError, isPublishError } from './errors';
 import type { IPublishPersister } from './publish-runner';
+import { publishError, publishStepLog, summarizeForLog } from '../utils/publish-logger';
 
 export type ProgressListener = (event: PublishProgressEvent) => void;
 
@@ -41,6 +42,15 @@ export class StepChain {
     }
   }
 
+  private buildProductMeta(ctx: StepContext): Record<string, unknown> {
+    const product = ctx.get('product') as { sourceId?: string; title?: string } | undefined;
+    return {
+      shopId: ctx.shopId,
+      sourceProductId: product?.sourceId,
+      productTitle: product?.title,
+    };
+  }
+
   /**
    * 执行步骤链
    * @param ctx        共享上下文
@@ -64,6 +74,15 @@ export class StepChain {
         status: StepStatus.RUNNING,
         message: `开始执行：${step.stepName}`,
       });
+      publishStepLog(ctx.taskId, step.stepCode, 'start', {
+        stepName: step.stepName,
+        ...this.buildProductMeta(ctx),
+      });
+      await this.persister?.updateTask(ctx.taskId, {
+        currentStepCode: step.stepCode,
+        status: TaskStatus.RUNNING,
+        errorMessage: '',
+      });
       await this.persister?.updateStep(ctx.taskId, stepId, {
         status: StepStatus.RUNNING,
         startedAt: new Date().toISOString(),
@@ -86,6 +105,12 @@ export class StepChain {
           status: result.status,
           message: result.message,
         });
+        publishStepLog(ctx.taskId, step.stepCode, 'finish', {
+          status: result.status,
+          message: result.message,
+          outputData: summarizeForLog(result.outputData),
+          ...this.buildProductMeta(ctx),
+        });
 
         if (result.status === StepStatus.FAILED) {
           throw new Error(result.message || `步骤 [${step.stepName}] 执行失败`);
@@ -98,6 +123,10 @@ export class StepChain {
             status: StepStatus.PENDING,
             errorMessage: '等待验证码',
           });
+          await this.persister?.updateTask(ctx.taskId, {
+            currentStepCode: step.stepCode,
+            errorMessage: '等待验证码',
+          });
           this.emit({
             taskId: ctx.taskId,
             stepCode: step.stepCode,
@@ -106,9 +135,25 @@ export class StepChain {
             captchaUrl: err.captchaUrl,
             validateUrl: err.validateUrl,
           });
+          publishStepLog(ctx.taskId, step.stepCode, 'captcha', {
+            captchaUrl: err.captchaUrl,
+            validateUrl: err.validateUrl,
+            ...this.buildProductMeta(ctx),
+          });
           // 向上透传，由 PublishRunner 暂停任务
           throw err;
         }
+        const publishErrorDetails = isPublishError(err) ? err.details : undefined;
+        await this.persister?.updateStep(ctx.taskId, stepId, {
+          status: StepStatus.FAILED,
+          outputData: publishErrorDetails ? JSON.stringify(publishErrorDetails) : undefined,
+          errorMessage: err instanceof Error ? err.message : String(err),
+          completedAt: new Date().toISOString(),
+        });
+        publishError(`[task:${ctx.taskId}] [step:${step.stepCode}] failed`, {
+          ...this.buildProductMeta(ctx),
+          error: summarizeForLog(err),
+        });
         throw err;
       }
     }
@@ -117,20 +162,25 @@ export class StepChain {
   /** 查询服务端步骤记录 ID，若不存在则自动创建 */
   private async resolveStepId(taskId: number, stepCode: StepCode): Promise<number> {
     if (!this.persister) return 0;
-    try {
-      const steps = await this.persister.listSteps(taskId);
-      const existing = steps.find(s => s.stepCode === stepCode);
-      if (existing) return existing.id;
 
-      const stepOrder = this.steps.findIndex(s => s.stepCode === stepCode) + 1;
-      const created = await this.persister.createStep(taskId, {
-        stepCode,
-        stepOrder,
-        status: StepStatus.PENDING,
-      });
-      return created.id;
-    } catch {
-      return 0;
+    const stepRecords = await this.persister.listSteps(taskId);
+    const steps = Array.isArray(stepRecords) ? stepRecords : [];
+    const existing = steps.find(s => s.stepCode === stepCode);
+    if (existing?.id) {
+      return existing.id;
     }
+
+    const stepOrder = this.steps.findIndex(s => s.stepCode === stepCode) + 1;
+    const created = await this.persister.createStep(taskId, {
+      stepCode,
+      stepOrder,
+      status: StepStatus.PENDING,
+    });
+
+    if (!created?.id) {
+      throw new Error(`步骤记录创建失败: ${stepCode}`);
+    }
+
+    return created.id;
   }
 }

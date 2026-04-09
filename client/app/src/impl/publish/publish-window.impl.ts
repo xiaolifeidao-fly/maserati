@@ -12,8 +12,11 @@ import {
  * 代理渲染进程对发布窗口的操作：打开、展示/隐藏验证码抽屉、关闭。
  */
 export class PublishWindowImpl extends PublishWindowApi {
-  async openPublishWindow(batchId?: number): Promise<{ opened: boolean }> {
-    openPublishWindow(batchId);
+  async openPublishWindow(options?: {
+    batchId?: number;
+    entryScene?: 'collection' | 'product';
+  }): Promise<{ opened: boolean }> {
+    openPublishWindow(options);
     return { opened: true };
   }
 

@@ -38,10 +38,10 @@ var validSourceTypes = map[string]struct{}{
 }
 
 type PublishTaskService struct {
-	taskRepository     *publishTaskRepository.PublishTaskRepository
-	stepRepository     *publishTaskRepository.PublishStepRepository
-	appUserRepository  *appUserRepository.AppUserRepository
-	shopRepository     *shopRepository.ShopRepository
+	taskRepository    *publishTaskRepository.PublishTaskRepository
+	stepRepository    *publishTaskRepository.PublishStepRepository
+	appUserRepository *appUserRepository.AppUserRepository
+	shopRepository    *shopRepository.ShopRepository
 }
 
 func NewPublishTaskService() *PublishTaskService {
@@ -145,16 +145,22 @@ func (s *PublishTaskService) CreateTask(req *publishTaskDTO.CreatePublishTaskDTO
 	if err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(req.SourceData) == "" {
-		return nil, fmt.Errorf("sourceData is required")
+	sourceProductID := strings.TrimSpace(req.SourceProductID)
+	if sourceProductID == "" {
+		return nil, fmt.Errorf("sourceProductId is required")
+	}
+	if req.SourceRecordID == 0 {
+		return nil, fmt.Errorf("sourceRecordId is required")
 	}
 	entity, err := s.taskRepository.Create(&publishTaskRepository.PublishTask{
-		AppUserID:  req.AppUserID,
-		ShopID:     req.ShopID,
-		SourceType: sourceType,
-		SourceData: strings.TrimSpace(req.SourceData),
-		Status:     "PENDING",
-		Remark:     strings.TrimSpace(req.Remark),
+		AppUserID:       req.AppUserID,
+		ShopID:          req.ShopID,
+		ProductID:       req.ProductID,
+		SourceType:      sourceType,
+		SourceProductID: sourceProductID,
+		SourceRecordID:  req.SourceRecordID,
+		Status:          "PENDING",
+		Remark:          strings.TrimSpace(req.Remark),
 	})
 	if err != nil {
 		return nil, err
@@ -249,7 +255,6 @@ func (s *PublishTaskService) CreateStep(taskID uint, req *publishTaskDTO.CreateP
 		StepCode:      strings.ToUpper(strings.TrimSpace(req.StepCode)),
 		StepOrder:     req.StepOrder,
 		Status:        status,
-		InputData:     req.InputData,
 	})
 	if err != nil {
 		return nil, err
@@ -282,12 +287,6 @@ func (s *PublishTaskService) UpdateStep(taskID uint, stepID uint, req *publishTa
 		if (status == "SUCCESS" || status == "FAILED" || status == "SKIPPED") && entity.CompletedAt == nil {
 			entity.CompletedAt = &now
 		}
-	}
-	if req.InputData != nil {
-		entity.InputData = *req.InputData
-	}
-	if req.OutputData != nil {
-		entity.OutputData = *req.OutputData
 	}
 	if req.ErrorMessage != nil {
 		entity.ErrorMessage = *req.ErrorMessage

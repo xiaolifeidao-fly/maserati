@@ -14,12 +14,16 @@ export class PublishWindowApi extends ElectronApi {
 
   /**
    * 打开发布窗口（BrowserWindow + BrowserView）。
-   * 若窗口已存在则聚焦。
-   * @param batchId 可选，预选的采集批次 ID
+   * 若窗口已存在则刷新到最新入口参数并聚焦。
+   * @param options.batchId 可选，预选的采集批次 ID
+   * @param options.entryScene 入口场景：collection=采集管理，product=商品管理
    */
   @InvokeType(Protocols.INVOKE)
-  async openPublishWindow(batchId?: number): Promise<{ opened: boolean }> {
-    return this.invokeApi('openPublishWindow', batchId);
+  async openPublishWindow(options?: {
+    batchId?: number;
+    entryScene?: 'collection' | 'product';
+  }): Promise<{ opened: boolean }> {
+    return this.invokeApi('openPublishWindow', options);
   }
 
   /**

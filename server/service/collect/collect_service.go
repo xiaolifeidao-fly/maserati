@@ -78,6 +78,30 @@ func normalizeCollectRecordStatus(value string) string {
 	}
 }
 
+func buildCollectRawDataURL(batchID uint64, sourceProductID string) string {
+	sourceID := strings.TrimSpace(sourceProductID)
+	if sourceID == "" {
+		return ""
+	}
+	return fmt.Sprintf("mock://collect-raw/%d/%s.json", batchID, sourceID)
+}
+
+func resolveCollectRawDataURL(
+	batchID uint64,
+	sourceProductID string,
+	explicitURL string,
+	rawSourceData string,
+) string {
+	if value := strings.TrimSpace(explicitURL); value != "" {
+		return value
+	}
+	if strings.TrimSpace(rawSourceData) == "" {
+		return ""
+	}
+	// TODO: rawSourceData 应上传到 OSS，这里先返回占位 URL。
+	return buildCollectRawDataURL(batchID, sourceProductID)
+}
+
 func ensureCollectAppUserExists(repo *appUserRepository.AppUserRepository, appUserID uint64) error {
 	if appUserID == 0 {
 		return fmt.Errorf("appUserId must be positive")
@@ -320,6 +344,7 @@ func (s *CollectService) CreateCollectRecord(req *collectDTO.CreateCollectRecord
 		ProductName:       strings.TrimSpace(req.ProductName),
 		SourceProductID:   strings.TrimSpace(req.SourceProductID),
 		SourceSnapshotURL: strings.TrimSpace(req.SourceSnapshotURL),
+		RawDataURL:        resolveCollectRawDataURL(req.CollectBatchID, req.SourceProductID, req.RawDataURL, req.RawSourceData),
 		IsFavorite:        req.IsFavorite,
 		Status:            normalizeCollectRecordStatus(req.Status),
 	})
@@ -368,6 +393,17 @@ func (s *CollectService) UpdateCollectRecord(id uint, req *collectDTO.UpdateColl
 	}
 	if req.SourceSnapshotURL != nil {
 		entity.SourceSnapshotURL = strings.TrimSpace(*req.SourceSnapshotURL)
+	}
+	if req.RawDataURL != nil || req.RawSourceData != nil {
+		rawDataURL := entity.RawDataURL
+		if req.RawDataURL != nil {
+			rawDataURL = strings.TrimSpace(*req.RawDataURL)
+		}
+		rawSourceData := ""
+		if req.RawSourceData != nil {
+			rawSourceData = *req.RawSourceData
+		}
+		entity.RawDataURL = resolveCollectRawDataURL(entity.CollectBatchID, entity.SourceProductID, rawDataURL, rawSourceData)
 	}
 	if req.IsFavorite != nil {
 		entity.IsFavorite = *req.IsFavorite

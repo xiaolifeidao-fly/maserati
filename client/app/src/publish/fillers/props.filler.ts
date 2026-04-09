@@ -7,7 +7,7 @@ import type { TbWindowJsonCatProp } from '../types/tb-window-json';
  * PropsFiller — 商品属性填充器
  *
  * 填充内容：
- *  - props    类目非销售属性（品牌、材质、颜色分类等）
+ *  - catProp  类目非销售属性（品牌、材质等）
  *
  * 匹配逻辑：
  *  1. 精确匹配类目属性名
@@ -32,46 +32,52 @@ export class PropsFiller implements IFiller {
       windowCatPropMap.set(p.name, p);
     }
 
-    const filledProps: Array<{
-      pid: string;
-      vid?: string;
-      value?: string;
-    }> = [];
+    const filledProps: Record<string, unknown> = {};
 
     for (const catProp of catProps) {
       const matched = this.findMatchingProductProp(catProp, productProps);
       if (!matched) continue;
 
+      const targetKey = this.resolveTargetKey(catProp, windowCatPropMap);
+      if (!targetKey) continue;
+
       if (catProp.uiType === 'input' || !catProp.dataSource?.length) {
-        filledProps.push({ pid: catProp.pid, value: matched.value });
+        filledProps[targetKey] = matched.value;
       } else {
         // 优先从 window.Json catProps 的 dataSource 中匹配 vid（页面实际选项）
         const windowProp = windowCatPropMap.get(catProp.name);
-        const vid =
-          matched.vid ??
-          this.matchVidFromWindow(matched.value, windowProp) ??
-          this.matchVid(matched.value, catProp);
-        if (vid) {
-          filledProps.push({ pid: catProp.pid, vid });
+        const option =
+          this.matchOptionFromWindow(matched.value, windowProp) ??
+          this.matchOptionFromCategory(matched.value, catProp);
+        if (option) {
+          filledProps[targetKey] = option;
         } else {
-          filledProps.push({ pid: catProp.pid, value: matched.value });
+          filledProps[targetKey] = matched.value;
         }
       }
     }
 
-    if (filledProps.length > 0) {
-      draftPayload['props'] = filledProps;
+    if (Object.keys(filledProps).length > 0) {
+      draftPayload['catProp'] = filledProps;
     }
   }
 
+  private resolveTargetKey(
+    catProp: TbCategoryProp,
+    windowCatPropMap: Map<string, TbWindowJsonCatProp>,
+  ): string | undefined {
+    const windowProp = windowCatPropMap.get(catProp.name);
+    return windowProp?.name ?? catProp.pid ?? undefined;
+  }
+
   /**
-   * 从 tbWindowJson.catProps 的 dataSource 中匹配 vid
+   * 从 tbWindowJson.catProps 的 dataSource 中匹配选项对象
    * window.Json 中选项格式为 { value, text }，value 即 vid
    */
-  private matchVidFromWindow(
+  private matchOptionFromWindow(
     value: string,
     windowProp: TbWindowJsonCatProp | undefined,
-  ): string | undefined {
+  ): { value: string; text: string } | undefined {
     if (!windowProp?.dataSource) return undefined;
     const options = Array.isArray(windowProp.dataSource)
       ? (windowProp.dataSource as Array<{ value?: unknown; text?: string }>)
@@ -82,7 +88,11 @@ export class PropsFiller implements IFiller {
         String(opt.text ?? '').includes(value) ||
         value.includes(String(opt.text ?? '')),
     );
-    return entry?.value != null ? String(entry.value) : undefined;
+    if (entry?.value == null || !entry.text) return undefined;
+    return {
+      value: String(entry.value),
+      text: entry.text,
+    };
   }
 
   private findMatchingProductProp(
@@ -99,7 +109,10 @@ export class PropsFiller implements IFiller {
     );
   }
 
-  private matchVid(value: string, catProp: TbCategoryProp): string | undefined {
+  private matchOptionFromCategory(
+    value: string,
+    catProp: TbCategoryProp,
+  ): { value: string; text: string } | undefined {
     if (!catProp.dataSource?.length) return undefined;
     const entry = catProp.dataSource.find(
       ds =>
@@ -108,6 +121,10 @@ export class PropsFiller implements IFiller {
         ds.name.includes(value) ||
         value.includes(ds.name),
     );
-    return entry?.vid;
+    if (!entry?.vid) return undefined;
+    return {
+      value: entry.vid,
+      text: entry.name,
+    };
   }
 }

@@ -4,26 +4,10 @@ import { PublishStep } from '../core/publish-step';
 import type { StepContext } from '../core/step-context';
 import { PublishError } from '../core/errors';
 import { CaptchaChecker } from './captcha.step';
-import { requestBackend } from '@src/impl/shared/backend';
-import log from 'electron-log';
-
-/**
- * 淘宝发布接口响应结构
- * 参考旧代码 PublishSkuStep.submit 的响应解析逻辑
- */
-interface TbPublishResponse {
-  /** 对应旧代码 models.globalMessage.type: "success" | "error" | "warning" */
-  type?: string;
-  /** 发布成功后跳转 URL，含 primaryId 参数 */
-  successUrl?: string;
-  /** 错误/警告消息（已由后端提取） */
-  message?: string;
-  /** 验证码 URL */
-  captchaUrl?: string;
-  validateUrl?: string;
-  /** 发布后的商品 ID（itemId / primaryId） */
-  itemId?: string;
-}
+import { publishInfo, summarizeForLog } from '../utils/publish-logger';
+import { getPublishPage } from './fill-draft.step';
+import type { NormalizedTbResponse } from '../utils/tb-publish-api';
+import { publishToTaobao, summarizeTbFailureForResult } from '../utils/tb-publish-api';
 
 /**
  * PublishFinalStep — 最终发布（Step 6）
@@ -47,21 +31,23 @@ export class PublishFinalStep extends PublishStep {
       throw new PublishError(this.stepCode, '草稿上下文为空，请先完成草稿填充步骤');
     }
 
-    log.info('[PublishFinalStep] submitting draftId:', draftCtx.draftId);
-
     // 调用后端，后端负责：
     //  - 设置 fakeCreditSubmit = true
     //  - POST https://item.upload.taobao.com/sell/v2/submit.htm
     //  - 解析 globalMessage.type (success/error/warning)
     //  - 提取 successUrl 中的 primaryId
     //  - 成功后删除草稿
-    const result = await requestBackend<TbPublishResponse>(
-      'POST',
-      '/publish-tasks/publish',
-      { data: { taskId: ctx.taskId, draftContext: draftCtx } },
-    );
-
-    log.info('[PublishFinalStep] response type:', result.type);
+    const pageEntry = getPublishPage(ctx.taskId);
+    if (!pageEntry) {
+      throw new PublishError(this.stepCode, '发布页面未找到，无法提交最终发布');
+    }
+    pageEntry.engine.bindPublishTask(ctx.taskId);
+    const result = await publishToTaobao(
+      ctx.taskId,
+      ctx.shopId,
+      pageEntry.page,
+      draftCtx,
+    ) as NormalizedTbResponse;
 
     // 验证码检测
     if (result.captchaUrl) {
@@ -70,24 +56,44 @@ export class PublishFinalStep extends PublishStep {
 
     // 参考旧代码：type == "warning" 视为发布失败，返回平台警告消息
     if (result.type === 'warning') {
-      throw new PublishError(this.stepCode, result.message ?? '发布商品存在违规警告，请检查商品信息');
+      throw new PublishError(
+        this.stepCode,
+        result.message ?? '发布商品存在违规警告，请检查商品信息',
+        false,
+        summarizeTbFailureForResult(result),
+      );
     }
 
     // 参考旧代码：type == "error" 或无 type 视为发布失败
     if (result.type !== 'success') {
-      throw new PublishError(this.stepCode, result.message ?? '发布商品失败');
+      throw new PublishError(
+        this.stepCode,
+        result.message ?? '发布商品失败',
+        false,
+        summarizeTbFailureForResult(result),
+      );
     }
 
     // 从 successUrl 提取 primaryId（参考旧代码正则匹配逻辑）
     const itemId = result.itemId ?? this.extractPrimaryId(result.successUrl) ?? draftCtx.itemId ?? '';
+    if (itemId) {
+      draftCtx.itemId = itemId;
+      ctx.set('draftContext', draftCtx);
+    }
     ctx.set('publishedItemId', itemId);
 
-    log.info('[PublishFinalStep] published successfully, itemId:', itemId);
+    publishInfo(`[task:${ctx.taskId}] [TB] [submit-item] DONE`, {
+      taskId: ctx.taskId,
+      draftId: draftCtx.draftId,
+      itemId,
+      input: summarizeForLog(draftCtx.submitPayload ?? {}),
+      output: summarizeForLog(result),
+    });
 
     return {
       status: StepStatus.SUCCESS,
       message: `商品发布成功，itemId: ${itemId}`,
-      outputData: { publishedItemId: itemId },
+      outputData: { publishedItemId: itemId, draftContext: draftCtx },
     };
   }
 

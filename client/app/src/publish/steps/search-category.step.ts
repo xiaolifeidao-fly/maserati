@@ -9,8 +9,14 @@ import type { RawSourceData } from '../types/source-data';
 import { TbEngine } from '@src/browser/tb.engine';
 import { buildCategoryInfoFromTbWindowJson, parseTbWindowJsonForDraft } from '../parsers/tb-window-json.parser';
 import axios from 'axios';
-import log from 'electron-log';
 import { randomUUID } from 'crypto';
+import {
+  publishInfo,
+  publishTaobaoRequestLog,
+  publishTaobaoResponseLog,
+  summarizeForLog,
+} from '../utils/publish-logger';
+import { ensureTbShopLoggedIn, handleTbMaybeLoginRequired } from '../utils/tb-login-state';
 
 declare const navigator: any;
 declare const window: any;
@@ -258,11 +264,13 @@ export class SearchCategoryStep extends PublishStep {
     params: { title: string; category?: string },
   ): Promise<TbCategoryInfo> {
     const engine = new TbEngine(String(ctx.shopId), true);
+    engine.bindPublishTask(ctx.taskId);
     try {
       const page = await engine.init(TB_CATEGORY_SEARCH_PAGE_URL);
       if (!page) {
         throw new PublishError(this.stepCode, '无法打开淘宝类目搜索页，请确认店铺登录状态');
       }
+      await ensureTbShopLoggedIn(page, this.stepCode, ctx.shopId);
 
       const context = engine.getContext();
       if (!context) {
@@ -286,7 +294,7 @@ export class SearchCategoryStep extends PublishStep {
       let categories: TbSearchCategoryItem[] = [];
       let matchedKeyword = keywordCandidates[0] ?? params.title;
       for (const keyword of keywordCandidates) {
-        const result = await this.requestTaobaoCategories(keyword, cookieStr, userAgent);
+        const result = await this.requestTaobaoCategories(ctx.taskId, ctx.shopId, keyword, cookieStr, userAgent);
         if (result.length > 0) {
           categories = result;
           matchedKeyword = keyword;
@@ -311,9 +319,15 @@ export class SearchCategoryStep extends PublishStep {
         waitUntil: 'domcontentloaded',
         timeout: 30000,
       });
-      await page.waitForFunction(() => Boolean(window?.Json), {
-        timeout: 15000,
-      });
+      await ensureTbShopLoggedIn(page, this.stepCode, ctx.shopId);
+      try {
+        await page.waitForFunction(() => Boolean(window?.Json), {
+          timeout: 15000,
+        });
+      } catch {
+        await ensureTbShopLoggedIn(page, this.stepCode, ctx.shopId);
+        throw new PublishError(this.stepCode, '无法打开淘宝发布页面，请确认店铺登录状态');
+      }
 
       const rawWindowJson = await page.evaluate(() => {
         return window?.Json;
@@ -328,21 +342,20 @@ export class SearchCategoryStep extends PublishStep {
       categoryInfo.catName = categoryInfo.catName || matchedCategory.name;
       categoryInfo.catPath = categoryInfo.catPath || matchedCategory.path || matchedCategory.name;
 
-      log.info('[SearchCategoryStep] matched TB category', {
+      publishInfo(`[task:${ctx.taskId}] [TB] [search-category] MATCHED`, {
         taskId: ctx.taskId,
-        keyword: matchedKeyword,
         catId: categoryInfo.catId,
-        catName: categoryInfo.catName,
-        props: categoryInfo.props.length,
-        saleProps: categoryInfo.salePropList.length,
+        keyword: matchedKeyword,
+        input: {
+          title: params.title,
+          category: params.category,
+          keyword: matchedKeyword,
+        },
+        output: summarizeForLog(categoryInfo),
       });
 
       return categoryInfo;
     } catch (error) {
-      log.error('[SearchCategoryStep] direct TB category search failed', {
-        taskId: ctx.taskId,
-        error,
-      });
       if (error instanceof PublishError) {
         throw error;
       }
@@ -400,10 +413,27 @@ export class SearchCategoryStep extends PublishStep {
   }
 
   private async requestTaobaoCategories(
+    taskId: number,
+    shopId: number,
     keyword: string,
     cookieStr: string,
     userAgent: string,
   ): Promise<TbSearchCategoryItem[]> {
+    publishTaobaoRequestLog(taskId, 'search-category', {
+      url: TB_CATEGORY_SEARCH_API_URL,
+      method: 'GET',
+      keyword,
+      input: {
+        keyword,
+        headers: summarizeForLog({
+          Cookie: cookieStr,
+          Origin: 'https://item.upload.taobao.com',
+          Referer: TB_CATEGORY_SEARCH_PAGE_URL,
+          'User-Agent': userAgent,
+        }),
+      },
+    });
+
     const response = await axios.get<{
       success?: boolean;
       data?: { category?: Array<Record<string, unknown>> };
@@ -433,6 +463,14 @@ export class SearchCategoryStep extends PublishStep {
     });
 
     const payload = response.data;
+    await handleTbMaybeLoginRequired(this.stepCode, shopId, payload);
+    publishTaobaoResponseLog(taskId, 'search-category', {
+      url: TB_CATEGORY_SEARCH_API_URL,
+      method: 'GET',
+      keyword,
+      status: response.status,
+      output: summarizeForLog(payload),
+    });
     if (payload?.rgv587_flag === 'sm' && payload.url) {
       throw new PublishError(this.stepCode, `淘宝类目搜索出现验证码: ${payload.url}`);
     }

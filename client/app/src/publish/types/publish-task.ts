@@ -51,7 +51,8 @@ export interface PublishTaskRecord {
   shopId: number;
   productId?: number;
   sourceType: SourceType;
-  sourceData: string;
+  sourceProductId?: string;
+  sourceRecordId?: number;
   status: TaskStatus;
   currentStepCode?: StepCode;
   errorMessage?: string;
@@ -84,8 +85,10 @@ export interface PublishStepRecord {
 export interface CreatePublishTaskPayload {
   appUserId?: number;
   shopId: number;
+  productId?: number;
   sourceType: SourceType;
-  sourceData: string;
+  sourceProductId: string;
+  sourceRecordId: number;
   remark?: string;
 }
 
@@ -134,4 +137,58 @@ export interface PublishProgressEvent {
   captchaUrl?: string;
   /** 验证码校验地址 */
   validateUrl?: string;
+}
+
+export type PublishEntryScene = 'collection' | 'product';
+
+export type PublishMessageLevel = 'info' | 'success' | 'warning' | 'error';
+
+export interface PublishRuntimeTaskSnapshot {
+  taskId: number;
+  shopId: number;
+  status: TaskStatus;
+  currentStepCode?: StepCode;
+  stepStatus?: StepStatus;
+  sourceProductId?: string;
+  title?: string;
+  statusText?: string;
+  errorMessage?: string;
+  outerItemId?: string;
+  waitingForCaptcha?: boolean;
+  captchaUrl?: string;
+  validateUrl?: string;
+  sourceBatchId?: number;
+  sourceBatchName?: string;
+  sourceRecordId?: number;
+  entryScene?: PublishEntryScene;
+  updatedAt: string;
+}
+
+export interface PublishBatchSummary {
+  batchId: number;
+  batchName?: string;
+  entryScene?: PublishEntryScene;
+  runningCount: number;
+  successCount: number;
+  failedCount: number;
+  totalCount: number;
+  latestUpdatedAt: string;
+}
+
+export interface PublishCenterMessage {
+  id: string;
+  taskId: number;
+  level: PublishMessageLevel;
+  title: string;
+  content?: string;
+  createdAt: string;
+}
+
+export interface PublishCenterState {
+  tasks: PublishRuntimeTaskSnapshot[];
+  messages: PublishCenterMessage[];
+  batchSummaries: PublishBatchSummary[];
+  runningCount: number;
+  failedCount: number;
+  abnormalCount: number;
 }

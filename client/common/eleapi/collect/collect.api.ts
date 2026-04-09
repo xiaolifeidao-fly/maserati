@@ -44,6 +44,7 @@ export class CollectRecordPreview {
   productName = "";
   sourceProductId = "";
   sourceSnapshotUrl = "";
+  rawDataUrl = "";
   isFavorite = false;
   status = "";
   active = 1;

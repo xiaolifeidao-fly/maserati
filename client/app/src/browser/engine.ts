@@ -7,6 +7,11 @@ import { Monitor, MonitorChain, MonitorRequest, MonitorResponse } from './monito
 import { DoorEntity } from './entity';
 import log from 'electron-log';
 import os from 'os';
+import {
+    publishTaobaoRequestLog,
+    publishTaobaoResponseLog,
+    summarizeForLog,
+} from '@src/publish/utils/publish-logger';
 declare const window: any;
 declare const navigator: any;
 declare const document: any;
@@ -187,6 +192,7 @@ export abstract class DoorEngine<T = any> {
     usePersistentContext : boolean;
 
     needValidateImage : boolean = false;
+    publishTaskId?: number;
 
     timeout : number = 30000;
 
@@ -236,6 +242,10 @@ export abstract class DoorEngine<T = any> {
 
     setNeedValidateImage(needValidateImage : boolean){
         this.needValidateImage = needValidateImage;
+    }
+
+    bindPublishTask(taskId: number){
+        this.publishTaskId = taskId;
     }
 
     getChromePath() : string | undefined{
@@ -464,6 +474,7 @@ export abstract class DoorEngine<T = any> {
             // 获取请求对象
             const request = router.request();
             const headers = await request.allHeaders();
+            await this.logPublishRequest(request, headers);
             const isFilter = await this.doBeforeRequest(router, request, headers);
             if(isFilter){
                 return;
@@ -520,8 +531,111 @@ export abstract class DoorEngine<T = any> {
 
     public async onResponse(page : Page){
         page.on('response', async (response) => {
+            await this.logPublishResponse(response);
             await this.doAfterResponse(response);
         });
+    }
+
+    private async logPublishRequest(
+        request: Request,
+        headers: { [key: string]: string; },
+    ): Promise<void> {
+        if (!this.publishTaskId) {
+            return;
+        }
+        const url = request.url();
+        if (!this.shouldLogPublishTraffic(url, request.resourceType(), request.method())) {
+            return;
+        }
+
+        let body: unknown = undefined;
+        try {
+            const postData = request.postData();
+            if (postData) {
+                body = this.normalizeTrafficBody(postData, headers['content-type']);
+            }
+        } catch (error) {
+            body = { readError: summarizeForLog(error) };
+        }
+
+        publishTaobaoRequestLog(this.publishTaskId, 'playwright', {
+            method: request.method(),
+            resourceType: request.resourceType(),
+            url,
+            headers: summarizeForLog(headers),
+            body: summarizeForLog(body),
+        });
+    }
+
+    private async logPublishResponse(response: Response): Promise<void> {
+        if (!this.publishTaskId) {
+            return;
+        }
+        const request = response.request();
+        const url = response.url();
+        if (!this.shouldLogPublishTraffic(url, request.resourceType(), request.method())) {
+            return;
+        }
+
+        let body: unknown = undefined;
+        try {
+            const contentType = response.headers()['content-type'] ?? '';
+            if (contentType.includes('application/json') || contentType.includes('text/')) {
+                body = await response.text();
+            } else {
+                body = { contentType, skipped: true };
+            }
+        } catch (error) {
+            body = { readError: summarizeForLog(error) };
+        }
+
+        publishTaobaoResponseLog(this.publishTaskId, 'playwright', {
+            method: request.method(),
+            resourceType: request.resourceType(),
+            url,
+            status: response.status(),
+            ok: response.ok(),
+            headers: summarizeForLog(await response.allHeaders()),
+            body: summarizeForLog(body),
+        });
+    }
+
+    private shouldLogPublishTraffic(url: string, resourceType: string, method: string): boolean {
+        const lowerUrl = url.toLowerCase();
+        const isTaobao = lowerUrl.includes('taobao.com') || lowerUrl.includes('tmall.com');
+        if (!isTaobao) {
+            return false;
+        }
+        return resourceType === 'xhr'
+            || resourceType === 'fetch'
+            || resourceType === 'document'
+            || method !== 'GET';
+    }
+
+    private normalizeTrafficBody(rawBody: string, contentType?: string): unknown {
+        const lowerType = String(contentType ?? '').toLowerCase();
+        if (lowerType.includes('application/json')) {
+            try {
+                return JSON.parse(rawBody);
+            } catch {
+                return rawBody;
+            }
+        }
+        if (lowerType.includes('application/x-www-form-urlencoded')) {
+            try {
+                return Object.fromEntries(new URLSearchParams(rawBody).entries());
+            } catch {
+                return rawBody;
+            }
+        }
+        if (lowerType.includes('multipart/form-data')) {
+            return {
+                contentType,
+                size: rawBody.length,
+                preview: rawBody.slice(0, 5000),
+            };
+        }
+        return rawBody;
     }
 
     resetMonitor(){

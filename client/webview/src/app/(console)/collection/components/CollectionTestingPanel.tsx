@@ -54,6 +54,7 @@ interface InjectedCollectTestingItem {
   productName?: string;
   sourceProductId?: string;
   sourceSnapshotUrl?: string;
+  rawDataUrl?: string;
   isFavorite?: boolean;
   status?: string;
 }
@@ -89,6 +90,7 @@ function normalizeInjectedItems(items: InjectedCollectTestingItem[], fallbackBat
     productName: String(item.productName || "").trim() || `临时商品 ${now}-${index + 1}`,
     sourceProductId: String(item.sourceProductId || "").trim(),
     sourceSnapshotUrl: String(item.sourceSnapshotUrl || "").trim(),
+    rawDataUrl: String(item.rawDataUrl || "").trim(),
     isFavorite: Boolean(item.isFavorite),
     status: String(item.status || "INJECTED").trim() || "INJECTED",
     active: 1,

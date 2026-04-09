@@ -7,6 +7,7 @@ export interface CollectSaveContext {
   batchId: number;
   appUserId: number;
   sourceUrl: string;
+  rawSourceData?: unknown;
   /** 当前 workspaceState.batch，用于计算 collectedCount */
   currentBatch: CollectBatchRecord;
   /** 当前 workspaceState.records 长度，用于计算 collectedCount */
@@ -78,6 +79,7 @@ export async function saveCollectedToServer(
           productName: summary.productName,
           sourceProductId: summary.sourceProductId,
           sourceSnapshotUrl: sourceUrl,
+          rawSourceData: ctx.rawSourceData ? JSON.stringify(ctx.rawSourceData) : undefined,
           status: summary.status,
         },
       },
@@ -95,6 +97,7 @@ export async function saveCollectedToServer(
         productName: summary.productName,
         sourceProductId: summary.sourceProductId,
         sourceSnapshotUrl: sourceUrl,
+        rawSourceData: ctx.rawSourceData ? JSON.stringify(ctx.rawSourceData) : undefined,
         isFavorite: false,
         status: summary.status,
       },

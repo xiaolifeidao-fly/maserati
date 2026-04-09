@@ -1,7 +1,8 @@
 import path from 'path';
-import { BrowserView, BrowserWindow, screen as electronScreen } from 'electron';
+import { BrowserView, BrowserWindow, type WebContents } from 'electron';
 import log from 'electron-log';
 import { mainWindow } from '@src/kernel/windows';
+import { getLatestCaptchaTask } from './runtime/publish-center';
 
 // ─── 布局常量 ─────────────────────────────────────────────────────────────────
 
@@ -15,6 +16,11 @@ let publishBrowserWindow: BrowserWindow | null = null;
 let leftBrowserView: BrowserView | null = null;
 let rightBrowserView: BrowserView | null = null;
 let captchaPanelVisible = false;
+
+type PublishWindowOpenOptions = {
+  batchId?: number;
+  entryScene?: 'collection' | 'product';
+};
 
 // ─── 工具函数 ─────────────────────────────────────────────────────────────────
 
@@ -51,28 +57,50 @@ function syncBounds(): void {
   }
 }
 
+function buildPublishWindowUrl(options?: PublishWindowOpenOptions): string {
+  const webviewUrl = process.env.WEBVIEW_URL;
+  if (!webviewUrl) {
+    throw new Error('WEBVIEW_URL is not configured');
+  }
+
+  const pageUrl = new URL('/publish-window', webviewUrl);
+  if (Number(options?.batchId) > 0) {
+    pageUrl.searchParams.set('batchId', String(options?.batchId));
+  }
+  if (options?.entryScene) {
+    pageUrl.searchParams.set('entryScene', options.entryScene);
+  }
+
+  return pageUrl.toString();
+}
+
 // ─── 公开接口 ─────────────────────────────────────────────────────────────────
 
 /**
  * 打开发布窗口。
  * 若窗口已存在，直接聚焦；否则创建新 BrowserWindow + 两个 BrowserView。
  */
-export function openPublishWindow(batchId?: number): void {
+export function openPublishWindow(options?: PublishWindowOpenOptions): void {
+  let pageUrl = '';
+  try {
+    pageUrl = buildPublishWindowUrl(options);
+  } catch (error) {
+    log.error('[publish-window] failed to build publish window url', error);
+    return;
+  }
+
   if (publishBrowserWindow && !publishBrowserWindow.isDestroyed()) {
+    if (leftBrowserView && !leftBrowserView.webContents.isDestroyed()) {
+      leftBrowserView.webContents.loadURL(pageUrl).catch((err) => {
+        log.error('[publish-window] failed to reload left view', err);
+      });
+    }
     publishBrowserWindow.focus();
+    const captchaTask = getLatestCaptchaTask();
+    if (captchaTask?.captchaUrl) {
+      showCaptchaPanel(captchaTask.captchaUrl);
+    }
     return;
-  }
-
-  const webviewUrl = process.env.WEBVIEW_URL;
-  if (!webviewUrl) {
-    log.error('[publish-window] WEBVIEW_URL is not configured');
-    return;
-  }
-
-  // 构建左侧加载的页面 URL
-  const pageUrl = new URL('/publish-window', webviewUrl);
-  if (Number(batchId) > 0) {
-    pageUrl.searchParams.set('batchId', String(batchId));
   }
 
   // 以主窗口为父窗口，但不设置 modal（允许操作主窗口）
@@ -123,7 +151,7 @@ export function openPublishWindow(batchId?: number): void {
 
   syncBounds();
 
-  leftBrowserView.webContents.loadURL(pageUrl.toString()).catch((err) => {
+  leftBrowserView.webContents.loadURL(pageUrl).catch((err) => {
     log.error('[publish-window] failed to load left view', err);
   });
 
@@ -131,6 +159,10 @@ export function openPublishWindow(batchId?: number): void {
   leftBrowserView.webContents.once('did-finish-load', () => {
     if (publishBrowserWindow && !publishBrowserWindow.isDestroyed()) {
       publishBrowserWindow.show();
+      const captchaTask = getLatestCaptchaTask();
+      if (captchaTask?.captchaUrl) {
+        showCaptchaPanel(captchaTask.captchaUrl);
+      }
     }
   });
 
@@ -192,4 +224,20 @@ export function closePublishWindow(): void {
  */
 export function getPublishWindow(): BrowserWindow | null {
   return publishBrowserWindow;
+}
+
+export function getPublishRelatedWebContents(): WebContents[] {
+  const contents: WebContents[] = [];
+  const add = (webContents?: WebContents | null) => {
+    if (!webContents || webContents.isDestroyed()) {
+      return;
+    }
+    if (!contents.some((item) => item.id === webContents.id)) {
+      contents.push(webContents);
+    }
+  };
+
+  add(mainWindow?.webContents ?? null);
+  add(leftBrowserView?.webContents ?? null);
+  return contents;
 }

@@ -4,14 +4,15 @@ import { PublishStep } from '../core/publish-step';
 import type { StepContext } from '../core/step-context';
 import { PublishError } from '../core/errors';
 import { CaptchaChecker } from './captcha.step';
-import { requestBackend } from '@src/impl/shared/backend';
 import { getPublishPage } from './fill-draft.step';
 import { parseTbWindowJsonForDraft } from '../parsers/tb-window-json.parser';
 import { PropsFiller } from '../fillers/props.filler';
 import { SkuFiller } from '../fillers/sku.filler';
+import { DetailImagesFiller } from '../fillers/detail-images.filler';
 import type { FillerContext } from '../fillers/filler.interface';
 import type { TbWindowJsonCatProp, TbWindowJsonDraftData } from '../types/tb-window-json';
-import log from 'electron-log';
+import { publishInfo, publishWarn, summarizeForLog } from '../utils/publish-logger';
+import { assertTbDraftSubmitSuccess, buildDraftJsonBody, submitDraftToTaobao } from '../utils/tb-publish-api';
 
 declare const window: any;
 
@@ -54,8 +55,8 @@ export class EditDraftStep extends PublishStep {
       throw new PublishError(this.stepCode, '草稿页面未找到，请重新执行草稿填充步骤');
     }
     const { page } = pageEntry;
+    pageEntry.engine.bindPublishTask(ctx.taskId);
 
-    log.info('[EditDraftStep] reloading draft page for fresh window.Json');
     await page.reload();
     await page.waitForFunction(() => Boolean(window?.Json), { timeout: TB_WINDOW_JSON_TIMEOUT });
 
@@ -70,16 +71,18 @@ export class EditDraftStep extends PublishStep {
     ctx.set('draftContext', draftCtx);
 
     // ── Step 2: 以最新 window.Json 重新执行属性/SKU 填充 ─────────────────────
-    const correctionPayload: Record<string, unknown> = {
+    const correctionPayload: Record<string, unknown> = buildDraftJsonBody(draftCtx, {
+      ...(draftCtx.submitPayload ?? {}),
       catId: draftCtx.catId,
       startTraceId: draftCtx.startTraceId,
-    };
+    });
 
     const fillerCtx: FillerContext = {
       product,
       categoryInfo,
       uploadedMainImages: ctx.get('uploadedMainImages') ?? product.mainImages,
       uploadedDetailImages: ctx.get('uploadedDetailImages') ?? product.detailImages,
+      uploadedDetailImageMetas: ctx.get('uploadedDetailImageMetas') ?? [],
       draftContext: draftCtx,
       tbWindowJson,
       draftPayload: correctionPayload,
@@ -87,6 +90,7 @@ export class EditDraftStep extends PublishStep {
 
     await new PropsFiller().fill(fillerCtx);
     await new SkuFiller().fill(fillerCtx);
+    await new DetailImagesFiller().fill(fillerCtx);
 
     // ── Step 3: 补全必填 catProp 缺省值 ──────────────────────────────────────
     this.fillRequiredCatProps(tbWindowJson.catProps, correctionPayload);
@@ -94,16 +98,24 @@ export class EditDraftStep extends PublishStep {
     // ── Step 4: 校验必填字段（记录缺失，由平台接口最终拦截） ────────────────
     const missing = this.validateRequiredComponents(tbWindowJson, correctionPayload);
     if (missing.length > 0) {
-      log.warn('[EditDraftStep] missing required fields:', missing.join(', '));
+      publishWarn(`[task:${ctx.taskId}] [TB] [draft-update] REQUIRED_FIELDS_MISSING`, {
+        taskId: ctx.taskId,
+        draftId: draftCtx.draftId,
+        output: missing,
+      });
     }
 
     // ── Step 5: 提交修正载荷（调用淘宝 draftOp/update.json） ─────────────────
-    const response = await requestBackend<Record<string, unknown>>(
-      'POST',
-      '/publish-tasks/submit-draft',
-      { data: { taskId: ctx.taskId, draftContext: draftCtx, payload: correctionPayload } },
+    const response = await submitDraftToTaobao(
+      ctx.taskId,
+      ctx.shopId,
+      page,
+      draftCtx,
+      correctionPayload,
     );
     CaptchaChecker.check(this.stepCode, response);
+    assertTbDraftSubmitSuccess(this.stepCode, response, '更新草稿失败');
+    draftCtx.submitPayload = { ...correctionPayload };
 
     if (typeof response.draftId === 'string' && response.draftId) {
       draftCtx.draftId = response.draftId;
@@ -112,6 +124,16 @@ export class EditDraftStep extends PublishStep {
       draftCtx.itemId = response.itemId;
     }
     ctx.set('draftContext', draftCtx);
+    publishInfo(`[task:${ctx.taskId}] [TB] [draft-update] DONE`, {
+      taskId: ctx.taskId,
+      draftId: draftCtx.draftId,
+      itemId: draftCtx.itemId,
+      input: summarizeForLog(correctionPayload),
+      output: {
+        missing,
+        response: summarizeForLog(response),
+      },
+    });
 
     const missingNote = missing.length > 0 ? `（缺失字段：${missing.join(', ')}）` : '';
     return {

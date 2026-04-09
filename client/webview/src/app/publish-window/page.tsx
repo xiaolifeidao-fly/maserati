@@ -14,6 +14,8 @@ import { ProductPublishModal } from "@/app/(console)/product/components/ProductP
 function PublishWindowContent() {
   const searchParams = useSearchParams();
   const batchId = Number(searchParams?.get("batchId") || 0);
+  const entrySceneParam = searchParams?.get("entryScene");
+  const entryScene = entrySceneParam === "collection" ? "collection" : "product";
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
@@ -31,6 +33,7 @@ function PublishWindowContent() {
             }
           }}
           initialBatchId={batchId}
+          initialEntryScene={entryScene}
         />
       ) : null}
       <style jsx global>{`

@@ -10,7 +10,6 @@ import { mainWindow, setMainWindow } from './windows';
 import log from 'electron-log';
 import { registerRpc } from './register/rpc';
 import { init } from './store';
-import Store from 'electron-store';
 import { Browser, chromium } from 'playwright';
 import { getPlatform, initPlatform, setPlatform } from '@src/browser/engine';
 
@@ -233,9 +232,7 @@ log.info("app load")
 
 async function createDefaultWindow() {
   try {
-
-    const store = new Store();
-    init(store);
+    await init();
     log.info(`WEBVIEW_URL: ${process.env.WEBVIEW_URL}`);
     const instance = await createWindow("main", `${process.env.WEBVIEW_URL}`);
     
@@ -345,5 +342,4 @@ export const start = () => {
     });
 
 }
-
 

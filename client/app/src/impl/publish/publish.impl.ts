@@ -4,6 +4,7 @@ import { PublishRunner } from '@src/publish/core/publish-runner';
 import { showCaptchaPanel } from '@src/publish/publish-window';
 import type { IPublishPersister } from '@src/publish/core/publish-runner';
 import type {
+  PublishCenterState,
   PublishTaskRecord,
   PublishStepRecord,
   CreatePublishTaskPayload,
@@ -15,25 +16,60 @@ import type {
 } from '@src/publish/types/publish-task';
 import { StepCode, StepStatus, TaskStatus } from '@src/publish/types/publish-task';
 import type { PageResult } from '@eleapi/commerce/commerce.api';
+import {
+  clearPublishProductLogs,
+  publishError,
+  publishInfo,
+  registerPublishTaskLogFile,
+  summarizeForLog,
+  unregisterPublishTaskLogFile,
+} from '@src/publish/utils/publish-logger';
+import {
+  getPublishCenterState as getRuntimePublishCenterState,
+  syncPublishProgressEvent,
+  syncPublishTaskRecord,
+} from '@src/publish/runtime/publish-center';
+import {
+  clearPublishStepPayloads,
+  mergePublishStepPayloads,
+  persistPublishStepPayload,
+} from '@src/publish/runtime/publish-step-store';
+import { getPublishRelatedWebContents } from '@src/publish/publish-window';
 
 /**
  * HttpPublishPersister — 通过 HTTP 调用服务端接口持久化发布状态
  */
 class HttpPublishPersister implements IPublishPersister {
   async getTask(taskId: number): Promise<PublishTaskRecord> {
-    return requestBackend<PublishTaskRecord>('GET', `/publish-tasks/${taskId}`);
+    return requestBackend<PublishTaskRecord>('GET', `/publish-tasks/${taskId}`, {
+      publishLog: { taskId, label: 'get publish task' },
+    });
   }
 
   async updateTask(taskId: number, payload: UpdatePublishTaskPayload): Promise<PublishTaskRecord> {
-    return requestBackend<PublishTaskRecord>('PUT', `/publish-tasks/${taskId}`, { data: payload });
+    return requestBackend<PublishTaskRecord>('PUT', `/publish-tasks/${taskId}`, {
+      data: payload,
+      publishLog: { taskId, label: 'update publish task' },
+    });
   }
 
   async listSteps(taskId: number): Promise<PublishStepRecord[]> {
-    return requestBackend<PublishStepRecord[]>('GET', `/publish-tasks/${taskId}/steps`);
+    const steps = await requestBackend<PublishStepRecord[]>('GET', `/publish-tasks/${taskId}/steps`, {
+      publishLog: { taskId, label: 'list publish steps' },
+    });
+    return mergePublishStepPayloads(taskId, steps);
   }
 
   async createStep(taskId: number, payload: CreatePublishStepPayload): Promise<PublishStepRecord> {
-    return requestBackend<PublishStepRecord>('POST', `/publish-tasks/${taskId}/steps`, { data: payload });
+    const { inputData, ...serverPayload } = payload;
+    const step = await requestBackend<PublishStepRecord>('POST', `/publish-tasks/${taskId}/steps`, {
+      data: serverPayload,
+      publishLog: { taskId, label: `create publish step:${payload.stepCode}` },
+    });
+    if (inputData !== undefined && step.id) {
+      persistPublishStepPayload(taskId, step.id, { inputData });
+    }
+    return mergePublishStepPayloads(taskId, [step])[0] ?? step;
   }
 
   async updateStep(
@@ -41,11 +77,19 @@ class HttpPublishPersister implements IPublishPersister {
     stepId: number,
     payload: UpdatePublishStepPayload,
   ): Promise<PublishStepRecord> {
-    return requestBackend<PublishStepRecord>(
+    const { inputData, outputData, ...serverPayload } = payload;
+    const step = await requestBackend<PublishStepRecord>(
       'PUT',
       `/publish-tasks/${taskId}/steps/${stepId}`,
-      { data: payload },
+      {
+        data: serverPayload,
+        publishLog: { taskId, label: `update publish step:${stepId}` },
+      },
     );
+    if (inputData !== undefined || outputData !== undefined) {
+      persistPublishStepPayload(taskId, stepId, { inputData, outputData });
+    }
+    return mergePublishStepPayloads(taskId, [step])[0] ?? step;
   }
 }
 
@@ -59,7 +103,32 @@ class HttpPublishPersister implements IPublishPersister {
  */
 export class PublishImpl extends PublishApi {
   /** 正在运行的 Runner 实例 Map (taskId → runner) */
-  private readonly runnerMap = new Map<number, PublishRunner>();
+  private static readonly runnerMap = new Map<number, PublishRunner>();
+
+  private static broadcast(channel: string, payload: unknown): void {
+    for (const webContents of getPublishRelatedWebContents()) {
+      webContents.send(channel, payload);
+    }
+  }
+
+  private static broadcastPublishProgress(event: PublishProgressEvent): void {
+    PublishImpl.broadcast('publish.onPublishProgress', event);
+  }
+
+  private static broadcastPublishCenterState(): void {
+    PublishImpl.broadcast('publish.onPublishCenterStateChanged', getRuntimePublishCenterState());
+  }
+
+  private static syncTask(task: PublishTaskRecord, overrides?: Parameters<typeof syncPublishTaskRecord>[1]): void {
+    syncPublishTaskRecord(task, overrides);
+    PublishImpl.broadcastPublishCenterState();
+  }
+
+  private static syncProgress(taskId: number, event: PublishProgressEvent): void {
+    syncPublishProgressEvent(taskId, event);
+    PublishImpl.broadcastPublishProgress(event);
+    PublishImpl.broadcastPublishCenterState();
+  }
 
   // ─── 发布任务 CRUD ──────────────────────────────────────────────────────────
 
@@ -74,11 +143,17 @@ export class PublishImpl extends PublishApi {
   }
 
   async createPublishTask(payload: CreatePublishTaskPayload): Promise<PublishTaskRecord> {
-    return requestBackend<PublishTaskRecord>('POST', '/publish-tasks', { data: payload });
+    const task = await requestBackend<PublishTaskRecord>('POST', '/publish-tasks', { data: payload });
+    PublishImpl.syncTask(task, {
+      statusText: '任务已创建，等待开始发布',
+    });
+    return task;
   }
 
   async updatePublishTask(id: number, payload: UpdatePublishTaskPayload): Promise<PublishTaskRecord> {
-    return requestBackend<PublishTaskRecord>('PUT', `/publish-tasks/${id}`, { data: payload });
+    const task = await requestBackend<PublishTaskRecord>('PUT', `/publish-tasks/${id}`, { data: payload });
+    PublishImpl.syncTask(task);
+    return task;
   }
 
   async deletePublishTask(id: number): Promise<{ deleted: boolean }> {
@@ -88,15 +163,21 @@ export class PublishImpl extends PublishApi {
   // ─── 发布步骤 CRUD ──────────────────────────────────────────────────────────
 
   async listPublishSteps(taskId: number): Promise<PublishStepRecord[]> {
-    return requestBackend<PublishStepRecord[]>('GET', `/publish-tasks/${taskId}/steps`);
+    const steps = await requestBackend<PublishStepRecord[]>('GET', `/publish-tasks/${taskId}/steps`);
+    return mergePublishStepPayloads(taskId, steps);
   }
 
   async createPublishStep(taskId: number, payload: CreatePublishStepPayload): Promise<PublishStepRecord> {
-    return requestBackend<PublishStepRecord>(
+    const { inputData, ...serverPayload } = payload;
+    const step = await requestBackend<PublishStepRecord>(
       'POST',
       `/publish-tasks/${taskId}/steps`,
-      { data: payload },
+      { data: serverPayload },
     );
+    if (inputData !== undefined && step.id) {
+      persistPublishStepPayload(taskId, step.id, { inputData });
+    }
+    return mergePublishStepPayloads(taskId, [step])[0] ?? step;
   }
 
   async updatePublishStep(
@@ -104,18 +185,29 @@ export class PublishImpl extends PublishApi {
     stepId: number,
     payload: UpdatePublishStepPayload,
   ): Promise<PublishStepRecord> {
-    return requestBackend<PublishStepRecord>(
+    const { inputData, outputData, ...serverPayload } = payload;
+    const step = await requestBackend<PublishStepRecord>(
       'PUT',
       `/publish-tasks/${taskId}/steps/${stepId}`,
-      { data: payload },
+      { data: serverPayload },
     );
+    if (inputData !== undefined || outputData !== undefined) {
+      persistPublishStepPayload(taskId, stepId, { inputData, outputData });
+    }
+    return mergePublishStepPayloads(taskId, [step])[0] ?? step;
   }
 
   // ─── 发布流程控制 ───────────────────────────────────────────────────────────
 
   async startPublish(taskId: number): Promise<{ started: boolean }> {
-    if (this.runnerMap.has(taskId)) {
+    if (PublishImpl.runnerMap.has(taskId)) {
       // 已有 Runner 在运行，幂等返回
+      publishInfo(`[task:${taskId}] startPublish skipped because runner already exists`);
+      const task = await this.getPublishTask(taskId);
+      PublishImpl.syncTask(task, {
+        status: TaskStatus.RUNNING,
+        statusText: '任务已在执行中',
+      });
       return { started: true };
     }
 
@@ -123,21 +215,43 @@ export class PublishImpl extends PublishApi {
     const runner = new PublishRunner(persister);
 
     runner.onProgress((event: PublishProgressEvent) => {
-      // 通过 IPC 推送进度到渲染进程
-      this.send('onPublishProgress', event);
+      PublishImpl.syncProgress(taskId, event);
       // 检测到验证码时，自动在发布窗口右侧抽屉展示验证码
       if (event.captchaUrl) {
         showCaptchaPanel(event.captchaUrl);
       }
     });
 
-    this.runnerMap.set(taskId, runner);
+    PublishImpl.runnerMap.set(taskId, runner);
+    const task = await this.getPublishTask(taskId);
+    if (!task.currentStepCode && task.sourceProductId) {
+      clearPublishProductLogs(task.sourceProductId);
+    }
+    registerPublishTaskLogFile(taskId, task.sourceProductId);
+    publishInfo(`[task:${taskId}] startPublish accepted`, {
+      taskId,
+      sourceProductId: task.sourceProductId,
+    });
+    PublishImpl.syncTask(task, {
+      status: TaskStatus.RUNNING,
+      stepStatus: StepStatus.RUNNING,
+      statusText: '任务已开始执行',
+    });
 
     // 异步执行，不阻塞 IPC 响应
     runner
       .run(taskId)
+      .then(async () => {
+        const latestTask = await this.getPublishTask(taskId);
+        PublishImpl.syncTask(latestTask, {
+          statusText: latestTask.outerItemId
+            ? `发布成功，商品 #${latestTask.outerItemId}`
+            : '发布流程已完成',
+        });
+      })
       .catch((err: Error) => {
-        this.send('onPublishProgress', {
+        publishError(`[task:${taskId}] unhandled publish error`, summarizeForLog(err));
+        PublishImpl.syncProgress(taskId, {
           taskId,
           stepCode: StepCode.UNKNOWN,
           status: StepStatus.FAILED,
@@ -145,7 +259,9 @@ export class PublishImpl extends PublishApi {
         });
       })
       .finally(() => {
-        this.runnerMap.delete(taskId);
+        publishInfo(`[task:${taskId}] runner released`);
+        unregisterPublishTaskLogFile(taskId);
+        PublishImpl.runnerMap.delete(taskId);
       });
 
     return { started: true };
@@ -153,20 +269,22 @@ export class PublishImpl extends PublishApi {
 
   async resumePublish(taskId: number): Promise<{ resumed: boolean }> {
     // 先清除旧 Runner（若存在），再重新启动
-    this.runnerMap.delete(taskId);
+    PublishImpl.runnerMap.delete(taskId);
     const result = await this.startPublish(taskId);
     return { resumed: result.started };
   }
 
   async cancelPublish(taskId: number): Promise<{ cancelled: boolean }> {
     // 从 Runner Map 移除（Runner 下次检查时会自然退出）
-    this.runnerMap.delete(taskId);
+    PublishImpl.runnerMap.delete(taskId);
+    publishInfo(`[task:${taskId}] cancelPublish requested`);
 
     await requestBackend('PUT', `/publish-tasks/${taskId}`, {
       data: { status: TaskStatus.CANCELLED },
+      publishLog: { taskId, label: 'cancel publish task' },
     });
 
-    this.send('onPublishProgress', {
+    PublishImpl.syncProgress(taskId, {
       taskId,
       stepCode: StepCode.UNKNOWN,
       status: StepStatus.CANCELLED,
@@ -174,5 +292,9 @@ export class PublishImpl extends PublishApi {
     });
 
     return { cancelled: true };
+  }
+
+  async getPublishCenterState(): Promise<PublishCenterState> {
+    return getRuntimePublishCenterState();
   }
 }

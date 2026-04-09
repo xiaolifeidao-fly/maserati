@@ -7,12 +7,19 @@ import type { StepCode } from '../types/publish-task';
 export class PublishError extends Error {
   readonly stepCode: StepCode;
   readonly retryable: boolean;
+  readonly details?: Record<string, unknown>;
 
-  constructor(stepCode: StepCode, message: string, retryable = false) {
+  constructor(
+    stepCode: StepCode,
+    message: string,
+    retryable = false,
+    details?: Record<string, unknown>,
+  ) {
     super(message);
     this.name = 'PublishError';
     this.stepCode = stepCode;
     this.retryable = retryable;
+    this.details = details;
   }
 }
 

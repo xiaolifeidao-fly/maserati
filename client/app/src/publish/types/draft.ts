@@ -14,6 +14,12 @@ export interface TbDraftContext {
   csrfToken?: string;
   /** 页面 window 中抓取的 JSON 数据（原始页面状态） */
   pageJsonData?: Record<string, unknown>;
+  /** 最后一次提交草稿到淘宝的有效 payload */
+  submitPayload?: Record<string, unknown>;
+  /** 从 draftOp/add.json 请求中拦截到的原始 jsonBody（页面实际提交数据，比 window.Json 更准确） */
+  addDraftJsonBody?: Record<string, unknown>;
+  /** 从 draftOp/update.json 请求中拦截到的原始 jsonBody（已有草稿页面手动触发保存后获取） */
+  updateDraftJsonBody?: Record<string, unknown>;
 }
 
 /** 淘宝类目信息（SearchCategory 步骤获取） */
@@ -73,6 +79,16 @@ export interface TbDraftPayload {
   startTraceId: string;
   /** 其余字段为淘宝动态表单字段，使用索引签名 */
   [key: string]: unknown;
+}
+
+/** 上传后的图片元信息 */
+export interface TbUploadedImageMeta {
+  originalUrl?: string;
+  url: string;
+  width?: number;
+  height?: number;
+  size?: number;
+  imageId?: string;
 }
 
 /** 淘宝上传图片返回结果 */

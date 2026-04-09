@@ -86,7 +86,6 @@ type SkuQueryDTO struct {
 
 type ProductDraftDTO struct {
 	baseDTO.BaseDTO
-	ProductID       uint64 `json:"productId"`
 	SourceProductID string `json:"sourceProductId"`
 	ShopID          uint64 `json:"shopId"`
 	TbCatID         string `json:"tbCatId"`
@@ -95,7 +94,6 @@ type ProductDraftDTO struct {
 }
 
 type CreateProductDraftDTO struct {
-	ProductID       uint64 `json:"productId"`
 	SourceProductID string `json:"sourceProductId"`
 	ShopID          uint64 `json:"shopId"`
 	TbCatID         string `json:"tbCatId"`
@@ -104,7 +102,6 @@ type CreateProductDraftDTO struct {
 }
 
 type UpdateProductDraftDTO struct {
-	ProductID       *uint64 `json:"productId,omitempty"`
 	SourceProductID *string `json:"sourceProductId,omitempty"`
 	ShopID          *uint64 `json:"shopId,omitempty"`
 	TbCatID         *string `json:"tbCatId,omitempty"`
@@ -116,7 +113,6 @@ type ProductDraftQueryDTO struct {
 	Page            int    `form:"page"`
 	PageIndex       int    `form:"pageIndex"`
 	PageSize        int    `form:"pageSize"`
-	ProductID       uint64 `form:"productId"`
 	SourceProductID string `form:"sourceProductId"`
 	ShopID          uint64 `form:"shopId"`
 	TbCatID         string `form:"tbCatId"`

@@ -109,7 +109,10 @@ export function CollectionManagementSimplePanel() {
   };
 
   const openPublishModal = (record: CollectBatchRecord) => {
-    void getPublishWindowApi().openPublishWindow(record.id);
+    void getPublishWindowApi().openPublishWindow({
+      batchId: record.id,
+      entryScene: "collection",
+    });
   };
 
   const openDetailModal = (record: CollectBatchRecord) => {

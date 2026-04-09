@@ -21,6 +21,7 @@ type CollectRecord struct {
 	ProductName       string `gorm:"column:product_name;type:varchar(255);index:idx_product_name" description:"商品名称"`
 	SourceProductID   string `gorm:"column:source_product_id;type:varchar(128);index:idx_source_product_id" description:"来源商品ID"`
 	SourceSnapshotURL string `gorm:"column:source_snapshot_url;type:varchar(500)" description:"来源快照地址"`
+	RawDataURL        string `gorm:"column:raw_data_url;type:varchar(1000)" description:"原始数据在 OSS 的地址"`
 	IsFavorite        bool   `gorm:"column:is_favorite;type:tinyint(1);default:0" description:"是否收藏"`
 	Status            string `gorm:"column:status;type:varchar(32)" description:"状态"`
 }

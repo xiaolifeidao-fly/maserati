@@ -1,5 +1,5 @@
 import type { NormalizedProduct } from '../types/source-data';
-import type { TbCategoryInfo, TbDraftContext } from '../types/draft';
+import type { TbCategoryInfo, TbDraftContext, TbUploadedImageMeta } from '../types/draft';
 import type { TbWindowJsonDraftData } from '../types/tb-window-json';
 
 /**
@@ -17,6 +17,8 @@ export interface FillerContext {
   readonly uploadedMainImages: string[];
   /** 上传后的详情图 URL 列表 */
   readonly uploadedDetailImages: string[];
+  /** 上传后的详情图元信息 */
+  readonly uploadedDetailImageMetas?: TbUploadedImageMeta[];
   /** 草稿上下文（含 catId / startTraceId / draftId 等） */
   readonly draftContext: TbDraftContext;
   /** 发布页面 window.Json 解析结果（含实际表单字段、类目属性、SKU 选项等） */

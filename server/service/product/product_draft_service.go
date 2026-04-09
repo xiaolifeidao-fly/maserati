@@ -13,13 +13,11 @@ import (
 
 type ProductDraftService struct {
 	productDraftRepository *productRepository.ProductDraftRepository
-	productRepository      *productRepository.ProductRepository
 }
 
 func NewProductDraftService() *ProductDraftService {
 	return &ProductDraftService{
 		productDraftRepository: db.GetRepository[productRepository.ProductDraftRepository](),
-		productRepository:      db.GetRepository[productRepository.ProductRepository](),
 	}
 }
 
@@ -82,13 +80,33 @@ func (s *ProductDraftService) CreateProductDraft(req *productDTO.CreateProductDr
 	if req == nil {
 		return nil, fmt.Errorf("request is nil")
 	}
+	sourceProductID := strings.TrimSpace(req.SourceProductID)
+	tbCatID := strings.TrimSpace(req.TbCatID)
+	tbDraftID := strings.TrimSpace(req.TbDraftID)
+	status := normalizeProductDraftStatus(req.Status)
+
+	if sourceProductID != "" && req.ShopID > 0 && tbCatID != "" {
+		existing, err := s.productDraftRepository.FindByIdentity(sourceProductID, req.ShopID, tbCatID)
+		if err == nil && existing != nil && existing.Active == 1 {
+			existing.TbDraftID = tbDraftID
+			existing.Status = status
+			saved, saveErr := s.productDraftRepository.SaveOrUpdate(existing)
+			if saveErr != nil {
+				return nil, saveErr
+			}
+			return db.ToDTO[productDTO.ProductDraftDTO](saved), nil
+		}
+		if err != nil && err != gorm.ErrRecordNotFound {
+			return nil, err
+		}
+	}
+
 	entity, err := s.productDraftRepository.Create(&productRepository.ProductDraft{
-		ProductID:       req.ProductID,
-		SourceProductID: strings.TrimSpace(req.SourceProductID),
+		SourceProductID: sourceProductID,
 		ShopID:          req.ShopID,
-		TbCatID:         strings.TrimSpace(req.TbCatID),
-		TbDraftID:       strings.TrimSpace(req.TbDraftID),
-		Status:          normalizeProductDraftStatus(req.Status),
+		TbCatID:         tbCatID,
+		TbDraftID:       tbDraftID,
+		Status:          status,
 	})
 	if err != nil {
 		return nil, err
@@ -106,9 +124,6 @@ func (s *ProductDraftService) UpdateProductDraft(id uint, req *productDTO.Update
 	}
 	if entity.Active == 0 {
 		return nil, gorm.ErrRecordNotFound
-	}
-	if req.ProductID != nil {
-		entity.ProductID = *req.ProductID
 	}
 	if req.SourceProductID != nil {
 		entity.SourceProductID = strings.TrimSpace(*req.SourceProductID)

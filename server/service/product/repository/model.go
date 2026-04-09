@@ -28,7 +28,6 @@ func (s *Sku) TableName() string { return "sku" }
 
 type ProductDraft struct {
 	db.BaseEntity
-	ProductID       uint64 `gorm:"column:product_id;type:bigint unsigned;index:idx_product_id" description:"关联商品ID"`
 	SourceProductID string `gorm:"column:source_product_id;type:varchar(128);index:idx_source_product_id" description:"原商品ID"`
 	ShopID          uint64 `gorm:"column:shop_id;type:bigint unsigned;index:idx_draft_shop_id" description:"店铺ID"`
 	TbCatID         string `gorm:"column:tb_cat_id;type:varchar(50);index:idx_draft_tb_cat_id" description:"淘宝分类ID"`

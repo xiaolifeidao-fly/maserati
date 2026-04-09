@@ -537,6 +537,7 @@ async function collectCurrentGoods(url: string) {
       batchId: workspaceState.batch.id,
       appUserId: workspaceState.batch.appUserId,
       sourceUrl: url,
+      rawSourceData: getCollectedProductRawData(summary.sourceProductId, workspaceState.sourceType),
     };
 
     // Step 1: 通知左侧面板 — 插入加载占位

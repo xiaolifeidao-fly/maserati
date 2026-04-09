@@ -12,7 +12,14 @@ import fs from 'fs';
 import path from 'path';
 import FormData from 'form-data';
 import { app } from 'electron';
-import log from 'electron-log';
+import {
+  publishTaobaoRequestLog,
+  publishTaobaoResponseLog,
+  summarizeForLog,
+} from '../utils/publish-logger';
+import { handleTbLoginRequired, handleTbMaybeLoginRequired } from '../utils/tb-login-state';
+import type { TbUploadedImageMeta } from '../types/draft';
+import { parseTaobaoResponseText } from '../utils/tb-publish-api';
 
 const TB_UPLOAD_URL =
   'https://stream-upload.taobao.com/api/upload.api?_input_charset=utf-8&appkey=tu&folderId=0&picCompress=true&watermark=false';
@@ -20,6 +27,27 @@ const DOWNLOAD_UA =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 const MAX_RETRIES = 3;
 const RETRY_DELAY_MS = 2000;
+
+interface ProcessedImageResult {
+  localPath: string;
+  width: number;
+  height: number;
+  size: number;
+}
+
+interface UploadedImageResult {
+  url: string;
+  imageId?: string;
+  width?: number;
+  height?: number;
+  size?: number;
+}
+
+interface UploadFailureResult {
+  filePath: string;
+  message: string;
+  details?: Record<string, unknown>;
+}
 
 /**
  * UploadImagesStep — 上传商品图片（Step 2）
@@ -50,6 +78,7 @@ export class UploadImagesStep extends PublishStep {
     }
 
     const existingMap = ctx.get('imageUrlMap') ?? {};
+    const existingDetailMetas = ctx.get('uploadedDetailImageMetas') ?? [];
     const mainImages = product.mainImages;
     const detailImages = product.detailImages;
 
@@ -61,6 +90,18 @@ export class UploadImagesStep extends PublishStep {
     }
 
     const imageUrlMap: Record<string, string> = { ...existingMap };
+    const detailImageMetaMap = new Map<string, TbUploadedImageMeta>();
+    const tbUploadFailures: Array<Record<string, unknown>> = [];
+    for (const meta of existingDetailMetas) {
+      const originalKey = meta.originalUrl?.trim();
+      const uploadedKey = meta.url.trim();
+      if (originalKey) {
+        detailImageMetaMap.set(originalKey, meta);
+      }
+      if (uploadedKey) {
+        detailImageMetaMap.set(uploadedKey, meta);
+      }
+    }
 
     // ── 幂等检查：从服务端查询已上传过的图片 ─────────────────────────────────
     const serverCached = await this.checkServerCache(toUpload);
@@ -75,9 +116,10 @@ export class UploadImagesStep extends PublishStep {
       }
 
       // ── 获取淘宝会话 Cookie ──────────────────────────────────────────────────
-      const cookieStr = await this.getTbCookies(ctx.shopId);
-      if (!cookieStr) {
-        throw new PublishError(this.stepCode, '无法获取淘宝会话 Cookie，请先完成淘宝账号登录');
+      const cookieStr = await this.getTbCookies(ctx.taskId, ctx.shopId);
+      const resolvedCookieStr = cookieStr ?? '';
+      if (!resolvedCookieStr) {
+        await handleTbLoginRequired(this.stepCode, ctx.shopId);
       }
 
       const mainImageSet = new Set(mainImages);
@@ -85,27 +127,52 @@ export class UploadImagesStep extends PublishStep {
       // ── 逐张下载 → 处理 → 上传 ──────────────────────────────────────────────
       for (const originalUrl of toActuallyUpload) {
         const isMain = mainImageSet.has(originalUrl);
-        let localPath: string | null = null;
+        let processedImage: ProcessedImageResult | null = null;
         try {
-          localPath = await this.downloadAndProcess(originalUrl, isMain, tempDir);
-          if (!localPath) {
-            log.warn('[UploadImagesStep] skip image: download/process failed', { url: originalUrl });
+          processedImage = await this.downloadAndProcess(originalUrl, isMain, tempDir);
+          if (!processedImage) {
             continue;
           }
 
-          const tbUrl = await this.uploadToTb(localPath, cookieStr);
-          if (tbUrl) {
-            imageUrlMap[originalUrl] = tbUrl;
-            await this.storeToServerCache(product.sourceId ?? '', originalUrl, tbUrl);
-            log.info('[UploadImagesStep] image uploaded', { originalUrl, tbUrl });
+          const uploadedImage = await this.uploadToTb(
+            ctx.taskId,
+            ctx.shopId,
+            processedImage.localPath,
+            resolvedCookieStr,
+          );
+          if ('url' in uploadedImage) {
+            imageUrlMap[originalUrl] = uploadedImage.url;
+            await this.storeToServerCache(product.sourceId ?? '', originalUrl, uploadedImage.url);
+            if (!isMain) {
+              const meta: TbUploadedImageMeta = {
+                originalUrl,
+                url: uploadedImage.url,
+                width: uploadedImage.width ?? processedImage.width,
+                height: uploadedImage.height ?? processedImage.height,
+                size: uploadedImage.size ?? processedImage.size,
+                imageId: uploadedImage.imageId,
+              };
+              detailImageMetaMap.set(originalUrl, meta);
+              detailImageMetaMap.set(uploadedImage.url, meta);
+            }
           } else {
-            log.warn('[UploadImagesStep] TB upload returned no URL', { url: originalUrl });
+            tbUploadFailures.push({
+              originalUrl,
+              isMain,
+              filePath: uploadedImage.filePath,
+              message: uploadedImage.message,
+              details: uploadedImage.details,
+            });
           }
         } catch (error) {
-          log.warn('[UploadImagesStep] failed to upload image', { url: originalUrl, error });
+          tbUploadFailures.push({
+            originalUrl,
+            isMain,
+            error: summarizeForLog(error),
+          });
         } finally {
-          if (localPath) {
-            try { fs.unlinkSync(localPath); } catch { /* temp file cleanup, ignore */ }
+          if (processedImage?.localPath) {
+            try { fs.unlinkSync(processedImage.localPath); } catch { /* temp file cleanup, ignore */ }
           }
         }
       }
@@ -113,15 +180,34 @@ export class UploadImagesStep extends PublishStep {
 
     const uploadedMainImages = mainImages.map(img => imageUrlMap[img] ?? img);
     const uploadedDetailImages = detailImages.map(img => imageUrlMap[img] ?? img);
+    const uploadedDetailImageMetas = detailImages.map((originalUrl, index) => {
+      const uploadedUrl = uploadedDetailImages[index];
+      const meta = detailImageMetaMap.get(originalUrl) ?? detailImageMetaMap.get(uploadedUrl);
+      return {
+        originalUrl,
+        url: uploadedUrl,
+        width: meta?.width,
+        height: meta?.height,
+        size: meta?.size,
+        imageId: meta?.imageId,
+      } satisfies TbUploadedImageMeta;
+    });
 
     ctx.set('uploadedMainImages', uploadedMainImages);
     ctx.set('uploadedDetailImages', uploadedDetailImages);
+    ctx.set('uploadedDetailImageMetas', uploadedDetailImageMetas);
     ctx.set('imageUrlMap', imageUrlMap);
 
     return {
       status: StepStatus.SUCCESS,
       message: `图片上传完成，主图 ${uploadedMainImages.length} 张，详情图 ${uploadedDetailImages.length} 张`,
-      outputData: { uploadedMainImages, uploadedDetailImages, imageUrlMap },
+      outputData: {
+        uploadedMainImages,
+        uploadedDetailImages,
+        uploadedDetailImageMetas,
+        imageUrlMap,
+        tbUploadFailures,
+      },
     };
   }
 
@@ -131,18 +217,17 @@ export class UploadImagesStep extends PublishStep {
    * 通过 TbEngine 还原已保存的淘宝浏览器会话，提取 Cookie 字符串。
    * 只打开一个空白页来触发持久化上下文加载，不导航任何页面。
    */
-  private async getTbCookies(shopId: number): Promise<string | null> {
+  private async getTbCookies(taskId: number, shopId: number): Promise<string | null> {
     const engine = new TbEngine(String(shopId), true);
+    engine.bindPublishTask(taskId);
     try {
       const page = await engine.init();
       if (!page) {
-        log.warn('[UploadImagesStep] TbEngine init returned no page', { shopId });
         return null;
       }
 
       const context = engine.getContext();
       if (!context) {
-        log.warn('[UploadImagesStep] TbEngine context is null', { shopId });
         return null;
       }
 
@@ -155,15 +240,11 @@ export class UploadImagesStep extends PublishStep {
       ]);
 
       if (!cookies.length) {
-        log.warn('[UploadImagesStep] no TB cookies found', { shopId });
         return null;
       }
 
-      const cookieStr = cookies.map(c => `${c.name}=${c.value}`).join('; ');
-      log.info('[UploadImagesStep] TB cookies ready', { shopId, count: cookies.length });
-      return cookieStr;
-    } catch (error) {
-      log.error('[UploadImagesStep] failed to get TB cookies', { shopId, error });
+      return cookies.map(c => `${c.name}=${c.value}`).join('; ');
+    } catch {
       return null;
     } finally {
       await engine.closePage().catch(() => null);
@@ -180,7 +261,7 @@ export class UploadImagesStep extends PublishStep {
     url: string,
     isMain: boolean,
     tempDir: string,
-  ): Promise<string | null> {
+  ): Promise<ProcessedImageResult | null> {
     try {
       const hash = this.hashUrl(url);
       const tempPath = path.join(tempDir, `${hash}.jpg`);
@@ -192,11 +273,15 @@ export class UploadImagesStep extends PublishStep {
       });
 
       const buffer = Buffer.from(response.data);
-      const processedBuffer = await this.processImage(buffer, isMain);
-      fs.writeFileSync(tempPath, processedBuffer);
-      return tempPath;
-    } catch (error) {
-      log.error('[UploadImagesStep] image download/process failed', { url, error });
+      const processedImage = await this.processImage(buffer, isMain);
+      fs.writeFileSync(tempPath, processedImage.buffer);
+      return {
+        localPath: tempPath,
+        width: processedImage.width,
+        height: processedImage.height,
+        size: processedImage.buffer.length,
+      };
+    } catch {
       return null;
     }
   }
@@ -206,7 +291,10 @@ export class UploadImagesStep extends PublishStep {
    *  - 主图：scaleToFit 800×800（保持比例，不超过 800px）
    *  - 详情图：scaleToFit 2000×1600（保持比例，超出才缩小）
    */
-  private async processImage(buffer: Buffer, isMain: boolean): Promise<Buffer> {
+  private async processImage(
+    buffer: Buffer,
+    isMain: boolean,
+  ): Promise<{ buffer: Buffer; width: number; height: number }> {
     const image = await Jimp.read(buffer);
     const { width, height } = image.bitmap;
     const [maxW, maxH] = isMain ? [800, 800] : [2000, 1600];
@@ -215,7 +303,12 @@ export class UploadImagesStep extends PublishStep {
       image.scaleToFit({ w: maxW, h: maxH });
     }
 
-    return image.getBuffer(JimpMime.jpeg, { quality: 90 });
+    const output = await image.getBuffer(JimpMime.jpeg, { quality: 90 });
+    return {
+      buffer: output,
+      width: image.bitmap.width,
+      height: image.bitmap.height,
+    };
   }
 
   // ─── 上传到淘宝图片空间 ───────────────────────────────────────────────────────
@@ -224,7 +317,12 @@ export class UploadImagesStep extends PublishStep {
    * 调用淘宝 stream-upload API 上传本地图片文件。
    * 最多重试 3 次，返回淘宝图片空间 URL 或 null（失败）。
    */
-  private async uploadToTb(filePath: string, cookieStr: string): Promise<string | null> {
+  private async uploadToTb(
+    taskId: number,
+    shopId: number,
+    filePath: string,
+    cookieStr: string,
+  ): Promise<UploadedImageResult | UploadFailureResult> {
     const stats = fs.statSync(filePath);
     // 动态超时：至少 30s，每 MB 增加 5s
     const dynamicTimeout = Math.max(30000, (stats.size / 1024 / 1024) * 5000);
@@ -247,53 +345,105 @@ export class UploadImagesStep extends PublishStep {
           'Host': 'stream-upload.taobao.com',
           'x-requested-with': 'XMLHttpRequest',
         };
+        publishTaobaoRequestLog(taskId, 'upload-image', {
+          url: TB_UPLOAD_URL,
+          method: 'POST',
+          attempt: attempt + 1,
+          input: {
+            fileName: path.basename(filePath),
+            fileSize: stats.size,
+            headers: summarizeForLog(headers),
+          },
+        });
 
-        const response = await axios.post<Record<string, unknown>>(TB_UPLOAD_URL, form, {
+        const response = await axios.post<string>(TB_UPLOAD_URL, form, {
           headers,
           timeout: dynamicTimeout,
           maxContentLength: Infinity,
           maxBodyLength: Infinity,
+          responseType: 'text',
+          transformResponse: [raw => raw],
         });
 
-        const data = response.data;
+        await handleTbMaybeLoginRequired(this.stepCode, shopId, response.data);
+        const data = parseTaobaoResponseText(response.data, '淘宝上传图片接口');
+        await handleTbMaybeLoginRequired(this.stepCode, shopId, data);
+        publishTaobaoResponseLog(taskId, 'upload-image', {
+          url: TB_UPLOAD_URL,
+          method: 'POST',
+          attempt: attempt + 1,
+          status: response.status,
+          output: summarizeForLog(data),
+        });
         if (!data || typeof data === 'string') {
-          log.warn('[UploadImagesStep] TB upload unexpected response type', { data });
-          continue;
+          return {
+            filePath,
+            message: '淘宝上传图片接口返回数据为空',
+            details: { rawData: summarizeForLog(data) },
+          };
         }
 
         // 验证拦截（需要滑块验证）
         if ('ret' in data && Array.isArray(data.ret) && data.ret[0] === 'FAIL_SYS_USER_VALIDATE') {
-          log.error('[UploadImagesStep] TB upload requires CAPTCHA validation — aborting');
-          return null;
+          return {
+            filePath,
+            message: '淘宝上传图片需要验证码',
+            details: summarizeForLog(data) as Record<string, unknown>,
+          };
         }
 
         // 安全拦截
         if (data.rgv587_flag === 'sm') {
-          log.error('[UploadImagesStep] TB upload blocked by security check');
-          return null;
+          return {
+            filePath,
+            message: '淘宝上传图片被安全校验拦截',
+            details: summarizeForLog(data) as Record<string, unknown>,
+          };
         }
 
         if (!data.success) {
-          log.warn('[UploadImagesStep] TB upload returned success=false', { data });
-          continue;
+          return {
+            filePath,
+            message: String(data.message ?? '淘宝上传图片失败'),
+            details: summarizeForLog(data) as Record<string, unknown>,
+          };
         }
 
         const fileData = data.object as Record<string, unknown> | undefined;
         if (!fileData?.url) {
-          log.warn('[UploadImagesStep] TB upload response missing object.url', { data });
-          continue;
+          return {
+            filePath,
+            message: '淘宝上传图片成功但未返回图片地址',
+            details: summarizeForLog(data) as Record<string, unknown>,
+          };
         }
 
-        return String(fileData.url);
+        return {
+          url: String(fileData.url),
+          imageId: typeof fileData.id === 'string' || typeof fileData.id === 'number'
+            ? String(fileData.id)
+            : undefined,
+          width: typeof fileData.width === 'number' ? fileData.width : undefined,
+          height: typeof fileData.height === 'number' ? fileData.height : undefined,
+          size: typeof fileData.size === 'number' ? fileData.size : undefined,
+        };
       } catch (error) {
-        log.warn(`[UploadImagesStep] TB upload attempt ${attempt + 1}/${MAX_RETRIES} failed`, { error });
+        publishTaobaoResponseLog(taskId, 'upload-image-error', {
+          url: TB_UPLOAD_URL,
+          method: 'POST',
+          attempt: attempt + 1,
+          error: summarizeForLog(error),
+        });
         if (attempt < MAX_RETRIES - 1) {
           await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS * (attempt + 1)));
         }
       }
     }
 
-    return null;
+    return {
+      filePath,
+      message: '淘宝上传图片多次重试后仍失败',
+    };
   }
 
   // ─── 服务端幂等缓存 ───────────────────────────────────────────────────────────

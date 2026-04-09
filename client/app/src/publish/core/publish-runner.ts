@@ -16,6 +16,19 @@ import { FillDraftStep } from '../steps/fill-draft.step';
 import { EditDraftStep } from '../steps/edit-draft.step';
 import { PublishFinalStep } from '../steps/publish.step';
 import { CaptchaRequiredError } from './errors';
+import {
+  clearPublishProductLogs,
+  publishError,
+  publishInfo,
+  registerPublishTaskLogFile,
+  summarizeForLog,
+  unregisterPublishTaskLogFile,
+} from '../utils/publish-logger';
+import { getCollectedProductRawData } from '@src/collect/workspace.manager';
+import { requestBackend } from '@src/impl/shared/backend';
+import type { CollectSourceType } from '@eleapi/collect/collect.platform';
+import type { RawSourceData } from '../types/source-data';
+import { clearPublishStepPayloads } from '../runtime/publish-step-store';
 
 /**
  * IPublishPersister — 发布状态持久化接口
@@ -47,6 +60,7 @@ export type ProgressCallback = (event: PublishProgressEvent) => void;
 export class PublishRunner {
   private readonly persister: IPublishPersister;
   private progressListeners: ProgressCallback[] = [];
+  private readonly taskStartTimeMap = new Map<number, number>();
 
   constructor(persister: IPublishPersister) {
     this.persister = persister;
@@ -83,12 +97,33 @@ export class PublishRunner {
    * @param taskId  服务端任务 ID
    */
   async run(taskId: number): Promise<void> {
+    this.taskStartTimeMap.set(taskId, Date.now());
     const task = await this.persister.getTask(taskId);
+    registerPublishTaskLogFile(taskId, task.sourceProductId);
+    publishInfo(`[task:${taskId}] publish runner started`, {
+      taskId,
+      sourceProductId: task.sourceProductId,
+    });
     const ctx = new StepContext(taskId, task.shopId);
+    if (task.productId && task.productId > 0) {
+      ctx.set('productId', task.productId);
+    }
     ctx.set('sourceType', task.sourceType);
+    if (task.sourceProductId) {
+      ctx.set('sourceProductId', task.sourceProductId);
+    }
+    publishInfo(`[task:${taskId}] publish summary started`, {
+      shopId: task.shopId,
+      taskStatus: task.status,
+      sourceType: task.sourceType,
+      sourceProductId: task.sourceProductId,
+      currentStepCode: task.currentStepCode,
+    });
 
     // 恢复上下文（将已完成步骤的 outputData 反序列化注入 ctx）
     await this.restoreContext(ctx, task);
+    await this.ensureRawSourceLoaded(ctx, task);
+    await this.ensureProductIdLoaded(ctx, task);
 
     // 标记任务为运行中
     await this.persister.updateTask(taskId, {
@@ -109,6 +144,19 @@ export class PublishRunner {
         outerItemId: ctx.get('publishedItemId'),
         currentStepCode: StepCode.PUBLISH,
       });
+      clearPublishStepPayloads(taskId);
+      publishInfo(`[task:${taskId}] publish runner completed`, {
+        publishedItemId: ctx.get('publishedItemId'),
+      });
+      publishInfo(`[task:${taskId}] publish summary success`, {
+        shopId: ctx.shopId,
+        sourceProductId: this.getSourceProductId(ctx),
+        productTitle: this.getProductTitle(ctx),
+        publishedItemId: ctx.get('publishedItemId'),
+        durationMs: this.getDurationMs(taskId),
+      });
+      clearPublishProductLogs(this.getSourceProductId(ctx) ?? task.sourceProductId);
+      unregisterPublishTaskLogFile(taskId);
 
       this.emit({
         taskId,
@@ -119,6 +167,20 @@ export class PublishRunner {
 
     } catch (err) {
       if (err instanceof CaptchaRequiredError) {
+        publishInfo(`[task:${taskId}] publish runner waiting captcha`, {
+          stepCode: err.stepCode,
+          captchaUrl: err.captchaUrl,
+          validateUrl: err.validateUrl,
+        });
+        publishInfo(`[task:${taskId}] publish summary pending captcha`, {
+          shopId: ctx.shopId,
+          sourceProductId: this.getSourceProductId(ctx),
+          productTitle: this.getProductTitle(ctx),
+          stepCode: err.stepCode,
+          captchaUrl: err.captchaUrl,
+          validateUrl: err.validateUrl,
+          durationMs: this.getDurationMs(taskId),
+        });
         // 验证码暂停：不算失败，等待用户操作后调用 resumeAfterCaptcha()
         await this.persister.updateTask(taskId, {
           status: TaskStatus.PENDING,
@@ -128,12 +190,40 @@ export class PublishRunner {
         return;
       }
       const message = err instanceof Error ? err.message : String(err);
+      publishError(`[task:${taskId}] publish runner failed`, summarizeForLog(err));
+      publishError(`[task:${taskId}] publish summary failed`, {
+        shopId: ctx.shopId,
+        sourceProductId: this.getSourceProductId(ctx),
+        productTitle: this.getProductTitle(ctx),
+        errorMessage: message,
+        durationMs: this.getDurationMs(taskId),
+      });
       await this.persister.updateTask(taskId, {
         status: TaskStatus.FAILED,
         errorMessage: message,
       });
       throw err;
+    } finally {
+      this.taskStartTimeMap.delete(taskId);
     }
+  }
+
+  private getDurationMs(taskId: number): number | undefined {
+    const start = this.taskStartTimeMap.get(taskId);
+    if (!start) {
+      return undefined;
+    }
+    return Date.now() - start;
+  }
+
+  private getSourceProductId(ctx: StepContext): string | undefined {
+    const product = ctx.get('product') as { sourceId?: string } | undefined;
+    return product?.sourceId;
+  }
+
+  private getProductTitle(ctx: StepContext): string | undefined {
+    const product = ctx.get('product') as { title?: string } | undefined;
+    return product?.title;
   }
 
   /**
@@ -147,21 +237,96 @@ export class PublishRunner {
   /** 从已完成步骤的 outputData 中恢复 StepContext 快照 */
   private async restoreContext(ctx: StepContext, task: PublishTaskRecord): Promise<void> {
     try {
-      const steps = await this.persister.listSteps(task.id);
-      // 将源数据注入 ctx（任务创建时已存库）
-      if (task.sourceData) {
-        try {
-          ctx.set('rawSource', JSON.parse(task.sourceData));
-        } catch { /* ignore parse error */ }
-      }
+      const stepRecords = await this.persister.listSteps(task.id);
+      const steps = Array.isArray(stepRecords) ? stepRecords : [];
       for (const step of steps) {
         if (step.status !== 'SUCCESS' || !step.outputData) continue;
         try {
           const output = JSON.parse(step.outputData) as Record<string, unknown>;
+          publishInfo(`[task:${task.id}] restore step output`, {
+            stepCode: step.stepCode,
+            output: summarizeForLog(output),
+          });
           this.mergeOutputToContext(ctx, step.stepCode as StepCode, output);
         } catch { /* ignore */ }
       }
     } catch { /* ignore restore errors, start fresh */ }
+  }
+
+  private async ensureRawSourceLoaded(ctx: StepContext, task: PublishTaskRecord): Promise<void> {
+    if (ctx.get('rawSource')) {
+      return;
+    }
+
+    const sourceProductId = String(task.sourceProductId ?? '').trim();
+    if (!sourceProductId) {
+      return;
+    }
+
+    const collectSourceType = publishSourceTypeToCollect(task.sourceType);
+    const localRawSource = getCollectedProductRawData(sourceProductId, collectSourceType);
+    if (isRawSourceData(localRawSource)) {
+      ctx.set('rawSource', localRawSource);
+      return;
+    }
+
+    const serverRawSource = await fetchRawSourceFromServer(task.sourceRecordId, sourceProductId);
+    if (isRawSourceData(serverRawSource)) {
+      ctx.set('rawSource', serverRawSource);
+      return;
+    }
+
+    const errorMessage = task.sourceRecordId
+      ? '未命中 Electron 本地源数据，且服务端 OSS 原始数据回源失败'
+      : '未命中 Electron 本地源数据，且缺少服务端来源记录';
+
+    publishInfo(`[task:${task.id}] raw source not found`, {
+      sourceProductId,
+      sourceRecordId: task.sourceRecordId,
+      sourceType: task.sourceType,
+      errorMessage,
+    });
+    throw new Error(errorMessage);
+  }
+
+  private async ensureProductIdLoaded(ctx: StepContext, task: PublishTaskRecord): Promise<void> {
+    if ((ctx.get('productId') ?? 0) > 0) {
+      return;
+    }
+    if (!task.sourceRecordId || task.sourceRecordId <= 0) {
+      return;
+    }
+
+    try {
+      const result = await requestBackend<{
+        data?: Array<{ id?: number }>;
+        items?: Array<{ id?: number }>;
+      }>('GET', '/products', {
+        params: {
+          collectRecordId: String(task.sourceRecordId),
+          pageIndex: '1',
+          pageSize: '1',
+        },
+        publishLog: { taskId: task.id, label: 'resolve product id by sourceRecordId' },
+      });
+
+      const productId = result.data?.[0]?.id ?? result.items?.[0]?.id;
+      if (!productId || productId <= 0) {
+        return;
+      }
+
+      ctx.set('productId', productId);
+      await this.persister.updateTask(task.id, { productId });
+      publishInfo(`[task:${task.id}] resolved productId for publish task`, {
+        sourceRecordId: task.sourceRecordId,
+        productId,
+      });
+    } catch (error) {
+      publishInfo(`[task:${task.id}] resolve productId skipped`, {
+        sourceRecordId: task.sourceRecordId,
+        error: summarizeForLog(error),
+      });
+    }
   }
 
   private mergeOutputToContext(
@@ -176,6 +341,7 @@ export class PublishRunner {
       case StepCode.UPLOAD_IMAGES:
         if (output.uploadedMainImages)   ctx.set('uploadedMainImages', output.uploadedMainImages as any);
         if (output.uploadedDetailImages) ctx.set('uploadedDetailImages', output.uploadedDetailImages as any);
+        if (output.uploadedDetailImageMetas) ctx.set('uploadedDetailImageMetas', output.uploadedDetailImageMetas as any);
         if (output.imageUrlMap)          ctx.set('imageUrlMap', output.imageUrlMap as any);
         break;
       case StepCode.SEARCH_CATEGORY:
@@ -188,8 +354,54 @@ export class PublishRunner {
         if (output.draftContext) ctx.set('draftContext', output.draftContext as any);
         break;
       case StepCode.PUBLISH:
+        if (output.draftContext) ctx.set('draftContext', output.draftContext as any);
         if (output.publishedItemId) ctx.set('publishedItemId', output.publishedItemId as string);
         break;
     }
   }
+}
+
+function publishSourceTypeToCollect(sourceType: PublishTaskRecord['sourceType']): CollectSourceType {
+  switch (sourceType) {
+    case 'TB':
+      return 'tb';
+    case 'PXX':
+      return 'pxx';
+    default:
+      return 'unknown';
+  }
+}
+
+async function fetchRawSourceFromServer(sourceRecordId?: number, sourceProductId?: string): Promise<unknown | null> {
+  if (!sourceRecordId) {
+    return null;
+  }
+
+  try {
+    const record = await requestBackend<{ rawDataUrl?: string }>('GET', `/collect-records/${sourceRecordId}`);
+    const rawDataUrl = String(record?.rawDataUrl ?? '').trim();
+    if (!rawDataUrl) {
+      return null;
+    }
+    if (rawDataUrl.startsWith('mock://')) {
+      throw new Error(`原始数据已登记但 OSS 拉取尚未接入：${rawDataUrl}`);
+    }
+
+    const response = await fetch(rawDataUrl);
+    if (!response.ok) {
+      throw new Error(`拉取原始数据失败: ${response.status}`);
+    }
+    return await response.json();
+  } catch (error) {
+    publishError('[publish-runner] fetch raw source from server failed', {
+      sourceRecordId,
+      sourceProductId,
+      error: summarizeForLog(error),
+    });
+    return null;
+  }
+}
+
+function isRawSourceData(value: unknown): value is RawSourceData {
+  return typeof value === 'object' && value !== null;
 }

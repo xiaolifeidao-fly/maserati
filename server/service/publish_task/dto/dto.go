@@ -9,24 +9,27 @@ import (
 
 type PublishTaskDTO struct {
 	baseDTO.BaseDTO
-	AppUserID       uint64  `json:"appUserId"`
-	ShopID          uint64  `json:"shopId"`
-	ProductID       uint64  `json:"productId"`
-	SourceType      string  `json:"sourceType"`
-	SourceData      string  `json:"sourceData"`
-	Status          string  `json:"status"`
-	CurrentStepCode string  `json:"currentStepCode"`
-	ErrorMessage    string  `json:"errorMessage"`
-	OuterItemID     string  `json:"outerItemId"`
-	Remark          string  `json:"remark"`
+	AppUserID       uint64 `json:"appUserId"`
+	ShopID          uint64 `json:"shopId"`
+	ProductID       uint64 `json:"productId"`
+	SourceType      string `json:"sourceType"`
+	SourceProductID string `json:"sourceProductId"`
+	SourceRecordID  uint64 `json:"sourceRecordId"`
+	Status          string `json:"status"`
+	CurrentStepCode string `json:"currentStepCode"`
+	ErrorMessage    string `json:"errorMessage"`
+	OuterItemID     string `json:"outerItemId"`
+	Remark          string `json:"remark"`
 }
 
 type CreatePublishTaskDTO struct {
-	AppUserID  uint64 `json:"appUserId"`
-	ShopID     uint64 `json:"shopId"`
-	SourceType string `json:"sourceType"`
-	SourceData string `json:"sourceData"`
-	Remark     string `json:"remark"`
+	AppUserID       uint64 `json:"appUserId"`
+	ShopID          uint64 `json:"shopId"`
+	ProductID       uint64 `json:"productId"`
+	SourceType      string `json:"sourceType"`
+	SourceProductID string `json:"sourceProductId"`
+	SourceRecordID  uint64 `json:"sourceRecordId"`
+	Remark          string `json:"remark"`
 }
 
 type UpdatePublishTaskDTO struct {
@@ -56,8 +59,6 @@ type PublishStepDTO struct {
 	StepCode      string     `json:"stepCode"`
 	StepOrder     int        `json:"stepOrder"`
 	Status        string     `json:"status"`
-	InputData     string     `json:"inputData"`
-	OutputData    string     `json:"outputData"`
 	ErrorMessage  string     `json:"errorMessage"`
 	RetryCount    int        `json:"retryCount"`
 	StartedAt     *time.Time `json:"startedAt"`
@@ -68,13 +69,10 @@ type CreatePublishStepDTO struct {
 	StepCode  string `json:"stepCode"`
 	StepOrder int    `json:"stepOrder"`
 	Status    string `json:"status"`
-	InputData string `json:"inputData"`
 }
 
 type UpdatePublishStepDTO struct {
 	Status       *string    `json:"status,omitempty"`
-	InputData    *string    `json:"inputData,omitempty"`
-	OutputData   *string    `json:"outputData,omitempty"`
 	ErrorMessage *string    `json:"errorMessage,omitempty"`
 	RetryCount   *int       `json:"retryCount,omitempty"`
 	StartedAt    *time.Time `json:"startedAt,omitempty"`

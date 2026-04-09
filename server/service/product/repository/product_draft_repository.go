@@ -13,7 +13,16 @@ func (r *ProductDraftRepository) EnsureTable() error {
 	if r.Db == nil {
 		return fmt.Errorf("database is not initialized")
 	}
-	return r.Db.AutoMigrate(&ProductDraft{})
+	if err := r.Db.AutoMigrate(&ProductDraft{}); err != nil {
+		return err
+	}
+	migrator := r.Db.Migrator()
+	if migrator.HasColumn(&ProductDraft{}, "product_id") {
+		if err := migrator.DropColumn(&ProductDraft{}, "product_id"); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (r *ProductDraftRepository) CountByQuery(query productDTO.ProductDraftQueryDTO) (int64, error) {
@@ -21,9 +30,6 @@ func (r *ProductDraftRepository) CountByQuery(query productDTO.ProductDraftQuery
 		return 0, fmt.Errorf("database is not initialized")
 	}
 	dbQuery := r.Db.Model(&ProductDraft{}).Where("active = ?", 1)
-	if query.ProductID > 0 {
-		dbQuery = dbQuery.Where("product_id = ?", query.ProductID)
-	}
 	if value := strings.TrimSpace(query.SourceProductID); value != "" {
 		dbQuery = dbQuery.Where("source_product_id = ?", value)
 	}
@@ -51,9 +57,6 @@ func (r *ProductDraftRepository) ListByQuery(query productDTO.ProductDraftQueryD
 		return nil, fmt.Errorf("database is not initialized")
 	}
 	dbQuery := r.Db.Model(&ProductDraft{}).Where("active = ?", 1)
-	if query.ProductID > 0 {
-		dbQuery = dbQuery.Where("product_id = ?", query.ProductID)
-	}
 	if value := strings.TrimSpace(query.SourceProductID); value != "" {
 		dbQuery = dbQuery.Where("source_product_id = ?", value)
 	}
@@ -113,6 +116,26 @@ func (r *ProductDraftRepository) FindByTbDraftID(tbDraftID string) (*ProductDraf
 	}
 	var entity ProductDraft
 	if err := r.Db.Where("tb_draft_id = ? AND active = ?", tbDraftID, 1).First(&entity).Error; err != nil {
+		return nil, err
+	}
+	return &entity, nil
+}
+
+// FindByIdentity 通过 source_product_id + shop_id + tb_cat_id 查找草稿记录
+func (r *ProductDraftRepository) FindByIdentity(sourceProductID string, shopID uint64, tbCatID string) (*ProductDraft, error) {
+	if r.Db == nil {
+		return nil, fmt.Errorf("database is not initialized")
+	}
+	var entity ProductDraft
+	if err := r.Db.
+		Where(
+			"source_product_id = ? AND shop_id = ? AND tb_cat_id = ? AND active = ?",
+			strings.TrimSpace(sourceProductID),
+			shopID,
+			strings.TrimSpace(tbCatID),
+			1,
+		).
+		First(&entity).Error; err != nil {
 		return nil, err
 	}
 	return &entity, nil

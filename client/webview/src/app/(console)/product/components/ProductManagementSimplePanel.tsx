@@ -187,7 +187,10 @@ export function ProductManagementSimplePanel() {
             <Button icon={<ReloadOutlined />} onClick={() => void refresh()}>
               刷新
             </Button>
-            <Button icon={<PlayCircleOutlined />} onClick={() => void getPublishWindowApi().openPublishWindow()}>
+            <Button
+              icon={<PlayCircleOutlined />}
+              onClick={() => void getPublishWindowApi().openPublishWindow({ entryScene: "product" })}
+            >
               发布
             </Button>
           </Space>

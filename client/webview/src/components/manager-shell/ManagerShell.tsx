@@ -8,15 +8,35 @@ import {
   ShopOutlined,
   ShoppingOutlined,
 } from "@ant-design/icons";
-import { Avatar, Badge, Button, Layout, Space, Typography } from "antd";
+import { Avatar, Button, Empty, Layout, Popover, Space, Tag, Typography } from "antd";
 import { usePathname, useRouter } from "next/navigation";
 import { PropsWithChildren, useEffect, useState } from "react";
 import { getAuthState, logout } from "@/utils/auth";
+import { getPublishApi } from "@/utils/publish";
+import { getPublishWindowApi } from "@/utils/publish-window";
 
 const { Content, Header } = Layout;
 const { Paragraph, Text } = Typography;
 
 interface ManagerShellProps extends PropsWithChildren {}
+
+interface PublishBatchSummary {
+  batchId: number;
+  batchName?: string;
+  entryScene?: "collection" | "product";
+  runningCount: number;
+  successCount: number;
+  failedCount: number;
+  totalCount: number;
+  latestUpdatedAt: string;
+}
+
+interface PublishCenterState {
+  runningCount: number;
+  failedCount: number;
+  abnormalCount: number;
+  batchSummaries: PublishBatchSummary[];
+}
 
 const navigationItems = [
   {
@@ -65,6 +85,13 @@ export function ManagerShell({ children }: ManagerShellProps) {
   const [displayName, setDisplayName] = useState("管理员");
   const [username, setUsername] = useState("已登录用户");
   const [loggingOut, setLoggingOut] = useState(false);
+  const [publishCenterState, setPublishCenterState] = useState<PublishCenterState>({
+    runningCount: 0,
+    failedCount: 0,
+    abnormalCount: 0,
+    batchSummaries: [],
+  });
+  const [publishCenterOpen, setPublishCenterOpen] = useState(false);
 
   useEffect(() => {
     void (async () => {
@@ -73,6 +100,152 @@ export function ManagerShell({ children }: ManagerShellProps) {
       setUsername(session.username || "已登录用户");
     })();
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const publishApi = getPublishApi();
+
+    void publishApi.getPublishCenterState().then((state) => {
+      if (!cancelled) {
+        setPublishCenterState(state as PublishCenterState);
+      }
+    }).catch(() => undefined);
+
+    void publishApi.onPublishCenterStateChanged((state) => {
+      if (!cancelled) {
+        setPublishCenterState(state as PublishCenterState);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const handleOpenPublishBatch = async (summary: PublishBatchSummary) => {
+    setPublishCenterOpen(false);
+    await getPublishWindowApi().openPublishWindow({
+      batchId: summary.batchId,
+      entryScene: summary.entryScene || "product",
+    });
+  };
+
+  const publishCenterContent = (
+    <div style={{ width: 360, maxWidth: "calc(100vw - 48px)" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+        <strong style={{ color: "var(--manager-text)" }}>发布消息中心</strong>
+        <Space size={8}>
+          <Tag color="blue">进行中 {publishCenterState.runningCount}</Tag>
+          <Tag color="gold">失败 {publishCenterState.failedCount}</Tag>
+        </Space>
+      </div>
+
+      {publishCenterState.batchSummaries.length === 0 ? (
+        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无发布消息" style={{ margin: "12px 0 4px" }} />
+      ) : (
+        <div style={{ display: "grid", gap: 10, maxHeight: 420, overflowY: "auto", paddingRight: 4 }}>
+          {publishCenterState.batchSummaries.map((item) => (
+            <button
+              key={item.batchId}
+              type="button"
+              onClick={() => void handleOpenPublishBatch(item)}
+              style={{
+                width: "100%",
+                padding: "10px 12px",
+                borderRadius: 12,
+                border: "1px solid rgba(170,192,238,0.2)",
+                background: "rgba(170,192,238,0.08)",
+                appearance: "none",
+                textAlign: "left",
+                cursor: "pointer",
+              }}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
+                <div style={{ fontWeight: 600, color: "var(--manager-text)" }}>
+                  {item.batchName || `发布批次 #${item.batchId}`}
+                </div>
+                <Tag color="geekblue">批次 #{item.batchId}</Tag>
+              </div>
+              <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <Tag color="blue">进行中 {item.runningCount}</Tag>
+                <Tag color="green">完成 {item.successCount}</Tag>
+                <Tag color="gold">失败 {item.failedCount}</Tag>
+              </div>
+              <div style={{ marginTop: 6, color: "var(--manager-text-soft)", fontSize: 12 }}>
+                共 {item.totalCount} 条任务，点击查看该批次发布详情
+              </div>
+              <div style={{ marginTop: 6, color: "var(--manager-text-faint)", fontSize: 11 }}>
+                {item.latestUpdatedAt.replace("T", " ").slice(0, 19)}
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+
+  const publishCenterBadgeVisible = publishCenterState.runningCount > 0 || publishCenterState.failedCount > 0;
+
+  const publishCenterBadge = publishCenterBadgeVisible ? (
+    <span
+      style={{
+        position: "absolute",
+        top: -10,
+        right: -14,
+        display: "inline-flex",
+        overflow: "hidden",
+        borderRadius: 999,
+        border: "2px solid rgba(8,15,32,0.9)",
+        boxShadow: "0 10px 22px rgba(15,23,42,0.22)",
+      }}
+    >
+      <span
+        style={{
+          minWidth: 22,
+          height: 22,
+          padding: "0 7px",
+          background: "#1677ff",
+          color: "#fff",
+          fontSize: 11,
+          lineHeight: "22px",
+          textAlign: "center",
+          fontWeight: 700,
+        }}
+        title="进行中的发布任务"
+      >
+        {publishCenterState.runningCount}
+      </span>
+      <span
+        style={{
+          minWidth: 22,
+          height: 22,
+          padding: "0 7px",
+          background: "#faad14",
+          color: "#fff",
+          fontSize: 11,
+          lineHeight: "22px",
+          textAlign: "center",
+          fontWeight: 700,
+        }}
+        title="失败的发布任务"
+      >
+        {publishCenterState.failedCount}
+      </span>
+    </span>
+  ) : null;
+
+  const handlePublishCenterOpenChange = (nextOpen: boolean) => {
+    setPublishCenterOpen(nextOpen);
+  };
+
+  const publishCenterTrigger = (
+    <div style={{ position: "relative" }}>
+      <button type="button" className="manager-commerce-icon-button" aria-label="消息中心">
+        <BellOutlined />
+      </button>
+      {publishCenterBadge}
+    </div>
+  );
 
   const handleLogout = async () => {
     setLoggingOut(true);
@@ -124,11 +297,15 @@ export function ManagerShell({ children }: ManagerShellProps) {
 
                 <div className="manager-commerce-actions">
                   <Space size={12} wrap>
-                    <Badge count={6} size="small">
-                      <button type="button" className="manager-commerce-icon-button" aria-label="消息中心">
-                        <BellOutlined />
-                      </button>
-                    </Badge>
+                    <Popover
+                      trigger="click"
+                      placement="bottomRight"
+                      content={publishCenterContent}
+                      open={publishCenterOpen}
+                      onOpenChange={handlePublishCenterOpenChange}
+                    >
+                      {publishCenterTrigger}
+                    </Popover>
 
                     <div className="manager-commerce-user-card">
                       <Avatar
