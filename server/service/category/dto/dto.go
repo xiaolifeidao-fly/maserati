@@ -34,32 +34,36 @@ type CategoryQueryDTO struct {
 
 type PxxMapperCategoryDTO struct {
 	baseDTO.BaseDTO
-	PddCatID     string `json:"pddCatId"`
-	TbCatID      string `json:"tbCatId"`
-	TbCatName    string `json:"tbCatName"`
-	CategoryInfo string `json:"categoryInfo"`
+	SourceProductID string `json:"sourceProductId"`
+	PddCatID        string `json:"pddCatId"`
+	TbCatID         string `json:"tbCatId"`
+	TbCatName       string `json:"tbCatName"`
+	CategoryInfo    string `json:"categoryInfo"`
 }
 
 type CreatePxxMapperCategoryDTO struct {
-	PddCatID     string `json:"pddCatId"`
-	TbCatID      string `json:"tbCatId"`
-	TbCatName    string `json:"tbCatName"`
-	CategoryInfo string `json:"categoryInfo"`
+	SourceProductID string `json:"sourceProductId"`
+	PddCatID        string `json:"pddCatId"`
+	TbCatID         string `json:"tbCatId"`
+	TbCatName       string `json:"tbCatName"`
+	CategoryInfo    string `json:"categoryInfo"`
 }
 
 type UpdatePxxMapperCategoryDTO struct {
-	PddCatID     *string `json:"pddCatId,omitempty"`
-	TbCatID      *string `json:"tbCatId,omitempty"`
-	TbCatName    *string `json:"tbCatName,omitempty"`
-	CategoryInfo *string `json:"categoryInfo,omitempty"`
+	SourceProductID *string `json:"sourceProductId,omitempty"`
+	PddCatID        *string `json:"pddCatId,omitempty"`
+	TbCatID         *string `json:"tbCatId,omitempty"`
+	TbCatName       *string `json:"tbCatName,omitempty"`
+	CategoryInfo    *string `json:"categoryInfo,omitempty"`
 }
 
 type PxxMapperCategoryQueryDTO struct {
-	Page      int    `form:"page"`
-	PageIndex int    `form:"pageIndex"`
-	PageSize  int    `form:"pageSize"`
-	PddCatID  string `form:"pddCatId"`
-	TbCatID   string `form:"tbCatId"`
+	Page            int    `form:"page"`
+	PageIndex       int    `form:"pageIndex"`
+	PageSize        int    `form:"pageSize"`
+	SourceProductID string `form:"sourceProductId"`
+	PddCatID        string `form:"pddCatId"`
+	TbCatID         string `form:"tbCatId"`
 }
 
 // ─── SourceProductTbCategory DTOs ────────────────────────────────────────────

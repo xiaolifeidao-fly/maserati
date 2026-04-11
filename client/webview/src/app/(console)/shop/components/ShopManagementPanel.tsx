@@ -36,8 +36,8 @@ interface AuthorizeFormValues {
   activationCode: string;
 }
 
-function getShopDisplayName(record: Pick<ShopRecord, "remark" | "name" | "code" | "platform">) {
-  return record.remark || record.name || record.code || record.platform || "-";
+function getShopDisplayName(record: Pick<ShopRecord, "remark" | "nickname" | "name" | "code" | "platform">) {
+  return record.remark || record.nickname || record.name || record.code || record.platform || "-";
 }
 
 const platformOptions = [
@@ -174,12 +174,15 @@ export function ShopManagementPanel() {
     {
       title: "接入店铺",
       dataIndex: "name",
-      width: 240,
+      width: 280,
       render: (_, record) => {
         const stage = getShopStage(record);
         return (
           <div>
             <div style={{ color: "var(--manager-text)", fontWeight: 700 }}>{getShopDisplayName(record)}</div>
+            <div style={{ color: "var(--manager-text-faint)", marginTop: 4 }}>
+              店铺昵称：{record.nickname || record.name || "-"}
+            </div>
             <div style={{ color: "var(--manager-text-faint)", marginTop: 4 }}>
               {getPlatformLabel(record.platform)}
             </div>
@@ -193,11 +196,16 @@ export function ShopManagementPanel() {
     {
       title: "外部账号",
       key: "platformAccount",
-      width: 220,
+      width: 240,
       render: (_, record) => (
         <div>
           <div>{record.platformShopId || "-"}</div>
-          <div style={{ color: "var(--manager-text-faint)", marginTop: 4 }}>{record.businessId || "待补充业务ID"}</div>
+          <div style={{ color: "var(--manager-text-faint)", marginTop: 4 }}>
+            业务ID：{record.businessId || "待补充"}
+          </div>
+          <div style={{ color: "var(--manager-text-faint)", marginTop: 4 }}>
+            昵称来源：{record.nickname || record.name || "等待外部登录同步"}
+          </div>
         </div>
       ),
     },

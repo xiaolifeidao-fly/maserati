@@ -20,7 +20,21 @@ export interface TbDraftContext {
   addDraftJsonBody?: Record<string, unknown>;
   /** 从 draftOp/update.json 请求中拦截到的原始 jsonBody（已有草稿页面手动触发保存后获取） */
   updateDraftJsonBody?: Record<string, unknown>;
+  /** 从 draftOp/add.json 请求中拦截到的完整表单参数 */
+  addDraftRequestForm?: Record<string, string>;
+  /** 从 draftOp/update.json 请求中拦截到的完整表单参数 */
+  updateDraftRequestForm?: Record<string, string>;
+  /** 从 draftOp/add.json 请求中拦截到的请求头 */
+  addDraftRequestHeaders?: Record<string, string>;
+  /** 从 draftOp/update.json 请求中拦截到的请求头 */
+  updateDraftRequestHeaders?: Record<string, string>;
+  /** 发布页销售规格 UI 模式 */
+  saleSpecUiMode?: TbSaleSpecUiMode;
+  /** 发布页销售规格 UI 文案片段，便于排查 */
+  saleSpecUiText?: string;
 }
+
+export type TbSaleSpecUiMode = 'add-sale-prop' | 'custom-spec' | 'unknown';
 
 /** 淘宝类目信息（SearchCategory 步骤获取） */
 export interface TbCategoryInfo {

@@ -8,7 +8,9 @@ import (
 )
 
 // PxxMapperCategoryRepository pxx分类映射数据访问层
-type PxxMapperCategoryRepository struct{ db.Repository[*PxxMapperCategory] }
+type PxxMapperCategoryRepository struct {
+	db.Repository[*PxxMapperCategory]
+}
 
 func (r *PxxMapperCategoryRepository) EnsureTable() error {
 	if r.Db == nil {
@@ -22,6 +24,9 @@ func (r *PxxMapperCategoryRepository) CountByQuery(query categoryDTO.PxxMapperCa
 		return 0, fmt.Errorf("database is not initialized")
 	}
 	dbQuery := r.Db.Model(&PxxMapperCategory{}).Where("active = ?", 1)
+	if v := strings.TrimSpace(query.SourceProductID); v != "" {
+		dbQuery = dbQuery.Where("source_product_id = ?", v)
+	}
 	if v := strings.TrimSpace(query.PddCatID); v != "" {
 		dbQuery = dbQuery.Where("pdd_cat_id = ?", v)
 	}
@@ -40,6 +45,9 @@ func (r *PxxMapperCategoryRepository) ListByQuery(query categoryDTO.PxxMapperCat
 		return nil, fmt.Errorf("database is not initialized")
 	}
 	dbQuery := r.Db.Model(&PxxMapperCategory{}).Where("active = ?", 1)
+	if v := strings.TrimSpace(query.SourceProductID); v != "" {
+		dbQuery = dbQuery.Where("source_product_id = ?", v)
+	}
 	if v := strings.TrimSpace(query.PddCatID); v != "" {
 		dbQuery = dbQuery.Where("pdd_cat_id = ?", v)
 	}
@@ -64,8 +72,21 @@ func (r *PxxMapperCategoryRepository) FindByPddCatID(pddCatID string) (*PxxMappe
 	return &entity, nil
 }
 
+func (r *PxxMapperCategoryRepository) FindBySourceProductID(sourceProductID string) (*PxxMapperCategory, error) {
+	if r.Db == nil {
+		return nil, fmt.Errorf("database is not initialized")
+	}
+	var entity PxxMapperCategory
+	if err := r.Db.Where("source_product_id = ? AND active = ?", sourceProductID, 1).First(&entity).Error; err != nil {
+		return nil, err
+	}
+	return &entity, nil
+}
+
 // SourceProductTbCategoryRepository 原商品ID到tb分类映射数据访问层
-type SourceProductTbCategoryRepository struct{ db.Repository[*SourceProductTbCategory] }
+type SourceProductTbCategoryRepository struct {
+	db.Repository[*SourceProductTbCategory]
+}
 
 func (r *SourceProductTbCategoryRepository) EnsureTable() error {
 	if r.Db == nil {
@@ -170,4 +191,17 @@ func (r *CategoryRepository) ListByQuery(query categoryDTO.CategoryQueryDTO, pag
 		return nil, err
 	}
 	return entities, nil
+}
+
+func (r *CategoryRepository) FindByCode(code string) (*Category, error) {
+	if r.Db == nil {
+		return nil, fmt.Errorf("database is not initialized")
+	}
+	var entity Category
+	if err := r.Db.Where("code = ? AND active = ?", strings.TrimSpace(code), 1).
+		Order("id DESC").
+		First(&entity).Error; err != nil {
+		return nil, err
+	}
+	return &entity, nil
 }

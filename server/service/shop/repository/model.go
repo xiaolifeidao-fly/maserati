@@ -10,6 +10,7 @@ type Shop struct {
 	AppUserID              uint64     `gorm:"column:app_user_id;type:bigint unsigned;index:idx_app_user_id" description:"客户端用户ID"`
 	Code                   string     `gorm:"column:code;type:varchar(50)" description:"编码"`
 	Name                   string     `gorm:"column:name;type:varchar(50)" description:"名称"`
+	Nickname               string     `gorm:"column:nickname;type:varchar(100)" description:"店铺昵称"`
 	ShopTypeCode           string     `gorm:"column:shop_type_code;type:varchar(50)" description:"商品类型编码"`
 	Platform               string     `gorm:"column:platform;type:varchar(50);index:idx_platform" description:"平台"`
 	Remark                 string     `gorm:"column:remark;type:varchar(255)" description:"备注"`

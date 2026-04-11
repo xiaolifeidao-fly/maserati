@@ -7,7 +7,7 @@ import { CaptchaChecker } from './captcha.step';
 import { publishInfo, summarizeForLog } from '../utils/publish-logger';
 import { getPublishPage } from './fill-draft.step';
 import type { NormalizedTbResponse } from '../utils/tb-publish-api';
-import { publishToTaobao, summarizeTbFailureForResult } from '../utils/tb-publish-api';
+import { deleteTaobaoDraft, publishToTaobao, summarizeTbFailureForResult } from '../utils/tb-publish-api';
 
 /**
  * PublishFinalStep — 最终发布（Step 6）
@@ -81,6 +81,17 @@ export class PublishFinalStep extends PublishStep {
       ctx.set('draftContext', draftCtx);
     }
     ctx.set('publishedItemId', itemId);
+
+    try {
+      await deleteTaobaoDraft(ctx.taskId, ctx.shopId, pageEntry.page, draftCtx);
+    } catch (error) {
+      publishInfo(`[task:${ctx.taskId}] [TB] [delete-draft-after-publish] skipped`, {
+        taskId: ctx.taskId,
+        draftId: draftCtx.draftId,
+        itemId,
+        error: summarizeForLog(error),
+      });
+    }
 
     publishInfo(`[task:${ctx.taskId}] [TB] [submit-item] DONE`, {
       taskId: ctx.taskId,

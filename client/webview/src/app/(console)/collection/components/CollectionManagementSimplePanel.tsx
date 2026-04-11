@@ -25,6 +25,27 @@ interface CollectionFormValues {
   shopId: number;
 }
 
+function formatShopLabel(shop?: {
+  id?: number;
+  nickname?: string;
+  remark?: string;
+  name?: string;
+  code?: string;
+  platform?: string;
+}) {
+  if (!shop) {
+    return "-";
+  }
+
+  const primary = shop.name || shop.code || shop.platform || `店铺 #${shop.id ?? 0}`;
+  const details = [
+    shop.nickname?.trim() ? `昵称：${shop.nickname.trim()}` : "",
+    shop.remark?.trim() ? `备注：${shop.remark.trim()}` : "",
+  ].filter(Boolean);
+
+  return details.length > 0 ? `${primary} · ${details.join(" · ")}` : primary;
+}
+
 function buildBatchSerial(record: Pick<CollectBatchRecord, "id" | "createdTime" | "updatedTime">) {
   const timeSource = record.createdTime || record.updatedTime || "";
   const timePart = timeSource.replace(/\D/g, "").slice(0, 14) || "00000000000000";
@@ -142,17 +163,11 @@ export function CollectionManagementSimplePanel() {
         const shop = shopMap.get(record.shopId);
         return (
           <div>
-            <div>{shop?.remark || shop?.name || shop?.code || shop?.platform || `#${record.shopId}`}</div>
+            <div>{formatShopLabel(shop ?? { id: record.shopId })}</div>
             <div style={{ color: "var(--manager-text-faint)", marginTop: 4 }}>{shop?.platform || "-"}</div>
           </div>
         );
       },
-    },
-    {
-      title: "采集结果",
-      dataIndex: "ossUrl",
-      width: 260,
-      render: (value: string) => <span className="manager-muted">{value || "采集完成后自动生成结果地址"}</span>,
     },
     {
       title: "已采集数",
@@ -242,7 +257,7 @@ export function CollectionManagementSimplePanel() {
               placeholder="所属店铺"
               value={filters.shopId || undefined}
               onChange={(value) => setFilters((current) => ({ ...current, shopId: Number(value || 0) }))}
-              options={shops.map((item) => ({ label: item.remark || item.name || item.code || item.platform, value: item.id }))}
+              options={shops.map((item) => ({ label: formatShopLabel(item), value: item.id }))}
               style={{ width: 180 }}
             />
             <Button
@@ -291,7 +306,7 @@ export function CollectionManagementSimplePanel() {
             showSizeChanger: true,
             onChange: (page, pageSize) => void refresh({ pageIndex: page, pageSize }),
           }}
-          scroll={{ x: 1460 }}
+          scroll={{ x: 1180 }}
         />
       </section>
 
@@ -311,7 +326,7 @@ export function CollectionManagementSimplePanel() {
             <Input placeholder="例如：春季竞品采集批次" />
           </Form.Item>
           <Form.Item name="shopId" label="所属店铺" rules={[{ required: true, message: "请选择所属店铺" }]}>
-            <Select options={shops.map((item) => ({ label: item.remark || item.name || item.code || item.platform, value: item.id }))} />
+            <Select options={shops.map((item) => ({ label: formatShopLabel(item), value: item.id }))} />
           </Form.Item>
           {!editingRecord ? (
             <div className="manager-muted" style={{ marginTop: 4 }}>

@@ -13,6 +13,7 @@ import type {
   UpdatePublishStepPayload,
   PublishTaskQuery,
   PublishProgressEvent,
+  PublishBatchRepublishStats,
 } from '@src/publish/types/publish-task';
 import { StepCode, StepStatus, TaskStatus } from '@src/publish/types/publish-task';
 import type { PageResult } from '@eleapi/commerce/commerce.api';
@@ -142,10 +143,16 @@ export class PublishImpl extends PublishApi {
     return requestBackend<PublishTaskRecord>('GET', `/publish-tasks/${id}`);
   }
 
+  async getPublishBatchRepublishStats(batchId: number): Promise<PublishBatchRepublishStats> {
+    return requestBackend<PublishBatchRepublishStats>('GET', `/publish-tasks/batches/${batchId}/republish-stats`);
+  }
+
   async createPublishTask(payload: CreatePublishTaskPayload): Promise<PublishTaskRecord> {
     const task = await requestBackend<PublishTaskRecord>('POST', '/publish-tasks', { data: payload });
     PublishImpl.syncTask(task, {
-      statusText: '任务已创建，等待开始发布',
+      statusText: task.status === TaskStatus.SUCCESS
+        ? (task.outerItemId ? `商品已发布，商品 #${task.outerItemId}` : '商品已发布，无需重复发布')
+        : '任务已创建，等待开始发布',
     });
     return task;
   }
@@ -224,6 +231,25 @@ export class PublishImpl extends PublishApi {
 
     PublishImpl.runnerMap.set(taskId, runner);
     const task = await this.getPublishTask(taskId);
+    if (task.status === TaskStatus.SUCCESS) {
+      PublishImpl.syncTask(task, {
+        status: TaskStatus.SUCCESS,
+        stepStatus: StepStatus.SUCCESS,
+        statusText: task.outerItemId
+          ? `商品已发布，商品 #${task.outerItemId}`
+          : '商品已发布，无需重复发布',
+      });
+      PublishImpl.syncProgress(taskId, {
+        taskId,
+        stepCode: StepCode.PUBLISH,
+        status: StepStatus.SUCCESS,
+        message: task.outerItemId
+          ? `商品已发布，商品 #${task.outerItemId}`
+          : '商品已发布，无需重复发布',
+      });
+      PublishImpl.runnerMap.delete(taskId);
+      return { started: false };
+    }
     if (!task.currentStepCode && task.sourceProductId) {
       clearPublishProductLogs(task.sourceProductId);
     }

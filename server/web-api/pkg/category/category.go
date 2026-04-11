@@ -32,6 +32,7 @@ func (h *CategoryHandler) RegisterHandler(engine *gin.RouterGroup) {
 	// pxx分类映射
 	engine.GET("/pxx-mapper-categories", h.listPxxMappers)
 	engine.GET("/pxx-mapper-categories/:id", h.getPxxMapperByID)
+	engine.GET("/pxx-mapper-categories/source/:sourceProductId", h.getPxxMapperBySourceProductID)
 	engine.GET("/pxx-mapper-categories/pdd/:pddCatId", h.getPxxMapperByPddCatID)
 	engine.POST("/pxx-mapper-categories", h.createPxxMapper)
 	engine.PUT("/pxx-mapper-categories/:id", h.updatePxxMapper)
@@ -152,6 +153,16 @@ func (h *CategoryHandler) getPxxMapperByPddCatID(c *gin.Context) {
 		return
 	}
 	r, e := h.categoryService.GetPxxMapperByPddCatID(pddCatID)
+	commonRouter.ToJson(c, r, e)
+}
+
+func (h *CategoryHandler) getPxxMapperBySourceProductID(c *gin.Context) {
+	sourceProductID := c.Param("sourceProductId")
+	if sourceProductID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "invalid sourceProductId"})
+		return
+	}
+	r, e := h.categoryService.GetPxxMapperBySourceProductID(sourceProductID)
 	commonRouter.ToJson(c, r, e)
 }
 

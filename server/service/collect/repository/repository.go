@@ -120,3 +120,22 @@ func (r *CollectRecordRepository) ListByQuery(query collectDTO.CollectRecordQuer
 	}
 	return entities, nil
 }
+
+func (r *CollectRecordRepository) CountDistinctFavoriteSourceProductsByBatch(batchID, appUserID uint64) (int64, error) {
+	if r.Db == nil {
+		return 0, fmt.Errorf("database is not initialized")
+	}
+
+	dbQuery := r.Db.Model(&CollectRecord{}).
+		Where("active = ? AND collect_batch_id = ? AND is_favorite = ?", 1, batchID, 1).
+		Where("TRIM(source_product_id) <> ''")
+	if appUserID > 0 {
+		dbQuery = dbQuery.Where("app_user_id = ?", appUserID)
+	}
+
+	var total int64
+	if err := dbQuery.Distinct("source_product_id").Count(&total).Error; err != nil {
+		return 0, err
+	}
+	return total, nil
+}

@@ -71,8 +71,10 @@ const authAdapter = {
         token: session.token,
       });
     } catch {
-      clearAuthSession();
-      return { authenticated: false };
+      return {
+        ...session,
+        authenticated: false,
+      };
     }
   },
 };

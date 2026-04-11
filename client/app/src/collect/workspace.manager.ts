@@ -47,6 +47,10 @@ function getCollectedHtmlDir() {
   return path.join(app.getPath("userData"), "collected-html");
 }
 
+function getDebugRawDataDir() {
+  return path.join(app.getPath("userData"), "debug-rawdata");
+}
+
 function getCollectedHtmlPath(sourceProductId: string, sourceType: CollectSourceType = workspaceState.sourceType || "unknown") {
   return path.join(getCollectedHtmlDir(), `${sourceType}_${sourceProductId}.html`);
 }
@@ -104,6 +108,23 @@ function getStandardProductStoreKey(sourceProductId: string, sourceType: Collect
   return `standard_product_${sourceType}_${sourceProductId}`;
 }
 
+function isNavigationAbortedError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error || "");
+  return message.includes("ERR_ABORTED") || message.includes("(-3)");
+}
+
+async function safeLoadWorkspaceUrl(webContents: Electron.WebContents, url: string) {
+  try {
+    await webContents.loadURL(url);
+  } catch (error) {
+    if (isNavigationAbortedError(error)) {
+      log.info("[collection workspace] navigation aborted", { url, error: String(error) });
+      return;
+    }
+    throw error;
+  }
+}
+
 export function saveStandardProductToStore(sourceProductId: string, data: StandardProductData, sourceType: CollectSourceType): void {
   try {
     setGlobal(getStandardProductStoreKey(sourceProductId, sourceType), data);
@@ -130,6 +151,11 @@ let workspaceRightPanelVisible = true;
 let isScrapingRecord = false;
 let lastScrapedSourceProductId = "";
 let centerDebuggerBoundViewId = 0;
+let currentScrapingContext: {
+  sourceProductId: string;
+  url: string;
+  startedAt: number;
+} | null = null;
 const pendingGoodsResponses = new Map<string, { url: string; resourceType: string; mimeType: string }>();
 const capturedGoodsSummaryById = new Map<string, { productName: string; sourceProductId: string; status: string }>();
 
@@ -310,6 +336,66 @@ function getCurrentDriver() {
   return getCollectionPlatformDriver(workspaceState.sourceType);
 }
 
+function isTbRawPayload(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && (value as Record<string, unknown>).sourceType === "tb");
+}
+
+function mergeCollectedRawData(sourceProductId: string, nextRawData: unknown, sourceType: CollectSourceType) {
+  if (!isTbRawPayload(nextRawData)) {
+    saveRawDataToStore(sourceProductId, nextRawData, sourceType);
+    return;
+  }
+
+  const existing = getCollectedProductRawData(sourceProductId, sourceType);
+  const merged = isTbRawPayload(existing)
+    ? {
+        ...existing,
+        ...nextRawData,
+      }
+    : nextRawData;
+  saveRawDataToStore(sourceProductId, merged, sourceType);
+}
+
+function writeDebugRawDataFile(sourceProductId: string, sourceType: CollectSourceType) {
+  const storedRawData = getCollectedProductRawData(sourceProductId, sourceType);
+  if (!storedRawData) {
+    return;
+  }
+
+  try {
+    const debugDir = getDebugRawDataDir();
+    if (!fs.existsSync(debugDir)) {
+      fs.mkdirSync(debugDir, { recursive: true });
+    }
+    const debugFilePath = path.join(debugDir, `${sourceType}_${sourceProductId}_rawdata.json`);
+    fs.writeFileSync(debugFilePath, JSON.stringify(storedRawData, null, 2), "utf8");
+
+    const tbRawData = storedRawData as Record<string, unknown>;
+    const hasDetailData = Boolean(tbRawData?.detailData);
+    const hasDescData = Boolean(tbRawData?.descData);
+    const detailImageCount = hasDescData
+      ? Object.keys((((tbRawData.descData as Record<string, unknown> | undefined)?.components as Record<string, unknown> | undefined)?.componentData as Record<string, unknown> | undefined) ?? {}).length
+      : 0;
+
+    log.info("[collection workspace][DEBUG] raw data written to file", {
+      sourceProductId,
+      sourceType,
+      debugDir,
+      debugFilePath,
+      hasDetailData,
+      hasDescData,
+      detailImageComponentCount: detailImageCount,
+    });
+  } catch (debugErr) {
+    log.warn("[collection workspace][DEBUG] failed to write raw data file", {
+      sourceProductId,
+      sourceType,
+      debugDir: getDebugRawDataDir(),
+      error: debugErr,
+    });
+  }
+}
+
 function normalizeWorkspaceUrl(url: string | undefined) {
   const normalized = String(url || "").trim();
   const homeUrl = getCurrentDriver().homeUrl;
@@ -327,13 +413,31 @@ function normalizeWorkspaceUrl(url: string | undefined) {
 
 async function waitForCapturedGoodsSummary(sourceProductId: string, timeoutMs = 10000) {
   const startedAt = Date.now();
+  log.info("[collection workspace] waiting captured goods summary", {
+    sourceProductId,
+    timeoutMs,
+    capturedCount: capturedGoodsSummaryById.size,
+    pendingResponseCount: pendingGoodsResponses.size,
+  });
   while (Date.now() - startedAt < timeoutMs) {
     const summary = capturedGoodsSummaryById.get(sourceProductId);
     if (summary) {
+      log.info("[collection workspace] captured goods summary ready", {
+        sourceProductId,
+        waitedMs: Date.now() - startedAt,
+        productName: summary.productName,
+        status: summary.status,
+      });
       return summary;
     }
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
+  log.warn("[collection workspace] waiting captured goods summary timed out", {
+    sourceProductId,
+    timeoutMs,
+    capturedKeys: Array.from(capturedGoodsSummaryById.keys()),
+    pendingResponseCount: pendingGoodsResponses.size,
+  });
   return null;
 }
 
@@ -343,11 +447,30 @@ function clearCapturedGoodsState() {
 }
 
 function isGoodsResponseCandidate(url: string, resourceType: string) {
-  if (!url || !["Document", "XHR", "Fetch"].includes(resourceType)) {
+  if (!url || !["Document", "XHR", "Fetch", "Script"].includes(resourceType)) {
     return false;
   }
 
   return Boolean(getCurrentDriver().extractSourceProductId(url));
+}
+
+function shouldLogFilteredGoodsResponse(url: string, resourceType: string) {
+  if (!currentScrapingContext || !url) {
+    return false;
+  }
+  if (!["Document", "XHR", "Fetch", "Script"].includes(resourceType)) {
+    return false;
+  }
+  if (url.includes(currentScrapingContext.sourceProductId)) {
+    return true;
+  }
+
+  try {
+    const parsed = new URL(url);
+    return /yangkeduo\.com$/i.test(parsed.hostname);
+  } catch (_error) {
+    return false;
+  }
 }
 
 async function handleCenterDebuggerMessage(view: BrowserView, method: string, params: any) {
@@ -360,6 +483,15 @@ async function handleCenterDebuggerMessage(view: BrowserView, method: string, pa
     const responseUrl = String(params?.response?.url || "");
     const resourceType = String(params?.type || "");
     if (!requestId || !isGoodsResponseCandidate(responseUrl, resourceType)) {
+      if (requestId && shouldLogFilteredGoodsResponse(responseUrl, resourceType)) {
+        log.info("[collection workspace] filtered non-candidate response while scraping", {
+          requestId,
+          responseUrl,
+          resourceType,
+          currentScrapingSourceProductId: currentScrapingContext?.sourceProductId,
+          extractedSourceProductId: getCurrentDriver().extractSourceProductId(responseUrl),
+        });
+      }
       return;
     }
 
@@ -367,6 +499,12 @@ async function handleCenterDebuggerMessage(view: BrowserView, method: string, pa
       url: responseUrl,
       resourceType,
       mimeType: String(params?.response?.mimeType || ""),
+    });
+    log.info("[collection workspace] tracked candidate response", {
+      requestId,
+      resourceType,
+      responseUrl,
+      pendingResponseCount: pendingGoodsResponses.size,
     });
     return;
   }
@@ -386,6 +524,12 @@ async function handleCenterDebuggerMessage(view: BrowserView, method: string, pa
     return;
   }
   pendingGoodsResponses.delete(requestId);
+  log.info("[collection workspace] candidate response finished", {
+    requestId,
+    url: meta.url,
+    resourceType: meta.resourceType,
+    pendingResponseCount: pendingGoodsResponses.size,
+  });
 
   try {
     const result = await view.webContents.debugger.sendCommand("Network.getResponseBody", { requestId }) as {
@@ -394,12 +538,35 @@ async function handleCenterDebuggerMessage(view: BrowserView, method: string, pa
     };
     const rawBody = String(result?.body || "");
     const body = result?.base64Encoded ? Buffer.from(rawBody, "base64").toString("utf8") : rawBody;
+    const sourceProductIdFromUrl = getCurrentDriver().extractSourceProductId(meta.url);
+    const rawData = getCurrentDriver().extractRawDataFromResponse(meta.url, meta.mimeType, body);
+    if (sourceProductIdFromUrl && rawData) {
+      mergeCollectedRawData(sourceProductIdFromUrl, rawData, workspaceState.sourceType);
+      writeDebugRawDataFile(sourceProductIdFromUrl, workspaceState.sourceType);
+      await renderSidePanes();
+    }
+
     const parsed = getCurrentDriver().parseGoodsSummaryFromResponse(meta.url, meta.mimeType, body);
     if (!parsed?.sourceProductId) {
+      log.info("[collection workspace] response body parsed without goods summary", {
+        requestId,
+        url: meta.url,
+        mimeType: meta.mimeType,
+        sourceProductIdFromUrl,
+        hasRawData: Boolean(rawData),
+      });
       return;
     }
 
     capturedGoodsSummaryById.set(parsed.sourceProductId, parsed);
+    log.info("[collection workspace] parsed goods summary from response", {
+      requestId,
+      sourceProductId: parsed.sourceProductId,
+      productName: parsed.productName,
+      status: parsed.status,
+      resourceType: meta.resourceType,
+      capturedCount: capturedGoodsSummaryById.size,
+    });
 
     // Save parsed goods data to electron-store
     saveCollectedProductToStore(parsed.sourceProductId, {
@@ -410,7 +577,7 @@ async function handleCenterDebuggerMessage(view: BrowserView, method: string, pa
       capturedAt: new Date().toISOString(),
     }, workspaceState.sourceType);
 
-    if (meta.resourceType === "Document" && body.trim()) {
+    if (workspaceState.sourceType !== "tb" && meta.resourceType === "Document" && body.trim()) {
       const dir = getCollectedHtmlDir();
       if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, { recursive: true });
@@ -425,23 +592,11 @@ async function handleCenterDebuggerMessage(view: BrowserView, method: string, pa
           log.info("[collection workspace] saved product html to file", { sourceProductId: parsed.sourceProductId });
         }
       });
-      const rawData = getCurrentDriver().extractRawDataFromResponse(meta.url, meta.mimeType, body);
-      if (rawData) {
-        saveRawDataToStore(parsed.sourceProductId, rawData, workspaceState.sourceType);
+    }
 
-        // DEBUG: 将原始 JSON 写到文件，方便排查属性解析问题
-        try {
-          const debugDir = path.join(app.getPath("userData"), "debug-rawdata");
-          if (!fs.existsSync(debugDir)) {
-            fs.mkdirSync(debugDir, { recursive: true });
-          }
-          const debugFilePath = path.join(debugDir, `${workspaceState.sourceType}_${parsed.sourceProductId}_rawdata.json`);
-          fs.writeFileSync(debugFilePath, JSON.stringify(rawData, null, 2), "utf8");
-          log.info("[collection workspace][DEBUG] raw data written to file", { path: debugFilePath });
-        } catch (debugErr) {
-          log.warn("[collection workspace][DEBUG] failed to write raw data file", debugErr);
-        }
-      }
+    if (rawData && parsed.sourceProductId !== sourceProductIdFromUrl) {
+      mergeCollectedRawData(parsed.sourceProductId, rawData, workspaceState.sourceType);
+      writeDebugRawDataFile(parsed.sourceProductId, workspaceState.sourceType);
     }
 
     // Always trigger collection — covers cases where did-navigate didn't fire (PDD SPA in-page nav).
@@ -493,7 +648,12 @@ async function pushRecordToTestingBridge(record: CollectRecordPreview) {
 
 async function collectCurrentGoods(url: string) {
   if (isScrapingRecord) {
-    log.info("[collection workspace] collectCurrentGoods skipped: already scraping", { url });
+    log.info("[collection workspace] collectCurrentGoods skipped: already scraping", {
+      url,
+      currentScrapingSourceProductId: currentScrapingContext?.sourceProductId,
+      currentScrapingUrl: currentScrapingContext?.url,
+      scrapingElapsedMs: currentScrapingContext ? Date.now() - currentScrapingContext.startedAt : null,
+    });
     return;
   }
 
@@ -513,9 +673,16 @@ async function collectCurrentGoods(url: string) {
     sourceProductId,
     batchId: workspaceState.batch?.id,
     appUserId: workspaceState.batch?.appUserId,
+    pendingResponseCount: pendingGoodsResponses.size,
+    capturedCount: capturedGoodsSummaryById.size,
   });
 
   isScrapingRecord = true;
+  currentScrapingContext = {
+    sourceProductId,
+    url,
+    startedAt: Date.now(),
+  };
   const tempId = -(Date.now());
   try {
     const summary = await waitForCapturedGoodsSummary(sourceProductId);
@@ -532,6 +699,17 @@ async function collectCurrentGoods(url: string) {
       productName: summary.productName,
       status: summary.status,
     });
+
+    if (workspaceState.sourceType === "tb") {
+      const tbRawWaitStart = Date.now();
+      while (Date.now() - tbRawWaitStart < 2500) {
+        const tbRawData = getCollectedProductRawData(summary.sourceProductId, workspaceState.sourceType) as Record<string, unknown> | null;
+        if (tbRawData?.detailData && tbRawData?.descData) {
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 200));
+      }
+    }
 
     const notifyCtx = {
       batchId: workspaceState.batch.id,
@@ -563,13 +741,31 @@ async function collectCurrentGoods(url: string) {
     lastScrapedSourceProductId = summary.sourceProductId;
     await renderSidePanes();
     await pushRecordToTestingBridge(savedRecord);
+    log.info("[collection workspace] collectCurrentGoods finished", {
+      sourceProductId: summary.sourceProductId,
+      savedRecordId: savedRecord.id,
+      durationMs: currentScrapingContext ? Date.now() - currentScrapingContext.startedAt : null,
+    });
   } catch (error) {
     // 出错时移除占位 record，避免 UI 卡住
     workspaceState.records = workspaceState.records.filter((item) => item.id !== tempId);
     await renderSidePanes();
-    log.warn("[collection workspace] failed to collect current goods", error);
+    log.warn("[collection workspace] failed to collect current goods", {
+      error,
+      sourceProductId,
+      url,
+      durationMs: currentScrapingContext ? Date.now() - currentScrapingContext.startedAt : null,
+    });
   } finally {
+    log.info("[collection workspace] collectCurrentGoods cleanup", {
+      sourceProductId,
+      url,
+      durationMs: currentScrapingContext ? Date.now() - currentScrapingContext.startedAt : null,
+      pendingResponseCount: pendingGoodsResponses.size,
+      capturedCount: capturedGoodsSummaryById.size,
+    });
     isScrapingRecord = false;
+    currentScrapingContext = null;
   }
 }
 
@@ -579,6 +775,11 @@ async function handleCenterNavigation(url: string) {
   }
 
   if (getCurrentDriver().extractSourceProductId(url)) {
+    log.info("[collection workspace] center navigation matched goods detail", {
+      url,
+      sourceProductId: getCurrentDriver().extractSourceProductId(url),
+      isScrapingRecord,
+    });
     await collectCurrentGoods(url);
   }
 }
@@ -595,6 +796,14 @@ function bindCenterViewEvents(view: BrowserView) {
   view.webContents.on("did-navigate", onNavigation);
   view.webContents.on("did-navigate-in-page", onNavigation);
   view.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL) => {
+    if (errorCode === -3) {
+      log.info("[collection workspace] center view navigation aborted", {
+        errorCode,
+        errorDescription,
+        validatedURL,
+      });
+      return;
+    }
     log.error("[collection workspace] center view load failed", {
       errorCode,
       errorDescription,
@@ -613,7 +822,7 @@ function bindCenterWindowOpenHandler(view: BrowserView) {
       return { action: "deny" };
     }
 
-    void view.webContents.loadURL(nextUrl).catch((error) => {
+    void safeLoadWorkspaceUrl(view.webContents, nextUrl).catch((error) => {
       log.warn("[collection workspace] failed to reuse center view for opened url", {
         url: nextUrl,
         error,
@@ -741,7 +950,7 @@ export async function openCollectionWorkspace(options: OpenCollectionWorkspaceOp
     await applyOriginStorage(workspaceViews.center, options.originStorage);
   }
 
-  await workspaceViews.center.webContents.loadURL(normalizeWorkspaceUrl(options.initialUrl));
+  await safeLoadWorkspaceUrl(workspaceViews.center.webContents, normalizeWorkspaceUrl(options.initialUrl));
   await renderSidePanes();
 
   if (workspaceWindow.isMinimized()) {
@@ -760,15 +969,38 @@ export function getCollectionWorkspaceState() {
 export async function selectCollectionWorkspaceRecord(recordId: number) {
   const nextId = Number(recordId) || workspaceState.records[0]?.id || 0;
   workspaceState.selectedRecordId = nextId;
+
+  const record = workspaceState.records.find((item) => item.id === nextId);
+  if (workspaceState.sourceType === "tb" && nextId > 0) {
+    workspaceRightPanelVisible = true;
+    syncViewBounds();
+
+    if (record?.sourceSnapshotUrl && workspaceViews?.center && !workspaceViews.center.webContents.isDestroyed()) {
+      try {
+        await safeLoadWorkspaceUrl(workspaceViews.center.webContents, record.sourceSnapshotUrl);
+        log.info("[collection workspace] loaded original tb source url for record", {
+          recordId: nextId,
+          sourceProductId: record.sourceProductId,
+          sourceSnapshotUrl: record.sourceSnapshotUrl,
+        });
+      } catch (error) {
+        log.warn("[collection workspace] failed to load original tb source url", {
+          recordId: nextId,
+          sourceSnapshotUrl: record.sourceSnapshotUrl,
+          error,
+        });
+      }
+    }
+  }
+
   await renderSidePanes();
 
   // Load local HTML snapshot in center view if available
-  const record = workspaceState.records.find((item) => item.id === nextId);
-  if (record?.sourceProductId && workspaceViews?.center && !workspaceViews.center.webContents.isDestroyed()) {
+  if (workspaceState.sourceType !== "tb" && record?.sourceProductId && workspaceViews?.center && !workspaceViews.center.webContents.isDestroyed()) {
     const htmlPath = getCollectedHtmlPath(record.sourceProductId, workspaceState.sourceType);
     if (fs.existsSync(htmlPath)) {
       try {
-        await workspaceViews.center.webContents.loadURL(`file://${htmlPath}`);
+        await safeLoadWorkspaceUrl(workspaceViews.center.webContents, `file://${htmlPath}`);
         log.info("[collection workspace] loaded local html snapshot for record", {
           recordId: nextId,
           sourceProductId: record.sourceProductId,
@@ -805,17 +1037,19 @@ export async function previewCollectedRecord(sourceProductId: string, sourceType
     throw new Error("采集工作台尚未打开");
   }
 
-  const htmlPath = getCollectedHtmlPath(sourceProductId, sourceType);
-  if (fs.existsSync(htmlPath)) {
-    await workspaceViews.center.webContents.loadURL(`file://${htmlPath}`);
-    log.info("[collection workspace] preview loaded local html", { sourceProductId, htmlPath });
-    return { success: true, url: `file://${htmlPath}` };
+  if (sourceType !== "tb") {
+    const htmlPath = getCollectedHtmlPath(sourceProductId, sourceType);
+    if (fs.existsSync(htmlPath)) {
+      await safeLoadWorkspaceUrl(workspaceViews.center.webContents, `file://${htmlPath}`);
+      log.info("[collection workspace] preview loaded local html", { sourceProductId, htmlPath });
+      return { success: true, url: `file://${htmlPath}` };
+    }
   }
 
   // Fallback: load the original source URL if available
   const record = workspaceState.records.find((item) => item.sourceProductId === sourceProductId);
   if (record?.sourceSnapshotUrl) {
-    await workspaceViews.center.webContents.loadURL(record.sourceSnapshotUrl);
+    await safeLoadWorkspaceUrl(workspaceViews.center.webContents, record.sourceSnapshotUrl);
     return { success: true, url: record.sourceSnapshotUrl };
   }
 
@@ -861,7 +1095,7 @@ export async function navigateCollectionWorkspace(action: "back" | "forward" | "
       }
       break;
     case "home":
-      await webContents.loadURL(getCurrentDriver().homeUrl);
+      await safeLoadWorkspaceUrl(webContents, getCurrentDriver().homeUrl);
       break;
     case "refresh":
       webContents.reload();

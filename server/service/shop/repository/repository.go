@@ -44,7 +44,7 @@ func (r *ShopRepository) CountByQuery(query shopDTO.ShopQueryDTO) (int64, error)
 		dbQuery = dbQuery.Where("code LIKE ?", "%"+value+"%")
 	}
 	if value := strings.TrimSpace(query.Name); value != "" {
-		dbQuery = dbQuery.Where("(name LIKE ? OR remark LIKE ?)", "%"+value+"%", "%"+value+"%")
+		dbQuery = dbQuery.Where("(name LIKE ? OR nickname LIKE ? OR remark LIKE ?)", "%"+value+"%", "%"+value+"%", "%"+value+"%")
 	}
 	if value := strings.TrimSpace(query.Platform); value != "" {
 		dbQuery = dbQuery.Where("platform = ?", value)
@@ -83,7 +83,7 @@ func (r *ShopRepository) ListByQuery(query shopDTO.ShopQueryDTO, pageIndex, page
 		dbQuery = dbQuery.Where("code LIKE ?", "%"+value+"%")
 	}
 	if value := strings.TrimSpace(query.Name); value != "" {
-		dbQuery = dbQuery.Where("(name LIKE ? OR remark LIKE ?)", "%"+value+"%", "%"+value+"%")
+		dbQuery = dbQuery.Where("(name LIKE ? OR nickname LIKE ? OR remark LIKE ?)", "%"+value+"%", "%"+value+"%", "%"+value+"%")
 	}
 	if value := strings.TrimSpace(query.Platform); value != "" {
 		dbQuery = dbQuery.Where("platform = ?", value)

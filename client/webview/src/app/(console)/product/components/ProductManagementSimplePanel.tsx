@@ -2,14 +2,31 @@
 
 import { useMemo, useState } from "react";
 import { DeleteOutlined, EditOutlined, PlayCircleOutlined, ReloadOutlined, SearchOutlined } from "@ant-design/icons";
-import { Button, Drawer, Descriptions, Form, Input, Modal, Popconfirm, Select, Space, Table, Tag, message } from "antd";
+import { Button, Form, Input, Modal, Popconfirm, Select, Space, Table, Tag, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { type ProductPayload, type ProductRecord } from "../api/product.api";
 import { useProductManagement } from "../hooks/useProductManagement";
+import {
+  fetchCollectBatch,
+  fetchCollectRecord,
+  getCollectedProductRawData,
+  normalizeCollectSourceType,
+  saveStandardProductData,
+  type CollectSourceType,
+} from "@/app/(console)/collection/api/collection.api";
+import { ProductDetailEditor } from "@/app/(console)/collection/components/ProductDetailEditor";
+import { convertRawDataToStandard, type StandardProductData } from "@/app/(console)/collection/components/standard-product.types";
 import { formatDateTime } from "@/utils/format";
 import { getPublishWindowApi } from "@/utils/publish-window";
 
 interface ProductFormValues extends ProductPayload {}
+
+const PRODUCT_STATUS_LABELS: Record<string, { label: string; color: string }> = {
+  DRAFT: { label: "草稿", color: "gold" },
+  PUBLISHED: { label: "已发布", color: "green" },
+  OFFLINE: { label: "已下线", color: "default" },
+  ARCHIVED: { label: "已归档", color: "default" },
+};
 
 export function ProductManagementSimplePanel() {
   const [form] = Form.useForm<ProductFormValues>();
@@ -23,11 +40,17 @@ export function ProductManagementSimplePanel() {
     status: "",
   });
   const [modalOpen, setModalOpen] = useState(false);
-  const [previewRecord, setPreviewRecord] = useState<ProductRecord | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewingRecordId, setPreviewingRecordId] = useState(0);
+  const [detailModalOpen, setDetailModalOpen] = useState(false);
+  const [detailTitle, setDetailTitle] = useState("");
+  const [detailSourceProductId, setDetailSourceProductId] = useState("");
+  const [detailSourceType, setDetailSourceType] = useState<CollectSourceType>("unknown");
+  const [detailData, setDetailData] = useState<StandardProductData | null>(null);
   const [editingRecord, setEditingRecord] = useState<ProductRecord | null>(null);
 
   const shopNameMap = useMemo(
-    () => new Map(safeShops.map((item) => [item.id, item.remark || item.name || item.code || item.platform])),
+    () => new Map(safeShops.map((item) => [item.id, item.remark || item.nickname || item.name || item.code || item.platform])),
     [safeShops],
   );
   const categoryNameMap = useMemo(
@@ -47,8 +70,50 @@ export function ProductManagementSimplePanel() {
     setModalOpen(true);
   };
 
-  const openPreviewDrawer = (record: ProductRecord) => {
-    setPreviewRecord(record);
+  const openPreviewModal = async (record: ProductRecord) => {
+    if (!record.collectRecordId) {
+      message.warning("该商品没有关联采集记录，暂时无法打开采集详情");
+      return;
+    }
+
+    setPreviewLoading(true);
+    setPreviewingRecordId(record.id);
+    try {
+      const collectRecord = await fetchCollectRecord(record.collectRecordId);
+      if (!collectRecord.sourceProductId) {
+        throw new Error("关联采集商品缺少源商品ID");
+      }
+
+      if (!collectRecord.collectBatchId) {
+        throw new Error("关联采集批次不存在");
+      }
+
+      const batch = await fetchCollectBatch(collectRecord.collectBatchId);
+      const shop = safeShops.find((item) => item.id === batch.shopId);
+      const sourceType = normalizeCollectSourceType(shop?.platform);
+      const rawData = await getCollectedProductRawData(collectRecord.sourceProductId, sourceType);
+
+      if (!rawData || typeof rawData !== "object") {
+        throw new Error("未找到该商品的采集详情数据");
+      }
+
+      setDetailTitle(record.title || collectRecord.productName || `商品 #${record.id}`);
+      setDetailSourceProductId(collectRecord.sourceProductId);
+      setDetailSourceType(sourceType);
+      setDetailData(
+        convertRawDataToStandard(sourceType, rawData as Record<string, unknown>, {
+          productName: collectRecord.productName || record.title,
+          sourceProductId: collectRecord.sourceProductId,
+          sourceUrl: collectRecord.sourceSnapshotUrl,
+        }),
+      );
+      setDetailModalOpen(true);
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "加载采集详情失败");
+    } finally {
+      setPreviewLoading(false);
+      setPreviewingRecordId(0);
+    }
   };
 
   const handleSubmit = async () => {
@@ -98,7 +163,11 @@ export function ProductManagementSimplePanel() {
       title: "状态",
       dataIndex: "status",
       width: 120,
-      render: (value: string) => <Tag color={value === "PUBLISHED" ? "green" : value === "DRAFT" ? "gold" : "default"}>{value || "DRAFT"}</Tag>,
+      render: (value: string) => {
+        const normalized = String(value || "DRAFT").toUpperCase();
+        const status = PRODUCT_STATUS_LABELS[normalized] || { label: normalized || "草稿", color: "default" };
+        return <Tag color={status.color}>{status.label}</Tag>;
+      },
     },
     {
       title: "更新时间",
@@ -113,7 +182,7 @@ export function ProductManagementSimplePanel() {
       width: 200,
       render: (_, record) => (
         <Space size={2}>
-          <Button type="text" onClick={() => openPreviewDrawer(record)}>
+          <Button type="text" loading={previewLoading && previewingRecordId === record.id} onClick={() => void openPreviewModal(record)}>
             预览
           </Button>
           <Button type="text" icon={<EditOutlined />} onClick={() => openEditModal(record)} />
@@ -154,7 +223,7 @@ export function ProductManagementSimplePanel() {
               placeholder="所属店铺"
               value={filters.shopId || undefined}
               onChange={(value) => setFilters((current) => ({ ...current, shopId: Number(value || 0) }))}
-              options={safeShops.map((item) => ({ label: item.remark || item.name || item.code || item.platform, value: item.id }))}
+              options={safeShops.map((item) => ({ label: item.remark || item.nickname || item.name || item.code || item.platform, value: item.id }))}
               style={{ width: 160 }}
             />
             <Select
@@ -219,6 +288,25 @@ export function ProductManagementSimplePanel() {
       </section>
 
       <Modal
+        title={detailTitle ? `商品详情预览 · ${detailTitle}` : "商品详情预览"}
+        open={detailModalOpen}
+        onCancel={() => {
+          setDetailModalOpen(false);
+          setDetailTitle("");
+          setDetailSourceProductId("");
+          setDetailSourceType("unknown");
+          setDetailData(null);
+        }}
+        footer={null}
+        width="82vw"
+        style={{ top: 24 }}
+        styles={{ body: { minHeight: "72vh", maxHeight: "72vh", overflow: "auto", paddingTop: 12 } }}
+        destroyOnClose
+      >
+        <ProductDetailEditor data={detailData} loading={previewLoading} readonly />
+      </Modal>
+
+      <Modal
         title="编辑商品"
         open={modalOpen}
         onCancel={() => {
@@ -237,7 +325,7 @@ export function ProductManagementSimplePanel() {
             <Input placeholder="例如：SPF-2026-001" />
           </Form.Item>
           <Form.Item name="shopId" label="所属店铺" rules={[{ required: true, message: "请选择所属店铺" }]}>
-            <Select options={safeShops.map((item) => ({ label: item.remark || item.name || item.code || item.platform, value: item.id }))} />
+            <Select options={safeShops.map((item) => ({ label: item.remark || item.nickname || item.name || item.code || item.platform, value: item.id }))} />
           </Form.Item>
           <Form.Item name="categoryId" label="所属分类" rules={[{ required: true, message: "请选择所属分类" }]}>
             <Select options={safeCategories.map((item) => ({ label: item.name || item.code, value: item.id }))} />
@@ -254,61 +342,6 @@ export function ProductManagementSimplePanel() {
           </Form.Item>
         </Form>
       </Modal>
-
-      <Drawer
-        title="商品预览"
-        placement="right"
-        width={480}
-        open={Boolean(previewRecord)}
-        onClose={() => setPreviewRecord(null)}
-      >
-        {previewRecord ? (
-          <Space direction="vertical" size={20} style={{ width: "100%" }}>
-            <div
-              style={{
-                padding: 20,
-                borderRadius: 16,
-                background: "linear-gradient(135deg, rgba(170,192,238,0.22), rgba(255,255,255,0.92))",
-                border: "1px solid rgba(170,192,238,0.35)",
-              }}
-            >
-              <div style={{ fontSize: 12, color: "var(--manager-text-faint)", marginBottom: 8 }}>商品标题</div>
-              <div style={{ fontSize: 22, fontWeight: 700, color: "var(--manager-text)", lineHeight: 1.4 }}>
-                {previewRecord.title || "-"}
-              </div>
-              <div style={{ marginTop: 16 }}>
-                <Tag color={previewRecord.status === "PUBLISHED" ? "green" : previewRecord.status === "DRAFT" ? "gold" : "default"}>
-                  {previewRecord.status || "DRAFT"}
-                </Tag>
-              </div>
-            </div>
-
-            <Descriptions column={1} size="middle" bordered>
-              <Descriptions.Item label="商品ID">{previewRecord.id}</Descriptions.Item>
-              <Descriptions.Item label="外部商品ID">{previewRecord.outerProductId || "-"}</Descriptions.Item>
-              <Descriptions.Item label="所属店铺">
-                {shopNameMap.get(previewRecord.shopId) || `#${previewRecord.shopId}`}
-              </Descriptions.Item>
-              <Descriptions.Item label="所属分类">
-                {categoryNameMap.get(previewRecord.categoryId) || `#${previewRecord.categoryId}`}
-              </Descriptions.Item>
-              <Descriptions.Item label="更新时间">{formatDateTime(previewRecord.updatedTime)}</Descriptions.Item>
-            </Descriptions>
-
-            <Space>
-              <Button
-                type="primary"
-                onClick={() => {
-                  setPreviewRecord(null);
-                  openEditModal(previewRecord);
-                }}
-              >
-                编辑商品
-              </Button>
-            </Space>
-          </Space>
-        ) : null}
-      </Drawer>
 
     </div>
   );

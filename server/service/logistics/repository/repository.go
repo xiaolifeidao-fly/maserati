@@ -75,24 +75,24 @@ func (r *AddressTemplateRepository) EnsureTable() error {
 	return r.Db.AutoMigrate(&AddressTemplate{})
 }
 
-func (r *AddressTemplateRepository) ListByUserID(userID string) ([]*AddressTemplate, error) {
+func (r *AddressTemplateRepository) ListByPlatformShopID(platformShopID string) ([]*AddressTemplate, error) {
 	if r.Db == nil {
 		return nil, fmt.Errorf("database is not initialized")
 	}
 	var entities []*AddressTemplate
-	if err := r.Db.Where("user_id = ? AND active = ?", userID, 1).
+	if err := r.Db.Where("platform_shop_id = ? AND active = ?", platformShopID, 1).
 		Order("id DESC").Find(&entities).Error; err != nil {
 		return nil, err
 	}
 	return entities, nil
 }
 
-func (r *AddressTemplateRepository) FindByUserAndAddress(userID string, addressID uint64) (*AddressTemplate, error) {
+func (r *AddressTemplateRepository) FindByShopAndAddress(platformShopID string, addressID uint64) (*AddressTemplate, error) {
 	if r.Db == nil {
 		return nil, fmt.Errorf("database is not initialized")
 	}
 	var entity AddressTemplate
-	if err := r.Db.Where("user_id = ? AND address_id = ? AND active = ?", userID, addressID, 1).
+	if err := r.Db.Where("platform_shop_id = ? AND address_id = ? AND active = ?", platformShopID, addressID, 1).
 		First(&entity).Error; err != nil {
 		return nil, err
 	}

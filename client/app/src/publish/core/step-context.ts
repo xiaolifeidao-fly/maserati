@@ -1,7 +1,7 @@
 import type { TbCategoryInfo, TbDraftContext, TbUploadedImageMeta } from '../types/draft';
 import type { NormalizedProduct } from '../types/source-data';
 import type { RawSourceData } from '../types/source-data';
-import type { SourceType } from '../types/publish-task';
+import type { PublishConfig, SourceType } from '../types/publish-task';
 
 /**
  * StepContext 保存整个发布流程中步骤间共享的中间状态。
@@ -14,6 +14,8 @@ export interface StepContextSnapshot {
   sourceType?: SourceType;
   /** 源商品 ID（从任务记录注入，用于 draft 保存等需要 sourceProductId 的步骤） */
   sourceProductId?: string;
+  /** 发布配置（价格调整、发布策略） */
+  publishConfig?: PublishConfig;
   // ── Step 1: ParseSource 产出 ──────────────────────────────────
   rawSource?: RawSourceData;
   product?: NormalizedProduct;
@@ -24,6 +26,8 @@ export interface StepContextSnapshot {
   uploadedDetailImages?: string[];
   /** 详情图云端元信息（宽高/size/imageId） */
   uploadedDetailImageMetas?: TbUploadedImageMeta[];
+  /** SKU 图片原始 URL → 云端 URL 映射 */
+  uploadedSkuImageMap?: Record<string, string>;
   /** 本地路径 → 云端 URL 映射（去重复用） */
   imageUrlMap?: Record<string, string>;
   // ── Step 3: SearchCategory 产出 ──────────────────────────────

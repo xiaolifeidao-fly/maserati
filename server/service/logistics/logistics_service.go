@@ -140,11 +140,11 @@ func (s *LogisticsService) DeleteAddress(id uint) error {
 
 // ─── AddressTemplate CRUD ─────────────────────────────────────────────────────
 
-func (s *LogisticsService) ListTemplatesByUserID(userID string) ([]*logisticsDTO.AddressTemplateDTO, error) {
-	if strings.TrimSpace(userID) == "" {
-		return nil, fmt.Errorf("userId is required")
+func (s *LogisticsService) ListTemplatesByPlatformShopID(platformShopID string) ([]*logisticsDTO.AddressTemplateDTO, error) {
+	if strings.TrimSpace(platformShopID) == "" {
+		return nil, fmt.Errorf("platformShopId is required")
 	}
-	entities, err := s.templateRepository.ListByUserID(userID)
+	entities, err := s.templateRepository.ListByPlatformShopID(platformShopID)
 	if err != nil {
 		return nil, err
 	}
@@ -166,8 +166,8 @@ func (s *LogisticsService) CreateTemplate(req *logisticsDTO.CreateAddressTemplat
 	if req == nil {
 		return nil, fmt.Errorf("request is nil")
 	}
-	if strings.TrimSpace(req.UserID) == "" {
-		return nil, fmt.Errorf("userId is required")
+	if strings.TrimSpace(req.PlatformShopID) == "" {
+		return nil, fmt.Errorf("platformShopId is required")
 	}
 	if req.AddressID == 0 {
 		return nil, fmt.Errorf("addressId is required")
@@ -184,9 +184,9 @@ func (s *LogisticsService) CreateTemplate(req *logisticsDTO.CreateAddressTemplat
 		return nil, fmt.Errorf("address not found")
 	}
 	entity, err := s.templateRepository.Create(&logisticsRepository.AddressTemplate{
-		UserID:     strings.TrimSpace(req.UserID),
-		AddressID:  req.AddressID,
-		TemplateID: strings.TrimSpace(req.TemplateID),
+		PlatformShopID: strings.TrimSpace(req.PlatformShopID),
+		AddressID:      req.AddressID,
+		TemplateID:     strings.TrimSpace(req.TemplateID),
 	})
 	if err != nil {
 		return nil, err

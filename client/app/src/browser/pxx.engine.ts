@@ -161,6 +161,7 @@ function buildShopLoginPayload(shop: ShopRecord, rawData: unknown): ShopLoginPay
     shopId: shop.id > 0 ? shop.id : undefined,
     appUserId: shop.appUserId > 0 ? shop.appUserId : undefined,
     name,
+    nickname: name,
     code: shop.code || platformShopId,
     platform: "pxx",
     platformShopId: normalizedPlatformShopId,

@@ -8,7 +8,6 @@ type Product struct {
 	ShopID          uint64 `gorm:"column:shop_id;type:bigint unsigned;index:idx_shop_id" description:"店铺ID"`
 	CategoryID      uint64 `gorm:"column:category_id;type:bigint unsigned;index:idx_category_id" description:"分类ID"`
 	CollectRecordID uint64 `gorm:"column:collect_record_id;type:bigint unsigned;index:idx_collect_record_id" description:"采集记录ID"`
-	PublishRecordID uint64 `gorm:"column:publish_record_id;type:bigint unsigned;index:idx_publish_record_id" description:"发布记录ID"`
 	Title           string `gorm:"column:title;type:varchar(255)" description:"商品标题"`
 	OuterProductID  string `gorm:"column:outer_product_id;type:varchar(128);index:idx_outer_product_id" description:"外部商品ID"`
 	Status          string `gorm:"column:status;type:varchar(32)" description:"状态"`

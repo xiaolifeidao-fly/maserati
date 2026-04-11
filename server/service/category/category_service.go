@@ -13,9 +13,9 @@ import (
 )
 
 type CategoryService struct {
-	categoryRepository         *categoryRepository.CategoryRepository
-	platformRepository         *platformRepository.PlatformRepository
-	pxxMapperRepository        *categoryRepository.PxxMapperCategoryRepository
+	categoryRepository           *categoryRepository.CategoryRepository
+	platformRepository           *platformRepository.PlatformRepository
+	pxxMapperRepository          *categoryRepository.PxxMapperCategoryRepository
 	sourceProductTbCatRepository *categoryRepository.SourceProductTbCategoryRepository
 }
 
@@ -201,21 +201,32 @@ func (s *CategoryService) GetPxxMapperByPddCatID(pddCatID string) (*categoryDTO.
 	return db.ToDTO[categoryDTO.PxxMapperCategoryDTO](entity), nil
 }
 
+func (s *CategoryService) GetPxxMapperBySourceProductID(sourceProductID string) (*categoryDTO.PxxMapperCategoryDTO, error) {
+	entity, err := s.pxxMapperRepository.FindBySourceProductID(sourceProductID)
+	if err != nil {
+		return nil, err
+	}
+	return db.ToDTO[categoryDTO.PxxMapperCategoryDTO](entity), nil
+}
+
 func (s *CategoryService) CreatePxxMapper(req *categoryDTO.CreatePxxMapperCategoryDTO) (*categoryDTO.PxxMapperCategoryDTO, error) {
 	if req == nil {
 		return nil, fmt.Errorf("request is nil")
 	}
-	if strings.TrimSpace(req.PddCatID) == "" {
-		return nil, fmt.Errorf("pddCatId is required")
+	sourceProductID := strings.TrimSpace(req.SourceProductID)
+	pddCatID := strings.TrimSpace(req.PddCatID)
+	if sourceProductID == "" && pddCatID == "" {
+		return nil, fmt.Errorf("sourceProductId or pddCatId is required")
 	}
 	if strings.TrimSpace(req.TbCatID) == "" {
 		return nil, fmt.Errorf("tbCatId is required")
 	}
 	entity, err := s.pxxMapperRepository.Create(&categoryRepository.PxxMapperCategory{
-		PddCatID:     strings.TrimSpace(req.PddCatID),
-		TbCatID:      strings.TrimSpace(req.TbCatID),
-		TbCatName:    strings.TrimSpace(req.TbCatName),
-		CategoryInfo: req.CategoryInfo,
+		SourceProductID: sourceProductID,
+		PddCatID:        pddCatID,
+		TbCatID:         strings.TrimSpace(req.TbCatID),
+		TbCatName:       strings.TrimSpace(req.TbCatName),
+		CategoryInfo:    req.CategoryInfo,
 	})
 	if err != nil {
 		return nil, err
@@ -234,6 +245,9 @@ func (s *CategoryService) UpdatePxxMapper(id uint, req *categoryDTO.UpdatePxxMap
 	if entity.Active == 0 {
 		return nil, gorm.ErrRecordNotFound
 	}
+	if req.SourceProductID != nil {
+		entity.SourceProductID = strings.TrimSpace(*req.SourceProductID)
+	}
 	if req.PddCatID != nil {
 		entity.PddCatID = strings.TrimSpace(*req.PddCatID)
 	}
@@ -245,6 +259,12 @@ func (s *CategoryService) UpdatePxxMapper(id uint, req *categoryDTO.UpdatePxxMap
 	}
 	if req.CategoryInfo != nil {
 		entity.CategoryInfo = *req.CategoryInfo
+	}
+	if entity.SourceProductID == "" && entity.PddCatID == "" {
+		return nil, fmt.Errorf("sourceProductId or pddCatId is required")
+	}
+	if entity.TbCatID == "" {
+		return nil, fmt.Errorf("tbCatId is required")
 	}
 	saved, err := s.pxxMapperRepository.SaveOrUpdate(entity)
 	if err != nil {

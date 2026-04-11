@@ -177,6 +177,17 @@ export class TbEngine extends DoorEngine {
 }
 
 function buildTbShopLoginPayload(shop: ShopRecord, rawData: unknown): ShopLoginPayload {
+  const nickname = pickString(rawData, [
+    "data.result.displayNick",
+    "data.result.nick",
+    "data.sellerNick",
+    "data.nick",
+    "data.shop.nick",
+    "sellerNick",
+    "nick",
+    "nickName",
+  ]) || shop.nickname || shop.name || shop.remark || shop.code || `TB-${shop.id}`;
+
   const name = pickString(rawData, [
     "data.result.shopName",
     "data.result.displayNick",
@@ -192,7 +203,7 @@ function buildTbShopLoginPayload(shop: ShopRecord, rawData: unknown): ShopLoginP
     "nick",
     "nickName",
     "title",
-  ]) || shop.remark || shop.name || shop.code || `TB-${shop.id}`;
+  ]) || nickname || shop.remark || shop.name || shop.code || `TB-${shop.id}`;
 
   const platformShopId = pickString(rawData, [
     "data.result.shopId",
@@ -222,6 +233,7 @@ function buildTbShopLoginPayload(shop: ShopRecord, rawData: unknown): ShopLoginP
     shopId: shop.id > 0 ? shop.id : undefined,
     appUserId: shop.appUserId > 0 ? shop.appUserId : undefined,
     name,
+    nickname,
     code: shop.code || platformShopId || businessId || `tb-${shop.id}`,
     platform: "tb",
     platformShopId,

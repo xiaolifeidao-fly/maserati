@@ -33,9 +33,6 @@ func (r *ProductRepository) CountByQuery(query productDTO.ProductQueryDTO) (int6
 	if query.CollectRecordID > 0 {
 		dbQuery = dbQuery.Where("collect_record_id = ?", query.CollectRecordID)
 	}
-	if query.PublishRecordID > 0 {
-		dbQuery = dbQuery.Where("publish_record_id = ?", query.PublishRecordID)
-	}
 	if value := strings.TrimSpace(query.Title); value != "" {
 		dbQuery = dbQuery.Where("title LIKE ?", "%"+value+"%")
 	}
@@ -69,9 +66,6 @@ func (r *ProductRepository) ListByQuery(query productDTO.ProductQueryDTO, pageIn
 	if query.CollectRecordID > 0 {
 		dbQuery = dbQuery.Where("collect_record_id = ?", query.CollectRecordID)
 	}
-	if query.PublishRecordID > 0 {
-		dbQuery = dbQuery.Where("publish_record_id = ?", query.PublishRecordID)
-	}
 	if value := strings.TrimSpace(query.Title); value != "" {
 		dbQuery = dbQuery.Where("title LIKE ?", "%"+value+"%")
 	}
@@ -86,4 +80,17 @@ func (r *ProductRepository) ListByQuery(query productDTO.ProductQueryDTO, pageIn
 		return nil, err
 	}
 	return entities, nil
+}
+
+func (r *ProductRepository) FindByCollectRecordID(collectRecordID uint64) (*Product, error) {
+	if r.Db == nil {
+		return nil, fmt.Errorf("database is not initialized")
+	}
+	var entity Product
+	if err := r.Db.Where("collect_record_id = ? AND active = ?", collectRecordID, 1).
+		Order("id DESC").
+		First(&entity).Error; err != nil {
+		return nil, err
+	}
+	return &entity, nil
 }

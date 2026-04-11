@@ -187,7 +187,6 @@ func (s *ProductService) CreateProduct(req *productDTO.CreateProductDTO) (*produ
 		ShopID:          req.ShopID,
 		CategoryID:      req.CategoryID,
 		CollectRecordID: req.CollectRecordID,
-		PublishRecordID: req.PublishRecordID,
 		Title:           title,
 		OuterProductID:  strings.TrimSpace(req.OuterProductID),
 		Status:          normalizeProductStatus(req.Status),
@@ -240,9 +239,6 @@ func (s *ProductService) UpdateProduct(id uint, req *productDTO.UpdateProductDTO
 			return nil, err
 		}
 		entity.CollectRecordID = *req.CollectRecordID
-	}
-	if req.PublishRecordID != nil {
-		entity.PublishRecordID = *req.PublishRecordID
 	}
 	if req.Title != nil {
 		entity.Title = strings.TrimSpace(*req.Title)

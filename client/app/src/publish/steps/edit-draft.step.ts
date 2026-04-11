@@ -1,11 +1,13 @@
 import { StepCode, StepStatus, STEP_ORDER } from '../types/publish-task';
+import type { PublishStrategy } from '../types/publish-task';
 import type { StepResult } from '../core/publish-step';
 import { PublishStep } from '../core/publish-step';
 import type { StepContext } from '../core/step-context';
 import { PublishError } from '../core/errors';
 import { CaptchaChecker } from './captcha.step';
-import { getPublishPage } from './fill-draft.step';
+import { getPublishPage, fetchPlatformShopId, detectTbSaleSpecUiState } from './fill-draft.step';
 import { parseTbWindowJsonForDraft } from '../parsers/tb-window-json.parser';
+import { ComponentDefaultsFiller } from '../fillers/component-defaults.filler';
 import { PropsFiller } from '../fillers/props.filler';
 import { SkuFiller } from '../fillers/sku.filler';
 import { DetailImagesFiller } from '../fillers/detail-images.filler';
@@ -19,6 +21,13 @@ declare const window: any;
 const TB_WINDOW_JSON_TIMEOUT = 20_000;
 /** 校验时跳过的组件 key（参考旧代码 filterKey） */
 const SKIP_VALIDATE_KEYS = new Set(['descType', 'category']);
+
+function buildPublishStartTime(strategy?: PublishStrategy): { type: 0 | 2; shelfTime: null } {
+  return {
+    type: strategy === 'immediate' ? 0 : 2,
+    shelfTime: null,
+  };
+}
 
 /**
  * EditDraftStep — 二次编辑草稿（Step 5）
@@ -62,9 +71,12 @@ export class EditDraftStep extends PublishStep {
 
     const rawWindowJson = await page.evaluate(() => window?.Json);
     const tbWindowJson = parseTbWindowJsonForDraft(rawWindowJson);
+    const saleSpecUiState = await detectTbSaleSpecUiState(page);
 
     // 更新 draftContext 中的 pageJsonData 与 catId（平台可能调整类目）
     draftCtx.pageJsonData = rawWindowJson as Record<string, unknown>;
+    draftCtx.saleSpecUiMode = saleSpecUiState.mode;
+    draftCtx.saleSpecUiText = saleSpecUiState.text;
     if (tbWindowJson.meta.catId) {
       draftCtx.catId = tbWindowJson.meta.catId;
     }
@@ -77,20 +89,45 @@ export class EditDraftStep extends PublishStep {
       startTraceId: draftCtx.startTraceId,
     });
 
+    const platformShopId = await fetchPlatformShopId(ctx.shopId);
+
+    // 使用 imageUrlMap（来源于 product_file.file_path 缓存）将原始 URL 解析为淘宝图片空间 URL
+    const imageUrlMap = ctx.get('imageUrlMap') ?? {};
+    const resolveImageUrl = (url: string) => imageUrlMap[url] ?? url;
+
+    const uploadedMainImages = (ctx.get('uploadedMainImages') ?? product.mainImages)
+      .map(resolveImageUrl);
+    const uploadedDetailImages = (ctx.get('uploadedDetailImages') ?? product.detailImages)
+      .map(resolveImageUrl);
+
+    // 从 ctx 或 imageUrlMap 构建 SKU 图片映射
+    const uploadedSkuImageMap: Record<string, string> = { ...(ctx.get('uploadedSkuImageMap') ?? {}) };
+    for (const sku of product.skuList) {
+      if (sku.imgUrl && !uploadedSkuImageMap[sku.imgUrl] && imageUrlMap[sku.imgUrl]) {
+        uploadedSkuImageMap[sku.imgUrl] = imageUrlMap[sku.imgUrl];
+      }
+    }
+
     const fillerCtx: FillerContext = {
+      taskId: ctx.taskId,
+      platformShopId,
       product,
       categoryInfo,
-      uploadedMainImages: ctx.get('uploadedMainImages') ?? product.mainImages,
-      uploadedDetailImages: ctx.get('uploadedDetailImages') ?? product.detailImages,
+      uploadedMainImages,
+      uploadedDetailImages,
       uploadedDetailImageMetas: ctx.get('uploadedDetailImageMetas') ?? [],
+      uploadedSkuImageMap,
       draftContext: draftCtx,
+      publishConfig: ctx.get('publishConfig'),
       tbWindowJson,
       draftPayload: correctionPayload,
     };
 
     await new PropsFiller().fill(fillerCtx);
+    await new ComponentDefaultsFiller().fill(fillerCtx);
     await new SkuFiller().fill(fillerCtx);
     await new DetailImagesFiller().fill(fillerCtx);
+    correctionPayload['startTime'] = buildPublishStartTime(ctx.get('publishConfig')?.strategy);
 
     // ── Step 3: 补全必填 catProp 缺省值 ──────────────────────────────────────
     this.fillRequiredCatProps(tbWindowJson.catProps, correctionPayload);
@@ -204,6 +241,14 @@ export class EditDraftStep extends PublishStep {
       if (!component.props?.required) continue;
 
       const value = payload[key];
+      if (key === 'multiDiscountPromotion') {
+        const promotion = value as Record<string, unknown> | null | undefined;
+        if (promotion?.enable !== true) {
+          missing.push(key);
+        }
+        continue;
+      }
+
       if (value == null) { missing.push(key); continue; }
       if (typeof value === 'string' && value.trim() === '') { missing.push(key); continue; }
       if (typeof value === 'number' && value === 0) { missing.push(key); continue; }

@@ -11,10 +11,11 @@ interface BatchDetailModalProps {
   open: boolean;
   batch: CollectBatchRecord | null;
   sourceType: CollectSourceType;
+  focusRecordId?: number;
   onClose: () => void;
 }
 
-export function BatchDetailModal({ open, batch, sourceType, onClose }: BatchDetailModalProps) {
+export function BatchDetailModal({ open, batch, sourceType, focusRecordId = 0, onClose }: BatchDetailModalProps) {
   const [records, setRecords] = useState<CollectRecordPreview[]>([]);
   const [loading, setLoading] = useState(false);
   const [selectedRecordId, setSelectedRecordId] = useState(0);
@@ -63,15 +64,16 @@ export function BatchDetailModal({ open, batch, sourceType, onClose }: BatchDeta
     setLoading(true);
     void fetchCollectBatchRecords(batch.id, { pageIndex: 1, pageSize: 200 })
       .then((result) => {
-        const items = Array.isArray(result.data) ? result.data : [];
+        const rawItems = Array.isArray(result.data) ? result.data : [];
+        const items = focusRecordId > 0 ? rawItems.filter((item) => item.id === focusRecordId) : rawItems;
         setRecords(items);
-        setSelectedRecordId(items[0]?.id || 0);
+        setSelectedRecordId(items.find((item) => item.id === focusRecordId)?.id || items[0]?.id || 0);
       })
       .catch((error) => {
         message.error(error instanceof Error ? error.message : "加载采集记录失败");
       })
       .finally(() => setLoading(false));
-  }, [open, batch?.id]);
+  }, [open, batch?.id, focusRecordId]);
 
   const workspaceState: CollectionWorkspaceState = {
     batch: batch ?? new CollectBatchRecord(),

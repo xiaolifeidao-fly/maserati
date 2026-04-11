@@ -200,6 +200,10 @@ export class CollectImpl extends CollectApi {
     return requestBackend("GET", `/collect-batches/${batchId}/records`, { params: query });
   }
 
+  async getCollectRecord(id: number): Promise<CollectRecordPreview> {
+    return requestBackend("GET", `/collect-records/${id}`);
+  }
+
   async updateCollectRecord(id: number, payload: CollectRecordUpdatePayload): Promise<CollectRecordPreview> {
     return requestBackend("PUT", `/collect-records/${id}`, { data: payload });
   }

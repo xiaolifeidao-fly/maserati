@@ -148,6 +148,13 @@ function hasWorkspacePayload(state: CollectionWorkspaceState | null | undefined)
   return Boolean(state && (state.batch?.id || state.records?.length));
 }
 
+function shouldHydrateFromBatch(state: CollectionWorkspaceState | null | undefined, fallbackBatchId: number) {
+  if (fallbackBatchId <= 0 || !state?.batch?.id) {
+    return false;
+  }
+  return Number(state.batch.id) === Number(fallbackBatchId) && (!Array.isArray(state.records) || state.records.length === 0);
+}
+
 function useCollectionWorkspaceState({ enabled = true, fallbackBatchId = 0 } = {}) {
   const [workspaceState, setWorkspaceState] = useState<CollectionWorkspaceState>(createEmptyWorkspaceState);
   const [loading, setLoading] = useState(true);
@@ -174,6 +181,10 @@ function useCollectionWorkspaceState({ enabled = true, fallbackBatchId = 0 } = {
     void (async () => {
       try {
         const nextState = await fetchCollectionWorkspaceState();
+        if (shouldHydrateFromBatch(nextState, fallbackBatchId)) {
+          handleWorkspaceUpdate(await loadBatchWorkspaceState(fallbackBatchId));
+          return;
+        }
         if (hasWorkspacePayload(nextState)) {
           handleWorkspaceUpdate(nextState);
           return;
@@ -692,7 +703,7 @@ export function CollectionWorkspaceRightPanel({
       })
       .catch(() => setRawData(null))
       .finally(() => setDataLoading(false));
-  }, [selectedRecord?.sourceProductId]);
+  }, [selectedRecord?.sourceProductId, workspaceState.sourceType, workspaceState.records]);
 
   // 将 pxx 原始数据转换为标准结构
   const standardData = useMemo(() => {

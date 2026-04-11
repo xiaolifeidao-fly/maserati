@@ -41,28 +41,50 @@ export class DetailImagesFiller implements IFiller {
     const { uploadedDetailImages, uploadedDetailImageMetas, draftPayload } = ctx;
 
     const validImages = uploadedDetailImages.filter(Boolean);
-    if (!validImages.length) return;
+
+    const descRepublic = this.parseObjectLike(draftPayload['descRepublicOfSell']) ?? {};
+    const commitParam = this.parseObjectLike(descRepublic['descPageCommitParam']) ?? {};
+    const templateContent = this.parseTemplateContent(commitParam['templateContent']);
+
+    // 若无图片，检查现有 templateContent 是否已是合法 JSON 字符串；
+    // 若非法（空字符串/null 等），补写最小合法结构，避免 Taobao fastjson 在 pos 0 报错。
+    if (!validImages.length) {
+      const existing = commitParam['templateContent'];
+      if (typeof existing === 'string' && existing.trim().startsWith('{')) {
+        return; // 已有合法内容，不覆盖
+      }
+      draftPayload['descRepublicOfSell'] = {
+        ...descRepublic,
+        descPageCommitParam: {
+          ...commitParam,
+          changed: true,
+          templateContent: JSON.stringify({
+            groups: Array.isArray(templateContent.groups) ? templateContent.groups : [],
+            sellergroups: Array.isArray(templateContent.sellergroups) ? templateContent.sellergroups : [],
+          }),
+        },
+      };
+      return;
+    }
 
     const descriptionHtml = validImages
       .map(url => `<img src="${url}" style="max-width:${DetailImagesFiller.MAX_WIDTH}px;width:100%;" />`)
       .join('');
 
+    // 顶层 desc 字段（Taobao 纯文本/HTML 字段，不经 fastjson 解析，可以包含 HTML）
     draftPayload['desc'] = descriptionHtml;
 
-    const descRepublic = (draftPayload['descRepublicOfSell'] as Record<string, unknown> | undefined) ?? {};
-    const commitParam = (descRepublic['descPageCommitParam'] as Record<string, unknown> | undefined) ?? {};
-    const templateContent = this.parseTemplateContent(commitParam['templateContent']);
     const existingMetaMap = this.buildExistingMetaMap(templateContent, uploadedDetailImageMetas ?? []);
     const groups = validImages.map((url, index) => this.buildImageGroup(url, index, existingMetaMap.get(url)));
-    const detailHeight = groups.reduce((sum, group) => sum + group.boxStyle.height, 0);
 
+    // ⚠️ 注意：descPageCommitParam 中的字段会被 Taobao 服务端 fastjson 二次解析。
+    // 不能写入 HTML 字符串（如 detailParam），否则 '<' 在 pos 0 触发 fastjson ERROR token。
+    // 旧代码 fillImageDetail 也只修改 templateContent，其余字段保持捕获值不变。
     draftPayload['descRepublicOfSell'] = {
       ...descRepublic,
       descPageCommitParam: {
         ...commitParam,
         changed: true,
-        detailParam: descriptionHtml,
-        detailHeight,
         templateContent: JSON.stringify({
           groups,
           sellergroups: Array.isArray(templateContent.sellergroups) ? templateContent.sellergroups : [],
@@ -72,6 +94,10 @@ export class DetailImagesFiller implements IFiller {
   }
 
   private parseTemplateContent(rawValue: unknown): TemplateContent {
+    if (rawValue && typeof rawValue === 'object' && !Array.isArray(rawValue)) {
+      return rawValue as TemplateContent;
+    }
+
     if (typeof rawValue !== 'string' || !rawValue.trim()) {
       return {};
     }
@@ -239,6 +265,44 @@ export class DetailImagesFiller implements IFiller {
     return value && typeof value === 'object' && !Array.isArray(value)
       ? (value as Record<string, unknown>)
       : undefined;
+  }
+
+  private parseObjectLike(value: unknown): Record<string, unknown> | undefined {
+    const directRecord = this.asRecord(value);
+    if (directRecord) {
+      return directRecord;
+    }
+
+    if (typeof value !== 'string') {
+      return undefined;
+    }
+
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return undefined;
+    }
+
+    const attempts = [trimmed];
+    if (trimmed.startsWith('"') && trimmed.endsWith('"')) {
+      attempts.push(trimmed.slice(1, -1));
+    }
+    if (trimmed.includes('\\"')) {
+      attempts.push(trimmed.replace(/\\"/g, '"'));
+    }
+
+    for (const attempt of attempts) {
+      try {
+        const parsed = JSON.parse(attempt) as unknown;
+        const parsedRecord = this.asRecord(parsed);
+        if (parsedRecord) {
+          return parsedRecord;
+        }
+      } catch {
+        // ignore malformed string payload and continue trying repaired variants
+      }
+    }
+
+    return undefined;
   }
 
   private readString(value: unknown): string | undefined {

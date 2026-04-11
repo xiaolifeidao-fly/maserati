@@ -55,6 +55,7 @@ export class ShopRecord {
   appUserId = 0;
   code = "";
   name = "";
+  nickname = "";
   platform = "";
   remark = "";
   platformShopId = "";
@@ -96,6 +97,7 @@ export interface ShopLoginPayload {
   shopId?: number;
   appUserId?: number;
   name: string;
+  nickname?: string;
   code: string;
   platform: string;
   platformShopId: string;
@@ -113,6 +115,7 @@ export class ProductRecord {
   id = 0;
   shopId = 0;
   categoryId = 0;
+  collectRecordId = 0;
   title = "";
   outerProductId = "";
   status = "";

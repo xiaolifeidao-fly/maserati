@@ -2,6 +2,7 @@ import axios from 'axios';
 import type { Page } from 'playwright';
 import type { TbDraftContext } from '../types/draft';
 import {
+  publishInfo,
   publishTaobaoRequestLog,
   publishTaobaoResponseLog,
   summarizeForLog,
@@ -13,12 +14,128 @@ import { PublishError } from '../core/errors';
 declare const navigator: any;
 
 const TB_DRAFT_UPDATE_URL = 'https://item.upload.taobao.com/sell/draftOp/update.json';
+const TB_DRAFT_DELETE_URL = 'https://item.upload.taobao.com/sell/draftOp/delete.json';
+const TB_DRAFT_LIST_URL = 'https://item.upload.taobao.com/sell/draftList.json';
 const TB_PUBLISH_URL = 'https://item.upload.taobao.com/sell/v2/submit.htm';
+const TB_CRO_RULE_ASYNC_CHECK_URL = 'https://item.upload.taobao.com/sell/v2/asyncOpt.htm';
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : undefined;
+}
+
+function parseJsonObjectLike(value: unknown): Record<string, unknown> | undefined {
+  const directRecord = asRecord(value);
+  if (directRecord) {
+    return directRecord;
+  }
+
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+
+  const tryParseObject = (input: string): Record<string, unknown> | undefined => {
+    const trimmed = input.trim();
+    if (!trimmed) {
+      return undefined;
+    }
+
+    try {
+      const parsed = JSON.parse(trimmed) as unknown;
+      return parseJsonObjectLike(parsed);
+    } catch {
+      return undefined;
+    }
+  };
+
+  const trimmed = value.trim();
+  const attempts = new Set<string>([trimmed]);
+
+  if (trimmed.startsWith('"') && trimmed.endsWith('"')) {
+    attempts.add(trimmed.slice(1, -1));
+  }
+
+  if (trimmed.includes('\\"')) {
+    attempts.add(trimmed.replace(/\\"/g, '"'));
+  }
+
+  for (const attempt of attempts) {
+    const parsed = tryParseObject(attempt);
+    if (parsed) {
+      return parsed;
+    }
+
+    const normalized = attempt.trim();
+    if (!normalized) {
+      continue;
+    }
+
+    const wrapped = normalized.startsWith('{') ? normalized : `{${normalized}}`;
+    const wrappedParsed = tryParseObject(wrapped);
+    if (wrappedParsed?.descRepublicOfSell && asRecord(wrappedParsed.descRepublicOfSell)) {
+      return asRecord(wrappedParsed.descRepublicOfSell);
+    }
+    if (wrappedParsed?.descPageCommitParam || wrappedParsed?.descPageRenderParam || wrappedParsed?.descPageRenderModel) {
+      return wrappedParsed;
+    }
+  }
+
+  return undefined;
+}
+
+function normalizeJsonObjectString(value: unknown): string | undefined {
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return undefined;
+    }
+
+    const parsed = parseJsonObjectLike(trimmed);
+    if (parsed) {
+      return JSON.stringify(parsed);
+    }
+
+    return trimmed;
+  }
+
+  const record = parseJsonObjectLike(value);
+  if (record) {
+    return JSON.stringify(record);
+  }
+
+  return undefined;
+}
+
+function normalizeDescRepublicPayload(jsonBody: Record<string, unknown>): void {
+  const descRepublic = parseJsonObjectLike(jsonBody.descRepublicOfSell);
+  if (!descRepublic) {
+    return;
+  }
+
+  const commitParam = parseJsonObjectLike(descRepublic.descPageCommitParam) ?? {};
+  const renderParam = parseJsonObjectLike(descRepublic.descPageRenderParam) ?? {};
+  const renderModel = parseJsonObjectLike(descRepublic.descPageRenderModel) ?? {};
+  const descPageDO = parseJsonObjectLike(renderModel.descPageDO) ?? {};
+
+  const templateContent =
+    normalizeJsonObjectString(commitParam.templateContent)
+    ?? JSON.stringify({ groups: [], sellergroups: [] });
+
+  const editRst =
+    normalizeJsonObjectString(descPageDO.editRst)
+    ?? templateContent;
+
+  commitParam.templateContent = templateContent;
+  descPageDO.editRst = editRst;
+  renderModel.descPageDO = descPageDO;
+
+  jsonBody.descRepublicOfSell = {
+    ...descRepublic,
+    descPageCommitParam: commitParam,
+    descPageRenderParam: renderParam,
+    descPageRenderModel: renderModel,
+  };
 }
 
 function deepMergeDraftPayload(
@@ -60,11 +177,127 @@ function toNumericCatId(catId: unknown): number | string {
   return typeof catId === 'string' ? catId.trim() : String(catId ?? '');
 }
 
+function buildDescRepublicDebugInfo(jsonBody: Record<string, unknown>): Record<string, unknown> {
+  const descRepublic = parseJsonObjectLike(jsonBody.descRepublicOfSell);
+  const commitParam = parseJsonObjectLike(descRepublic?.descPageCommitParam);
+  const renderParam = parseJsonObjectLike(descRepublic?.descPageRenderParam);
+  const renderModel = parseJsonObjectLike(descRepublic?.descPageRenderModel);
+  const descPageDO = parseJsonObjectLike(renderModel?.descPageDO);
+  const templateContent = commitParam?.templateContent;
+  const editRst = descPageDO?.editRst;
+
+  const inspectJsonString = (value: unknown) => {
+    if (typeof value !== 'string') {
+      return {
+        type: typeof value,
+        length: 0,
+        startsWithBrace: false,
+        parseOk: false,
+        groupsCount: undefined,
+        sellergroupsCount: undefined,
+      };
+    }
+
+    const trimmed = value.trim();
+    try {
+      const parsed = JSON.parse(trimmed) as Record<string, unknown>;
+      const groups = Array.isArray(parsed?.groups) ? parsed.groups.length : undefined;
+      const sellergroups = Array.isArray(parsed?.sellergroups) ? parsed.sellergroups.length : undefined;
+      return {
+        type: 'string',
+        length: value.length,
+        startsWithBrace: trimmed.startsWith('{'),
+        parseOk: true,
+        groupsCount: groups,
+        sellergroupsCount: sellergroups,
+      };
+    } catch {
+      return {
+        type: 'string',
+        length: value.length,
+        startsWithBrace: trimmed.startsWith('{'),
+        parseOk: false,
+        groupsCount: undefined,
+        sellergroupsCount: undefined,
+        preview: trimmed.slice(0, 120),
+      };
+    }
+  };
+
+  return {
+    exists: Boolean(descRepublic),
+    descRepublicType: typeof jsonBody.descRepublicOfSell,
+    commitParamKeys: commitParam ? Object.keys(commitParam) : [],
+    renderParamKeys: renderParam ? Object.keys(renderParam) : [],
+    renderModelKeys: renderModel ? Object.keys(renderModel) : [],
+    templateContent: inspectJsonString(templateContent),
+    editRst: inspectJsonString(editRst),
+    templateEqualsEditRst:
+      typeof templateContent === 'string'
+      && typeof editRst === 'string'
+      && templateContent === editRst,
+  };
+}
+
+function assertDescRepublicPayload(jsonBody: Record<string, unknown>): void {
+  normalizeDescRepublicPayload(jsonBody);
+
+  const descRepublic = asRecord(jsonBody.descRepublicOfSell);
+  if (!descRepublic) {
+    throw new PublishError(
+      StepCode.FILL_DRAFT,
+      '淘宝详情数据异常：descRepublicOfSell 不是对象',
+      false,
+      { descRepublicOfSell: summarizeForLog(jsonBody.descRepublicOfSell) },
+    );
+  }
+
+  const commitParam = asRecord(descRepublic.descPageCommitParam);
+  const renderModel = asRecord(descRepublic.descPageRenderModel);
+  const descPageDO = asRecord(renderModel?.descPageDO);
+  const templateContent = commitParam?.templateContent;
+  const editRst = descPageDO?.editRst;
+
+  const ensureJsonString = (fieldName: string, value: unknown) => {
+    if (typeof value !== 'string' || !value.trim()) {
+      throw new PublishError(
+        StepCode.FILL_DRAFT,
+        `淘宝详情数据异常：${fieldName} 为空或不是字符串`,
+        false,
+        { [fieldName]: summarizeForLog(value) },
+      );
+    }
+
+    try {
+      const parsed = JSON.parse(value) as Record<string, unknown>;
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        throw new Error('not-object');
+      }
+    } catch {
+      throw new PublishError(
+        StepCode.FILL_DRAFT,
+        `淘宝详情数据异常：${fieldName} 不是合法 JSON 对象字符串`,
+        false,
+        {
+          [fieldName]: {
+            length: value.length,
+            preview: value.trim().slice(0, 120),
+          },
+        },
+      );
+    }
+  };
+
+  ensureJsonString('descPageCommitParam.templateContent', templateContent);
+  ensureJsonString('descPageRenderModel.descPageDO.editRst', editRst);
+}
+
 export function buildDraftJsonBody(
   draftContext: TbDraftContext,
   payload: Record<string, unknown>,
 ): Record<string, unknown> {
   let base: Record<string, unknown>;
+  let baseSource: string;
   const pageJson = asRecord(draftContext.pageJsonData) ?? {};
   const models = asRecord(pageJson.models) ?? {};
   const globalModel = asRecord(models.global);
@@ -73,9 +306,11 @@ export function buildDraftJsonBody(
   if (draftContext.updateDraftJsonBody) {
     // 已有草稿优先使用从 draftOp/update.json 请求中拦截的 jsonBody
     base = { ...draftContext.updateDraftJsonBody };
+    baseSource = 'updateDraftJsonBody';
   } else if (draftContext.addDraftJsonBody) {
     // 新建草稿优先使用从 draftOp/add.json 请求中拦截的 jsonBody（页面实际提交数据，最准确）
     base = { ...draftContext.addDraftJsonBody };
+    baseSource = 'addDraftJsonBody';
   } else {
     // 回退：从 window.Json.models 重建
     const formValues = asRecord(models.formValues) ?? {};
@@ -84,10 +319,25 @@ export function buildDraftJsonBody(
       ...formValues,
       icmp_global: { ...globalValue },
     };
+    baseSource = 'fallback(window.Json.models)';
   }
+
+  // [LOGISTICS-DEBUG] 记录 base 来源及 tbExtractWay 原始值，以及 patch 中的值
+  publishInfo('[buildDraftJsonBody] [LOGISTICS] tbExtractWay merge', {
+    baseSource,
+    base_tbExtractWay: summarizeForLog(base['tbExtractWay'] ?? null),
+    patch_tbExtractWay: summarizeForLog(payload['tbExtractWay'] ?? null),
+  });
 
   const merged = deepMergeDraftPayload(base, payload);
   const numericCatId = toNumericCatId(draftContext.catId);
+
+  normalizeDescRepublicPayload(merged);
+
+  // [LOGISTICS-DEBUG] 记录 merge 后结果
+  publishInfo('[buildDraftJsonBody] [LOGISTICS] tbExtractWay after merge', {
+    merged_tbExtractWay: summarizeForLog(merged['tbExtractWay'] ?? null),
+  });
 
   merged.catId = numericCatId;
   const icmpGlobal = asRecord(merged.icmp_global);
@@ -132,6 +382,30 @@ function buildGlobalExtendInfo(draftContext: TbDraftContext): Record<string, unk
   };
 }
 
+function buildDefaultGlobalExtendInfo(startTraceId?: string): Record<string, unknown> {
+  return {
+    startTraceId: startTraceId?.trim() || `draft-cleanup-${Date.now()}`,
+    skuDecoupling: 'true',
+    noIcmp: 'true',
+  };
+}
+
+function buildDraftSubmitFormData(
+  draftContext: TbDraftContext,
+  jsonBody: Record<string, unknown>,
+  globalExtendInfo: Record<string, unknown>,
+): Record<string, string> {
+  const capturedForm = draftContext.updateDraftRequestForm ?? draftContext.addDraftRequestForm ?? {};
+
+  return {
+    ...capturedForm,
+    id: draftContext.draftId ?? capturedForm.id ?? '',
+    dbDraftId: draftContext.draftId ?? capturedForm.dbDraftId ?? '',
+    jsonBody: JSON.stringify(jsonBody),
+    globalExtendInfo: JSON.stringify(globalExtendInfo),
+  };
+}
+
 export interface NormalizedTbResponse extends Record<string, unknown> {
   captchaUrl?: string;
   validateUrl?: string;
@@ -145,6 +419,21 @@ export interface NormalizedTbResponse extends Record<string, unknown> {
   message?: string;
   nonJson?: boolean;
   rawTextSnippet?: string;
+}
+
+export interface TaobaoDraftListItem {
+  id?: string | number;
+  name?: string;
+  time?: string;
+  lastModify?: string;
+  deleteUrl?: string;
+  loadUrl?: string;
+}
+
+export interface TaobaoDraftListResponse extends NormalizedTbResponse {
+  count?: number;
+  infoMsg?: string;
+  list?: TaobaoDraftListItem[];
 }
 
 function buildRawTextSnippet(rawText: string): string {
@@ -202,13 +491,11 @@ export async function submitDraftToTaobao(
     throw error;
   }
   const jsonBody = buildDraftJsonBody(draftContext, payload);
+  const descRepublicDebug = buildDescRepublicDebugInfo(jsonBody);
+  publishInfo(`[task:${taskId}] [submit-draft-direct] descRepublicOfSell precheck`, descRepublicDebug);
+  assertDescRepublicPayload(jsonBody);
   const globalExtendInfo = buildGlobalExtendInfo(draftContext);
-  const data = {
-    id: draftContext.draftId,
-    dbDraftId: draftContext.draftId,
-    jsonBody: JSON.stringify(jsonBody),
-    globalExtendInfo: JSON.stringify(globalExtendInfo),
-  };
+  const data = buildDraftSubmitFormData(draftContext, jsonBody, globalExtendInfo);
 
   publishTaobaoRequestLog(taskId, 'submit-draft-direct', {
     url: `${TB_DRAFT_UPDATE_URL}?catId=${draftContext.catId}`,
@@ -218,6 +505,7 @@ export async function submitDraftToTaobao(
     input: {
       headers: summarizeForLog(headers),
       data: summarizeForLog(data),
+      reusedCapturedFormKeys: Object.keys(draftContext.updateDraftRequestForm ?? draftContext.addDraftRequestForm ?? {}),
     },
   });
 
@@ -248,6 +536,71 @@ export async function submitDraftToTaobao(
       normalized: summarizeForLog(normalized),
     },
   });
+  return normalized;
+}
+
+export async function syncCustomSalePropsToTaobao(
+  taskId: number,
+  shopId: number,
+  page: Page,
+  draftContext: TbDraftContext,
+  payload: Record<string, unknown>,
+): Promise<NormalizedTbResponse> {
+  let headers: Record<string, string>;
+  try {
+    headers = await buildTaobaoHeaders(page, page.url() || 'https://item.upload.taobao.com/sell/v2/draft.htm');
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('Cookie')) {
+      await handleTbLoginRequired(StepCode.FILL_DRAFT, shopId);
+    }
+    throw error;
+  }
+
+  const jsonBody = buildDraftJsonBody(draftContext, payload);
+  const globalExtendInfo = buildGlobalExtendInfo(draftContext);
+  const data = {
+    jsonBody: JSON.stringify(jsonBody),
+    globalExtendInfo: JSON.stringify(globalExtendInfo),
+  };
+  const requestUrl = `${TB_CRO_RULE_ASYNC_CHECK_URL}?optType=croRuleAsyncCheck&catId=${draftContext.catId}`;
+
+  publishTaobaoRequestLog(taskId, 'sync-custom-sale-props', {
+    url: requestUrl,
+    method: 'POST',
+    catId: draftContext.catId,
+    draftId: draftContext.draftId,
+    itemId: draftContext.itemId,
+    input: {
+      headers: summarizeForLog(headers),
+      data: summarizeForLog(data),
+    },
+  });
+
+  const response = await axios.post<string>(requestUrl, data, {
+    headers,
+    timeout: 30000,
+    responseType: 'text',
+    transformResponse: [raw => raw],
+  });
+
+  await handleTbMaybeLoginRequired(StepCode.FILL_DRAFT, shopId, response.data);
+  const rawData = parseTaobaoResponseText(response.data, '淘宝自定义销售属性接口');
+  const normalized = normalizeTbCroRuleResponse(rawData);
+  await handleTbMaybeLoginRequired(StepCode.FILL_DRAFT, shopId, normalized);
+
+  publishTaobaoResponseLog(taskId, 'sync-custom-sale-props', {
+    url: requestUrl,
+    method: 'POST',
+    status: response.status,
+    catId: draftContext.catId,
+    draftId: draftContext.draftId,
+    itemId: draftContext.itemId,
+    output: {
+      rawData: summarizeForLog(rawData),
+      normalized: summarizeForLog(normalized),
+    },
+  });
+
   return normalized;
 }
 
@@ -314,6 +667,197 @@ export async function publishToTaobao(
       normalized: summarizeForLog(normalized),
     },
   });
+  return normalized;
+}
+
+export async function listTaobaoDrafts(
+  taskId: number,
+  shopId: number,
+  page: Page,
+  catId: string,
+  startTraceId?: string,
+): Promise<TaobaoDraftListResponse> {
+  let headers: Record<string, string>;
+  try {
+    headers = await buildTaobaoHeaders(page, page.url() || `${TB_PUBLISH_URL}?catId=${catId}`);
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('Cookie')) {
+      await handleTbLoginRequired(StepCode.FILL_DRAFT, shopId);
+    }
+    throw error;
+  }
+
+  const globalExtendInfo = buildDefaultGlobalExtendInfo(startTraceId);
+  const requestUrl = `${TB_DRAFT_LIST_URL}?catId=${encodeURIComponent(catId)}&globalExtendInfo=${encodeURIComponent(JSON.stringify(globalExtendInfo))}`;
+
+  publishTaobaoRequestLog(taskId, 'list-drafts-before-create', {
+    url: requestUrl,
+    method: 'GET',
+    catId,
+    input: {
+      headers: summarizeForLog(headers),
+      globalExtendInfo: summarizeForLog(globalExtendInfo),
+    },
+  });
+
+  const response = await axios.get<string>(requestUrl, {
+    headers,
+    timeout: 30000,
+    responseType: 'text',
+    transformResponse: [raw => raw],
+  });
+
+  await handleTbMaybeLoginRequired(StepCode.FILL_DRAFT, shopId, response.data);
+  const rawData = parseTaobaoResponseText(response.data, '淘宝草稿列表接口') as TaobaoDraftListResponse;
+  const normalized = normalizeTbResponse(rawData) as TaobaoDraftListResponse;
+  normalized.count = typeof rawData.count === 'number' ? rawData.count : Number(rawData.count ?? 0);
+  normalized.infoMsg = typeof rawData.infoMsg === 'string' ? rawData.infoMsg : '';
+  normalized.list = Array.isArray(rawData.list) ? rawData.list : [];
+  await handleTbMaybeLoginRequired(StepCode.FILL_DRAFT, shopId, normalized);
+
+  publishTaobaoResponseLog(taskId, 'list-drafts-before-create', {
+    url: requestUrl,
+    method: 'GET',
+    status: response.status,
+    catId,
+    output: {
+      rawData: summarizeForLog(rawData),
+      normalized: summarizeForLog({
+        count: normalized.count,
+        infoMsg: normalized.infoMsg,
+        list: normalized.list,
+        success: normalized.success,
+        message: normalized.message,
+      }),
+    },
+  });
+
+  return normalized;
+}
+
+export async function deleteTaobaoDraftById(
+  taskId: number,
+  shopId: number,
+  page: Page,
+  catId: string,
+  draftId: string,
+  startTraceId?: string,
+): Promise<NormalizedTbResponse> {
+  let headers: Record<string, string>;
+  try {
+    headers = await buildTaobaoHeaders(page, page.url() || 'https://item.upload.taobao.com/sell/v2/draft.htm');
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('Cookie')) {
+      await handleTbLoginRequired(StepCode.FILL_DRAFT, shopId);
+    }
+    throw error;
+  }
+
+  const requestUrl = `${TB_DRAFT_DELETE_URL}?dbDraftId=${encodeURIComponent(draftId)}&catId=${encodeURIComponent(catId)}`;
+  const data = {
+    globalExtendInfo: JSON.stringify(buildDefaultGlobalExtendInfo(startTraceId)),
+  };
+
+  publishTaobaoRequestLog(taskId, 'delete-draft-before-create', {
+    url: requestUrl,
+    method: 'POST',
+    catId,
+    draftId,
+    input: {
+      headers: summarizeForLog(headers),
+      data: summarizeForLog(data),
+    },
+  });
+
+  const response = await axios.post<string>(requestUrl, data, {
+    headers,
+    timeout: 30000,
+    responseType: 'text',
+    transformResponse: [raw => raw],
+  });
+
+  await handleTbMaybeLoginRequired(StepCode.FILL_DRAFT, shopId, response.data);
+  const rawData = parseTaobaoResponseText(response.data, '淘宝删除草稿接口');
+  const normalized = normalizeTbResponse(rawData);
+  await handleTbMaybeLoginRequired(StepCode.FILL_DRAFT, shopId, normalized);
+
+  publishTaobaoResponseLog(taskId, 'delete-draft-before-create', {
+    url: requestUrl,
+    method: 'POST',
+    status: response.status,
+    catId,
+    draftId,
+    output: {
+      rawData: summarizeForLog(rawData),
+      normalized: summarizeForLog(normalized),
+    },
+  });
+
+  return normalized;
+}
+
+export async function deleteTaobaoDraft(
+  taskId: number,
+  shopId: number,
+  page: Page,
+  draftContext: TbDraftContext,
+): Promise<NormalizedTbResponse> {
+  if (!draftContext.draftId?.trim() || !draftContext.catId?.trim()) {
+    return { success: true, type: 'success' };
+  }
+
+  let headers: Record<string, string>;
+  try {
+    headers = await buildTaobaoHeaders(page, page.url() || 'https://item.upload.taobao.com/sell/v2/draft.htm');
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('Cookie')) {
+      await handleTbLoginRequired(StepCode.PUBLISH, shopId);
+    }
+    throw error;
+  }
+
+  const requestUrl = `${TB_DRAFT_DELETE_URL}?dbDraftId=${encodeURIComponent(draftContext.draftId)}&catId=${encodeURIComponent(draftContext.catId)}`;
+  const data = {
+    globalExtendInfo: JSON.stringify(buildGlobalExtendInfo(draftContext)),
+  };
+
+  publishTaobaoRequestLog(taskId, 'delete-draft-after-publish', {
+    url: requestUrl,
+    method: 'POST',
+    catId: draftContext.catId,
+    draftId: draftContext.draftId,
+    itemId: draftContext.itemId,
+    input: {
+      headers: summarizeForLog(headers),
+      data: summarizeForLog(data),
+    },
+  });
+
+  const response = await axios.post<string>(requestUrl, data, {
+    headers,
+    timeout: 30000,
+    responseType: 'text',
+    transformResponse: [raw => raw],
+  });
+
+  await handleTbMaybeLoginRequired(StepCode.PUBLISH, shopId, response.data);
+  const rawData = parseTaobaoResponseText(response.data, '淘宝删除草稿接口');
+  const normalized = normalizeTbResponse(rawData);
+  await handleTbMaybeLoginRequired(StepCode.PUBLISH, shopId, normalized);
+
+  publishTaobaoResponseLog(taskId, 'delete-draft-after-publish', {
+    url: requestUrl,
+    method: 'POST',
+    status: response.status,
+    catId: draftContext.catId,
+    draftId: draftContext.draftId,
+    itemId: draftContext.itemId,
+    output: {
+      rawData: summarizeForLog(rawData),
+      normalized: summarizeForLog(normalized),
+    },
+  });
+
   return normalized;
 }
 
@@ -435,6 +979,33 @@ export function normalizeTbDraftResponse(data: NormalizedTbResponse): Normalized
 
   if (!result.message) {
     const nestedMessage = payload?.message ?? payload?.msg ?? payload?.errorMsg;
+    if (nestedMessage != null && String(nestedMessage).trim()) {
+      result.message = String(nestedMessage);
+    }
+  }
+
+  const inferredSuccess = inferTbSuccess(result);
+  if (typeof inferredSuccess === 'boolean') {
+    result.success = inferredSuccess;
+  }
+
+  return result;
+}
+
+export function normalizeTbCroRuleResponse(data: NormalizedTbResponse): NormalizedTbResponse {
+  const result = normalizeTbResponse(data);
+  const models = asRecord(result.models);
+  const globalMessage = asRecord(models?.globalMessage);
+  const globalType = globalMessage?.type;
+
+  if (typeof globalType === 'string' && globalType.trim()) {
+    result.type = globalType.trim();
+  }
+
+  if (!result.message) {
+    const messageList = Array.isArray(globalMessage?.message) ? globalMessage?.message : [];
+    const firstMessage = asRecord(messageList[0]);
+    const nestedMessage = globalMessage?.msg ?? firstMessage?.msg;
     if (nestedMessage != null && String(nestedMessage).trim()) {
       result.message = String(nestedMessage);
     }

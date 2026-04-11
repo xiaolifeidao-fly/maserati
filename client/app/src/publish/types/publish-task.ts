@@ -43,12 +43,25 @@ export enum SourceType {
   PXX = 'PXX',
 }
 
+export type PublishStrategy = 'warehouse' | 'immediate';
+
+export interface PublishPriceSettings {
+  floatRatio: number;
+  floatAmount: number;
+}
+
+export interface PublishConfig {
+  strategy: PublishStrategy;
+  priceSettings?: PublishPriceSettings;
+}
+
 // ─── 服务端记录 ───────────────────────────────────────────────────────────────
 
 export interface PublishTaskRecord {
   id: number;
   appUserId: number;
   shopId: number;
+  collectBatchId?: number;
   productId?: number;
   sourceType: SourceType;
   sourceProductId?: string;
@@ -85,6 +98,7 @@ export interface PublishStepRecord {
 export interface CreatePublishTaskPayload {
   appUserId?: number;
   shopId: number;
+  collectBatchId?: number;
   productId?: number;
   sourceType: SourceType;
   sourceProductId: string;
@@ -93,11 +107,16 @@ export interface CreatePublishTaskPayload {
 }
 
 export interface UpdatePublishTaskPayload {
+  collectBatchId?: number;
   productId?: number;
   status?: TaskStatus;
   currentStepCode?: StepCode;
   errorMessage?: string;
   outerItemId?: string;
+  productTitle?: string;
+  tbCatId?: string;
+  categoryInfo?: string;
+  tbDraftId?: string;
   remark?: string;
 }
 
@@ -122,8 +141,17 @@ export interface PublishTaskQuery {
   pageIndex?: number;
   pageSize?: number;
   shopId?: number;
+  collectBatchId?: number;
   status?: TaskStatus;
   sourceType?: SourceType;
+}
+
+export interface PublishBatchRepublishStats {
+  batchId: number;
+  totalCount: number;
+  successCount: number;
+  failedCount: number;
+  pendingCount: number;
 }
 
 // ─── 进度事件（主进程 → 渲染进程推送） ────────────────────────────────────────
@@ -169,6 +197,7 @@ export interface PublishBatchSummary {
   batchName?: string;
   entryScene?: PublishEntryScene;
   runningCount: number;
+  pendingCount: number;
   successCount: number;
   failedCount: number;
   totalCount: number;

@@ -1,23 +1,28 @@
 import { StepCode, StepStatus, STEP_ORDER } from '../types/publish-task';
+import type { PublishStrategy } from '../types/publish-task';
 import type { StepResult } from '../core/publish-step';
 import { PublishStep } from '../core/publish-step';
 import type { StepContext } from '../core/step-context';
 import { PublishError } from '../core/errors';
 import { CaptchaChecker } from './captcha.step';
 import { BasicInfoFiller } from '../fillers/basic-info.filler';
+import { ComponentDefaultsFiller } from '../fillers/component-defaults.filler';
 import { PropsFiller } from '../fillers/props.filler';
 import { SkuFiller } from '../fillers/sku.filler';
 import { LogisticsFiller } from '../fillers/logistics.filler';
 import { DetailImagesFiller } from '../fillers/detail-images.filler';
+import { FoodFiller } from '../fillers/food.filler';
 import type { IFiller, FillerContext } from '../fillers/filler.interface';
 import { requestBackend } from '@src/impl/shared/backend';
-import type { TbDraftContext } from '../types/draft';
+import type { TbDraftContext, TbSaleSpecUiMode } from '../types/draft';
 import { v4 as uuidv4 } from 'uuid';
 import { parseTbWindowJsonForDraft } from '../parsers/tb-window-json.parser';
 import type { Page } from 'playwright';
 import { TbEngine } from '@src/browser/tb.engine';
+import log from 'electron-log';
 import {
   publishInfo,
+  publishWarn,
   publishTaobaoResponseLog,
   publishTaobaoRequestLog,
   summarizeForLog,
@@ -25,13 +30,23 @@ import {
 import {
   assertTbDraftSubmitSuccess,
   buildDraftJsonBody,
+  deleteTaobaoDraftById,
+  listTaobaoDrafts,
   normalizeTbDraftResponse,
   parseTaobaoResponseText,
   submitDraftToTaobao,
+  syncCustomSalePropsToTaobao,
 } from '../utils/tb-publish-api';
 import { ensureTbShopLoggedIn, handleTbMaybeLoginRequired } from '../utils/tb-login-state';
 
 declare const window: any;
+
+function buildPublishStartTime(strategy?: PublishStrategy): { type: 0 | 2; shelfTime: null } {
+  return {
+    type: strategy === 'immediate' ? 0 : 2,
+    shelfTime: null,
+  };
+}
 
 // ─── 跨步骤 Page 共享（进程内存，不持久化）────────────────────────────────────
 
@@ -58,6 +73,19 @@ export async function closePublishPage(taskId: number): Promise<void> {
   await entry.engine.closePage().catch(() => undefined);
 }
 
+/** 通过内部 shopId 查询店铺，返回 platformShopId */
+export async function fetchPlatformShopId(shopId: number): Promise<string> {
+  try {
+    const shop = await requestBackend<{ platformShopId?: string }>(
+      'GET',
+      `/shops/${shopId}`,
+    );
+    return shop.platformShopId?.trim() ?? '';
+  } catch {
+    return '';
+  }
+}
+
 // ─── 淘宝发布页面 URL ─────────────────────────────────────────────────────────
 
 /** 通过类别 ID 打开新建草稿的发布页面 */
@@ -74,6 +102,37 @@ const TB_WINDOW_JSON_TIMEOUT = 20_000;
 const TB_DRAFT_ADD_API = 'draftOp/add.json';
 /** 编辑已有草稿时的保存接口特征 */
 const TB_DRAFT_UPDATE_API = 'draftOp/update.json';
+
+interface TbSaleSpecUiState {
+  mode: TbSaleSpecUiMode;
+  text: string;
+}
+
+function parseRequestForm(postData: string): Record<string, string> {
+  const params = new URLSearchParams(postData);
+  const result: Record<string, string> = {};
+  for (const [key, value] of params.entries()) {
+    result[key] = value;
+  }
+  return result;
+}
+
+export async function detectTbSaleSpecUiState(page: Page): Promise<TbSaleSpecUiState> {
+  const text = await page.evaluate(() => {
+    const doc = (globalThis as { document?: { body?: { innerText?: string } } }).document;
+    return doc?.body?.innerText?.slice(0, 4000) || '';
+  });
+
+  if (text.includes('+ 创建规格') || text.includes('创建规格') || text.includes('编辑规格')) {
+    return { mode: 'custom-spec', text };
+  }
+
+  if (text.includes('添加销售属性')) {
+    return { mode: 'add-sale-prop', text };
+  }
+
+  return { mode: 'unknown', text };
+}
 
 /**
  * FillDraftStep — 初始化并填充草稿（Step 4）
@@ -92,8 +151,8 @@ const TB_DRAFT_UPDATE_API = 'draftOp/update.json';
  *  - draftContext: TbDraftContext
  */
 
-/** 单个分类下淘宝草稿数上限 */
-const TB_DRAFT_MAX_PER_CAT = 10;
+/** 新增草稿前的淘宝草稿清理阈值：达到 9 个就先清空 */
+const TB_DRAFT_CLEANUP_THRESHOLD = 9;
 
 export class FillDraftStep extends PublishStep {
   readonly stepCode = StepCode.FILL_DRAFT;
@@ -103,10 +162,12 @@ export class FillDraftStep extends PublishStep {
   /** 填充器注册表（按执行顺序排列） */
   private readonly fillers: IFiller[] = [
     new BasicInfoFiller(),
+    new ComponentDefaultsFiller(),
     new PropsFiller(),
     new SkuFiller(),
     new LogisticsFiller(),
     new DetailImagesFiller(),
+    new FoodFiller(),
   ];
 
   protected async doExecute(ctx: StepContext): Promise<StepResult> {
@@ -123,6 +184,9 @@ export class FillDraftStep extends PublishStep {
     const shopId = ctx.shopId;
     const sourceProductId = product.sourceId?.trim() ?? ctx.get('sourceProductId')?.trim() ?? '';
 
+    // 取店铺的 platformShopId，供 LogisticsFiller 查询 address_template
+    const platformShopId = await fetchPlatformShopId(shopId);
+
     // ── Step 1: 查询服务端是否已有草稿记录 ────────────────────────────────────
     const serverDraft = await this.findExistingDraftRecord(sourceProductId, shopId, catId);
 
@@ -132,8 +196,9 @@ export class FillDraftStep extends PublishStep {
     //   b) 服务端有草稿记录（tbDraftId）→ 打开淘宝草稿编辑页面
     //   c) 无草稿 → 确保草稿数量未超限，再通过 catId 打开淘宝新建发布页面
     const existingCtx = ctx.get('draftContext');
+    log.info('existingCtx', existingCtx);
+    log.info('serverDraft', serverDraft);
     let draftCtx: TbDraftContext;
-
     if (existingCtx?.startTraceId && existingCtx?.pageJsonData) {
       // a) 重试场景：直接复用
       draftCtx = existingCtx;
@@ -142,8 +207,10 @@ export class FillDraftStep extends PublishStep {
       draftCtx = await this.loadExistingDraft(ctx, serverDraft.tbDraftId.trim());
     } else {
       // c) 新建草稿
-      await this.ensureDraftSlot(shopId, catId);
+      log.info('createNewDraft start');
+      await this.ensureDraftSlot(ctx.taskId, shopId, catId);
       draftCtx = await this.createNewDraft(ctx);
+      log.info('createNewDraft end');
     }
 
     ctx.set('draftContext', draftCtx);
@@ -164,28 +231,103 @@ export class FillDraftStep extends PublishStep {
       ? parseTbWindowJsonForDraft(draftCtx.pageJsonData)
       : undefined;
 
+    // [LOGISTICS-DEBUG] 打印 window.Json 里解析出的 shippingArea / tbExtractWay 组件原始数据
+    publishInfo(`[task:${ctx.taskId}] [LOGISTICS] window.Json components`, {
+      taskId: ctx.taskId,
+      tbWindowJsonExists: tbWindowJson !== undefined,
+      shippingAreaComponent: summarizeForLog(tbWindowJson?.components?.['shippingArea'] ?? null),
+      tbExtractWayComponent: summarizeForLog(tbWindowJson?.components?.['tbExtractWay'] ?? null),
+    });
+
     // ── Step 5: 构建填充器上下文 ──────────────────────────────────────────────
+
+    // [LOGISTICS-DEBUG] 打印源商品物流数据，用于判断 templateId/shipFrom 是否被正确解析
+    publishInfo(`[task:${ctx.taskId}] [LOGISTICS] product.logistics`, {
+      taskId: ctx.taskId,
+      logistics: summarizeForLog(product.logistics),
+    });
+
+    // [LOGISTICS-DEBUG] 打印草稿 base jsonBody 中原始 tbExtractWay，用于判断草稿本身有无模板
+    const baseJsonBody = draftCtx.updateDraftJsonBody ?? draftCtx.addDraftJsonBody;
+    const baseTbExtractWay = (baseJsonBody as Record<string, unknown> | undefined)?.['tbExtractWay'];
+    publishInfo(`[task:${ctx.taskId}] [LOGISTICS] draft base tbExtractWay`, {
+      taskId: ctx.taskId,
+      source: draftCtx.updateDraftJsonBody ? 'updateDraftJsonBody' : draftCtx.addDraftJsonBody ? 'addDraftJsonBody' : 'fallback(window.Json)',
+      tbExtractWay: summarizeForLog(baseTbExtractWay ?? null),
+    });
+
+    const initialDraftPayload = buildDraftJsonBody(draftCtx, {
+      ...(draftCtx.submitPayload ?? {}),
+      catId: draftCtx.catId,
+      startTraceId: draftCtx.startTraceId,
+    });
+
+    // [LOGISTICS-DEBUG] 打印 buildDraftJsonBody 初始化后的 tbExtractWay（fillers 执行前）
+    publishInfo(`[task:${ctx.taskId}] [LOGISTICS] initialDraftPayload tbExtractWay (before fillers)`, {
+      taskId: ctx.taskId,
+      tbExtractWay: summarizeForLog(initialDraftPayload['tbExtractWay'] ?? null),
+    });
+
+    // 使用 imageUrlMap（来源于 product_file.file_path 缓存）将原始 URL 解析为淘宝图片空间 URL
+    const imageUrlMap = ctx.get('imageUrlMap') ?? {};
+    const resolveImageUrl = (url: string) => imageUrlMap[url] ?? url;
+
+    const uploadedMainImages = (ctx.get('uploadedMainImages') ?? product.mainImages)
+      .map(resolveImageUrl);
+    const uploadedDetailImages = (ctx.get('uploadedDetailImages') ?? product.detailImages)
+      .map(resolveImageUrl);
+
+    // 从 ctx 或 imageUrlMap 构建 SKU 图片映射
+    const uploadedSkuImageMap: Record<string, string> = { ...(ctx.get('uploadedSkuImageMap') ?? {}) };
+    for (const sku of product.skuList) {
+      if (sku.imgUrl && !uploadedSkuImageMap[sku.imgUrl] && imageUrlMap[sku.imgUrl]) {
+        uploadedSkuImageMap[sku.imgUrl] = imageUrlMap[sku.imgUrl];
+      }
+    }
+
     const fillerCtx: FillerContext = {
+      taskId: ctx.taskId,
+      platformShopId,
       product,
       categoryInfo,
-      uploadedMainImages: ctx.get('uploadedMainImages') ?? product.mainImages,
-      uploadedDetailImages: ctx.get('uploadedDetailImages') ?? product.detailImages,
+      uploadedMainImages,
+      uploadedDetailImages,
       uploadedDetailImageMetas: ctx.get('uploadedDetailImageMetas') ?? [],
+      uploadedSkuImageMap,
       draftContext: draftCtx,
+      publishConfig: ctx.get('publishConfig'),
       tbWindowJson,
-      draftPayload: buildDraftJsonBody(draftCtx, {
-        ...(draftCtx.submitPayload ?? {}),
-        catId: draftCtx.catId,
-        startTraceId: draftCtx.startTraceId,
-      }),
+      draftPayload: initialDraftPayload,
     };
 
     // ── Step 6: 依次执行各填充器（源商品信息 + tbWindowJson 共同驱动构造 payload）
     for (const filler of this.fillers) {
-      await filler.fill(fillerCtx);
+      publishInfo(`[task:${ctx.taskId}] [FILLER] start ${filler.fillerName}`, { taskId: ctx.taskId });
+      try {
+        await filler.fill(fillerCtx);
+        publishInfo(`[task:${ctx.taskId}] [FILLER] done ${filler.fillerName}`, { taskId: ctx.taskId });
+      } catch (fillerError) {
+        publishWarn(`[task:${ctx.taskId}] [FILLER] error in ${filler.fillerName}`, {
+          taskId: ctx.taskId,
+          error: fillerError instanceof Error ? fillerError.message : String(fillerError),
+        });
+        throw fillerError;
+      }
     }
 
-    // ── Step 7: 提交草稿 ──────────────────────────────────────────────────────
+    fillerCtx.draftPayload['startTime'] = buildPublishStartTime(ctx.get('publishConfig')?.strategy);
+
+    // [LOGISTICS-DEBUG] 所有 fillers 执行完后，打印最终 tbExtractWay（提交前）
+    publishInfo(`[task:${ctx.taskId}] [LOGISTICS] draftPayload tbExtractWay (after fillers)`, {
+      taskId: ctx.taskId,
+      tbExtractWay: summarizeForLog(fillerCtx.draftPayload['tbExtractWay'] ?? null),
+      shippingArea: summarizeForLog(fillerCtx.draftPayload['shippingArea'] ?? null),
+    });
+
+    // ── Step 7: 仅在 FillDraft 阶段先同步一次自定义销售属性到淘宝 ──────────────
+    await this.syncCustomSalePropsIfNeeded(ctx.taskId, ctx.shopId, draftCtx, fillerCtx.draftPayload);
+
+    // ── Step 8: 提交草稿 ──────────────────────────────────────────────────────
     const response = await this.submitDraft(ctx.taskId, ctx.shopId, draftCtx, fillerCtx.draftPayload);
     CaptchaChecker.check(this.stepCode, response);
     assertTbDraftSubmitSuccess(this.stepCode, response, '填充草稿失败');
@@ -200,7 +342,7 @@ export class FillDraftStep extends PublishStep {
     }
     ctx.set('draftContext', draftCtx);
 
-    // ── Step 8: 提交后更新服务端草稿记录（写入最终 draftId） ──────────────────
+    // ── Step 9: 提交后更新服务端草稿记录（写入最终 draftId） ──────────────────
     if (draftRecordId && draftCtx.draftId) {
       await this.updateDraftRecord(draftRecordId, {
         taskId: ctx.taskId,
@@ -275,22 +417,31 @@ export class FillDraftStep extends PublishStep {
     // 提取 window.Json
     const rawWindowJson = await page.evaluate(() => window?.Json);
     const tbWindowJson = parseTbWindowJsonForDraft(rawWindowJson);
+    const saleSpecUiState = await detectTbSaleSpecUiState(page);
 
     // 从请求中提取 jsonBody（比 window.Json 重建更准确）
     let addDraftJsonBody: Record<string, unknown> | undefined;
+    let addDraftRequestForm: Record<string, string> | undefined;
+    let addDraftRequestHeaders: Record<string, string> | undefined;
     const savedRequest = await saveDraftRequestPromise;
     if (savedRequest) {
       try {
         const postData = savedRequest.postData() ?? '';
-        const params = new URLSearchParams(postData);
-        const jsonBodyStr = params.get('jsonBody');
+        const requestForm = parseRequestForm(postData);
+        const jsonBodyStr = requestForm.jsonBody;
         if (jsonBodyStr) {
+          addDraftRequestForm = requestForm;
+          addDraftRequestHeaders = await savedRequest.allHeaders();
           addDraftJsonBody = JSON.parse(jsonBodyStr) as Record<string, unknown>;
           publishTaobaoRequestLog(ctx.taskId, 'draft-add', {
             url: savedRequest.url(),
             method: savedRequest.method(),
             catId,
-            input: summarizeForLog(addDraftJsonBody),
+            input: {
+              jsonBody: summarizeForLog(addDraftJsonBody),
+              formKeys: Object.keys(requestForm),
+              headers: summarizeForLog(addDraftRequestHeaders),
+            },
           });
         }
       } catch {
@@ -336,7 +487,11 @@ export class FillDraftStep extends PublishStep {
       input: {
         startTraceId,
       },
-      output: summarizeForLog(tbWindowJson.meta),
+      output: {
+        meta: summarizeForLog(tbWindowJson.meta),
+        saleSpecUiMode: saleSpecUiState.mode,
+        saleSpecUiText: saleSpecUiState.text.slice(0, 300),
+      },
     });
 
     // page 保留供后续步骤（EditDraft / Publish）复用，不在此处关闭
@@ -349,6 +504,12 @@ export class FillDraftStep extends PublishStep {
       pageJsonData: rawWindowJson as Record<string, unknown>,
       addDraftJsonBody,
       updateDraftJsonBody: undefined,
+      addDraftRequestForm,
+      updateDraftRequestForm: undefined,
+      addDraftRequestHeaders,
+      updateDraftRequestHeaders: undefined,
+      saleSpecUiMode: saleSpecUiState.mode,
+      saleSpecUiText: saleSpecUiState.text,
       submitPayload: undefined,
     };
   }
@@ -401,22 +562,31 @@ export class FillDraftStep extends PublishStep {
 
     const rawWindowJson = await page.evaluate(() => window?.Json);
     const tbWindowJson = parseTbWindowJsonForDraft(rawWindowJson);
+    const saleSpecUiState = await detectTbSaleSpecUiState(page);
 
     let updateDraftJsonBody: Record<string, unknown> | undefined;
+    let updateDraftRequestForm: Record<string, string> | undefined;
+    let updateDraftRequestHeaders: Record<string, string> | undefined;
     const updateRequest = await updateDraftRequestPromise;
     if (updateRequest) {
       try {
         const postData = updateRequest.postData() ?? '';
-        const params = new URLSearchParams(postData);
-        const jsonBodyStr = params.get('jsonBody');
+        const requestForm = parseRequestForm(postData);
+        const jsonBodyStr = requestForm.jsonBody;
         if (jsonBodyStr) {
+          updateDraftRequestForm = requestForm;
+          updateDraftRequestHeaders = await updateRequest.allHeaders();
           updateDraftJsonBody = JSON.parse(jsonBodyStr) as Record<string, unknown>;
           publishTaobaoRequestLog(ctx.taskId, 'draft-update-capture', {
             url: updateRequest.url(),
             method: updateRequest.method(),
             catId: tbWindowJson.meta.catId ?? fallbackCatId,
             draftId: tbDraftId,
-            input: summarizeForLog(updateDraftJsonBody),
+            input: {
+              jsonBody: summarizeForLog(updateDraftJsonBody),
+              formKeys: Object.keys(requestForm),
+              headers: summarizeForLog(updateDraftRequestHeaders),
+            },
           });
         }
       } catch {
@@ -458,7 +628,11 @@ export class FillDraftStep extends PublishStep {
       input: {
         startTraceId,
       },
-      output: summarizeForLog(tbWindowJson.meta),
+      output: {
+        meta: summarizeForLog(tbWindowJson.meta),
+        saleSpecUiMode: saleSpecUiState.mode,
+        saleSpecUiText: saleSpecUiState.text.slice(0, 300),
+      },
     });
 
     // page 保留供后续步骤（EditDraft / Publish）复用，不在此处关闭
@@ -471,6 +645,12 @@ export class FillDraftStep extends PublishStep {
       pageJsonData: rawWindowJson as Record<string, unknown>,
       addDraftJsonBody: undefined,
       updateDraftJsonBody,
+      addDraftRequestForm: undefined,
+      updateDraftRequestForm,
+      addDraftRequestHeaders: undefined,
+      updateDraftRequestHeaders,
+      saleSpecUiMode: saleSpecUiState.mode,
+      saleSpecUiText: saleSpecUiState.text,
       submitPayload: undefined,
     };
   }
@@ -478,38 +658,50 @@ export class FillDraftStep extends PublishStep {
   // ─── 草稿数量管理 ──────────────────────────────────────────────────────────
 
   /**
-   * 确保该分类下有草稿名额（< 10 个）
-   * 若已满，将最旧的草稿逐一删除直到腾出空间
+   * 新增草稿前，先检查淘宝当前类目草稿数。
+   * 若达到阈值（>= 9），先删除淘宝端该类目下全部草稿，再继续后续保存草稿逻辑。
    */
-  private async ensureDraftSlot(shopId: number, catId: string): Promise<void> {
+  private async ensureDraftSlot(taskId: number, shopId: number, catId: string): Promise<void> {
+    const engine = new TbEngine(String(shopId), true);
+    engine.bindPublishTask(taskId);
+
     try {
-      const { count } = await requestBackend<{ count: number }>(
-        'GET',
-        '/product-drafts/count/shop-cat',
-        { params: { shopId: String(shopId), tbCatId: catId } },
-      );
+      const page = await engine.init(`${TB_PUBLISH_PAGE_URL}?catId=${catId}`);
+      if (!page) {
+        throw new PublishError(this.stepCode, '无法打开淘宝发布页面，无法检查草稿数量');
+      }
+      await ensureTbShopLoggedIn(page, this.stepCode, shopId);
 
-      if (count < TB_DRAFT_MAX_PER_CAT) return;
+      const draftList = await listTaobaoDrafts(taskId, shopId, page, catId);
+      const draftCount = typeof draftList.count === 'number'
+        ? draftList.count
+        : Array.isArray(draftList.list) ? draftList.list.length : 0;
 
-      const deleteCount = count - TB_DRAFT_MAX_PER_CAT + 1;
-      const oldestDrafts = await requestBackend<{
-        items: Array<{ id: number; tbDraftId: string }>;
-      }>('GET', '/product-drafts', {
-        params: {
-          shopId: String(shopId),
-          tbCatId: catId,
-          pageSize: String(deleteCount),
-          pageIndex: '1',
-        },
+      publishInfo(`[task:${taskId}] [TB] [draft-list-before-create]`, {
+        taskId,
+        catId,
+        count: draftCount,
+        infoMsg: draftList.infoMsg,
+        draftIds: (draftList.list ?? []).map(draft => String(draft.id ?? '')).filter(Boolean),
       });
 
-      for (const draft of oldestDrafts?.items ?? []) {
-        if (!draft.id) continue;
-        await this.deleteDraftRecord(draft.id).catch(() => undefined);
-        // TODO: 调用 TB 平台接口删除对应草稿（需要 /publish-tasks/delete-draft 端点）
+      if (draftCount < TB_DRAFT_CLEANUP_THRESHOLD) {
+        return;
       }
+
+      for (const draft of draftList.list ?? []) {
+        const tbDraftId = String(draft.id ?? '').trim();
+        if (!tbDraftId) {
+          continue;
+        }
+        await deleteTaobaoDraftById(taskId, shopId, page, catId, tbDraftId);
+      }
+
+      await this.cleanupLocalDraftRecords(shopId, catId);
     } catch {
       // 容错：查询/删除失败不阻塞发布
+    } finally {
+      await engine.closePage().catch(() => undefined);
     }
   }
 
@@ -525,18 +717,19 @@ export class FillDraftStep extends PublishStep {
     }
     try {
       const result = await requestBackend<{
-        items: Array<{ id: number; tbDraftId?: string; tbCatId?: string }>;
+        total: number;
+        data: Array<{ id: number; tbDraftId?: string; tbCatId?: string }>;
       }>('GET', '/product-drafts', {
         params: {
           sourceProductId,
-          shopId: String(shopId),
+          shopId: shopId,
           tbCatId: catId,
           status: 'DRAFT',
           pageIndex: '1',
           pageSize: '1',
         },
       });
-      const draft = result.items?.[0] ?? null;
+      const draft = result.data?.[0] ?? null;
       if (!draft?.tbDraftId?.trim()) {
         return draft ? { ...draft, tbDraftId: '' } : null;
       }
@@ -613,6 +806,32 @@ export class FillDraftStep extends PublishStep {
     await requestBackend('DELETE', `/product-drafts/${recordId}`);
   }
 
+  private async cleanupLocalDraftRecords(shopId: number, catId: string): Promise<void> {
+    try {
+      const result = await requestBackend<{
+        total: number;
+        data: Array<{ id: number }>;
+      }>('GET', '/product-drafts', {
+        params: {
+          shopId: String(shopId),
+          tbCatId: catId,
+          pageIndex: '1',
+          pageSize: '100',
+        },
+      });
+
+      for (const draft of result.data ?? []) {
+        if (!draft.id) {
+          continue;
+        }
+        await this.deleteDraftRecord(draft.id).catch(() => undefined);
+      }
+    } catch {
+      // 非关键路径，失败不阻塞发布
+    }
+  }
+
+
   // ─── 淘宝接口调用 ─────────────────────────────────────────────────────────
 
   private async submitDraft(
@@ -627,5 +846,45 @@ export class FillDraftStep extends PublishStep {
     }
     pageEntry.engine.bindPublishTask(taskId);
     return submitDraftToTaobao(taskId, shopId, pageEntry.page, draftCtx, payload);
+  }
+
+  private async syncCustomSalePropsIfNeeded(
+    taskId: number,
+    shopId: number,
+    draftCtx: TbDraftContext,
+    payload: Record<string, unknown>,
+  ): Promise<void> {
+    if (draftCtx.saleSpecUiMode !== 'custom-spec') {
+      publishInfo(`[task:${taskId}] [TB] [sale-spec] skip custom-spec sync`, {
+        taskId,
+        mode: draftCtx.saleSpecUiMode ?? 'unknown',
+      });
+      return;
+    }
+
+    const customSaleProp = Array.isArray(payload['customSaleProp'])
+      ? (payload['customSaleProp'] as unknown[])
+      : [];
+    const sku = Array.isArray(payload['sku']) ? (payload['sku'] as unknown[]) : [];
+
+    if (!customSaleProp.length || !sku.length) {
+      return;
+    }
+
+    const pageEntry = getPublishPage(taskId);
+    if (!pageEntry) {
+      throw new PublishError(this.stepCode, '发布页面未找到，无法同步淘宝销售属性');
+    }
+    pageEntry.engine.bindPublishTask(taskId);
+
+    const response = await syncCustomSalePropsToTaobao(
+      taskId,
+      shopId,
+      pageEntry.page,
+      draftCtx,
+      payload,
+    );
+    CaptchaChecker.check(this.stepCode, response);
+    assertTbDraftSubmitSuccess(this.stepCode, response, '同步淘宝自定义销售属性失败');
   }
 }

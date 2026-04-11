@@ -10,10 +10,12 @@ import {
   Alert,
   Button,
   Descriptions,
-  InputNumber,
+  Input,
   Modal,
+  Popover,
   Progress,
   Select,
+  Spin,
   Steps,
   Table,
   Tag,
@@ -38,30 +40,76 @@ const SHOP_LOGIN_REQUIRED_MESSAGE = "当前选中的店铺未登录，需要去�
 
 const PRICE_SETTINGS_KEY = "publish_price_settings_v1";
 
-interface PriceSettings {
+type PublishStrategy = "warehouse" | "immediate";
+
+interface PublishSettings {
   floatRatio: number;
   floatAmount: number;
+  strategy: PublishStrategy;
 }
 
-function loadPriceSettings(): PriceSettings {
+const DEFAULT_PUBLISH_SETTINGS: PublishSettings = {
+  floatRatio: 1.3,
+  floatAmount: 0,
+  strategy: "warehouse",
+};
+
+function formatShopLabel(shop?: Pick<ShopRecord, "id" | "nickname" | "remark" | "name" | "code" | "platform">) {
+  if (!shop) {
+    return "-";
+  }
+
+  const primary = shop.name || shop.code || shop.platform || `店铺 #${shop.id}`;
+  const details = [
+    shop.nickname?.trim() ? `昵称：${shop.nickname.trim()}` : "",
+    shop.remark?.trim() ? `备注：${shop.remark.trim()}` : "",
+  ].filter(Boolean);
+
+  return details.length > 0 ? `${primary} · ${details.join(" · ")}` : primary;
+}
+
+function formatEditableNumber(value: number): string {
+  return Number.isInteger(value) ? String(value) : String(value);
+}
+
+function formatPublishTime(value?: string): string {
+  const text = String(value || "").trim();
+  if (!text) {
+    return "—";
+  }
+  const date = new Date(text);
+  if (Number.isNaN(date.getTime())) {
+    return text;
+  }
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  const hour = String(date.getHours()).padStart(2, "0");
+  const minute = String(date.getMinutes()).padStart(2, "0");
+  const second = String(date.getSeconds()).padStart(2, "0");
+  return `${year}-${month}-${day} ${hour}:${minute}:${second}`;
+}
+
+function loadPriceSettings(): PublishSettings {
   try {
     if (typeof window !== "undefined") {
       const raw = localStorage.getItem(PRICE_SETTINGS_KEY);
       if (raw) {
-        const parsed = JSON.parse(raw) as Partial<PriceSettings>;
+        const parsed = JSON.parse(raw) as Partial<PublishSettings>;
         return {
-          floatRatio: typeof parsed.floatRatio === "number" ? parsed.floatRatio : 1.3,
-          floatAmount: typeof parsed.floatAmount === "number" ? parsed.floatAmount : 0,
+          floatRatio: typeof parsed.floatRatio === "number" ? parsed.floatRatio : DEFAULT_PUBLISH_SETTINGS.floatRatio,
+          floatAmount: typeof parsed.floatAmount === "number" ? parsed.floatAmount : DEFAULT_PUBLISH_SETTINGS.floatAmount,
+          strategy: parsed.strategy === "immediate" ? "immediate" : DEFAULT_PUBLISH_SETTINGS.strategy,
         };
       }
     }
   } catch {
     // ignore
   }
-  return { floatRatio: 1.3, floatAmount: 0 };
+  return { ...DEFAULT_PUBLISH_SETTINGS };
 }
 
-function savePriceSettings(settings: PriceSettings): void {
+function savePriceSettings(settings: PublishSettings): void {
   if (typeof window !== "undefined") {
     localStorage.setItem(PRICE_SETTINGS_KEY, JSON.stringify(settings));
   }
@@ -84,8 +132,24 @@ interface PublishQueueItem {
   status: PublishQueueStatus;
   taskId?: number;
   publishedItemId?: string;
+  publishedTime?: string;
+  currentStepCode?: string;
   statusText?: string;
   waitingForCaptcha?: boolean;
+  error?: string;
+}
+
+interface PublishStepDetail {
+  id: number;
+  stepCode: string;
+  status: string;
+  errorMessage?: string;
+  completedAt?: string;
+}
+
+interface TaskErrorDetailState {
+  loading: boolean;
+  steps: PublishStepDetail[];
   error?: string;
 }
 
@@ -97,6 +161,7 @@ interface ProductPublishModalProps {
   onPublished?: () => Promise<void> | void;
   initialBatchId?: number;
   initialEntryScene?: "collection" | "product";
+  initialView?: "default" | "progress";
 }
 
 // ─── 状态标签配置 ─────────────────────────────────────────────────────────────
@@ -132,6 +197,12 @@ const PublishStepStatus = {
 
 const PublishStepCode = {
   UNKNOWN: "UNKNOWN",
+  PARSE_SOURCE: "PARSE_SOURCE",
+  UPLOAD_IMAGES: "UPLOAD_IMAGES",
+  SEARCH_CATEGORY: "SEARCH_CATEGORY",
+  FILL_DRAFT: "FILL_DRAFT",
+  EDIT_DRAFT: "EDIT_DRAFT",
+  PUBLISH: "PUBLISH",
 } as const;
 
 type PublishSourceTypeValue = typeof PublishSourceType[keyof typeof PublishSourceType];
@@ -161,6 +232,7 @@ interface PublishRuntimeTaskSnapshot {
   sourceBatchId?: number;
   sourceBatchName?: string;
   sourceRecordId?: number;
+  updatedAt: string;
 }
 
 interface PublishBatchSummary {
@@ -168,6 +240,7 @@ interface PublishBatchSummary {
   batchName?: string;
   entryScene?: "collection" | "product";
   runningCount: number;
+  pendingCount: number;
   successCount: number;
   failedCount: number;
   totalCount: number;
@@ -182,6 +255,14 @@ interface PublishCenterState {
   abnormalCount: number;
 }
 
+interface PublishBatchRepublishStats {
+  batchId: number;
+  totalCount: number;
+  successCount: number;
+  failedCount: number;
+  pendingCount: number;
+}
+
 // ─── 主组件 ───────────────────────────────────────────────────────────────────
 
 export function ProductPublishModal({
@@ -190,16 +271,23 @@ export function ProductPublishModal({
   onPublished,
   initialBatchId = 0,
   initialEntryScene = "product",
+  initialView = "default",
 }: ProductPublishModalProps) {
   const isCollectionBatchEntry = initialEntryScene === "collection" && initialBatchId > 0;
-  const [currentStep, setCurrentStep] = useState(isCollectionBatchEntry ? 2 : 0);
+  const directToProgress = initialView === "progress";
+  const initialStep = directToProgress ? 4 : isCollectionBatchEntry ? 2 : 1;
+  const [currentStep, setCurrentStep] = useState(initialStep);
   const [collectBatches, setCollectBatches] = useState<CollectBatchRecord[]>([]);
   const [shops, setShops] = useState<ShopRecord[]>([]);
   const [optionsLoading, setOptionsLoading] = useState(false);
+  const [republishStatsByBatchId, setRepublishStatsByBatchId] = useState<Record<number, PublishBatchRepublishStats>>({});
+  const [republishStatsLoadingBatchIds, setRepublishStatsLoadingBatchIds] = useState<number[]>([]);
   const [selectedDataSource, setSelectedDataSource] = useState<PublishDataSource>("batch");
   const [selectedBatchId, setSelectedBatchId] = useState(initialBatchId);
   const [selectedTargetShopId, setSelectedTargetShopId] = useState(0);
-  const [priceSettings, setPriceSettings] = useState<PriceSettings>(loadPriceSettings);
+  const [priceSettings, setPriceSettings] = useState<PublishSettings>(loadPriceSettings);
+  const [priceRatioInput, setPriceRatioInput] = useState(() => formatEditableNumber(loadPriceSettings().floatRatio));
+  const [priceAmountInput, setPriceAmountInput] = useState(() => formatEditableNumber(loadPriceSettings().floatAmount));
   const [publishQueue, setPublishQueue] = useState<PublishQueueItem[]>([]);
   const [publishRunning, setPublishRunning] = useState(false);
   const [fetchingFavorites, setFetchingFavorites] = useState(false);
@@ -207,14 +295,16 @@ export function ProductPublishModal({
   const [restoredFromCenter, setRestoredFromCenter] = useState(false);
   const [recoveryMode, setRecoveryMode] = useState<RecoveryMode>("undecided");
   const [recoverableTasks, setRecoverableTasks] = useState<PublishRuntimeTaskSnapshot[]>([]);
+  const [taskErrorDetails, setTaskErrorDetails] = useState<Record<number, TaskErrorDetailState>>({});
   const [stoppingAll, setStoppingAll] = useState(false);
   const runningTableWrapRef = useRef<HTMLDivElement | null>(null);
+  const publishQueueRef = useRef<PublishQueueItem[]>([]);
   const restoredFromCenterRef = useRef(false);
   const recoveryModeRef = useRef<RecoveryMode>("undecided");
   const stopRequestedRef = useRef(false);
   const publishRunIdRef = useRef(0);
   // Step 5 内部阶段：preview = 预览待发布数据，recovery = 选择恢复策略，running = 发布任务执行中
-  const [step4Phase, setStep4Phase] = useState<"preview" | "recovery" | "running">("preview");
+  const [step4Phase, setStep4Phase] = useState<"preview" | "recovery" | "running">(directToProgress ? "running" : "preview");
 
   // 打开时加载选项数据
   useEffect(() => {
@@ -245,22 +335,30 @@ export function ProductPublishModal({
   // 打开时重置状态
   useEffect(() => {
     if (!open) return;
-    setCurrentStep(isCollectionBatchEntry ? 2 : 0);
+    const nextPriceSettings = loadPriceSettings();
+    setCurrentStep(directToProgress ? 4 : isCollectionBatchEntry ? 2 : 1);
     setSelectedDataSource("batch");
     setSelectedBatchId(initialBatchId);
     setSelectedTargetShopId(0);
     setPublishQueue([]);
-    setStep4Phase("preview");
-    setPriceSettings(loadPriceSettings());
+    setStep4Phase(directToProgress ? "running" : "preview");
+    setPriceSettings(nextPriceSettings);
+    setPriceRatioInput(formatEditableNumber(nextPriceSettings.floatRatio));
+    setPriceAmountInput(formatEditableNumber(nextPriceSettings.floatAmount));
     setResumingTaskIds([]);
-    setRestoredFromCenter(false);
-    setRecoveryMode("undecided");
+    setRestoredFromCenter(directToProgress);
+    setRecoveryMode(directToProgress ? "continue" : "undecided");
     setRecoverableTasks([]);
+    setTaskErrorDetails({});
     setPublishRunning(false);
     setStoppingAll(false);
     stopRequestedRef.current = false;
     publishRunIdRef.current += 1;
-  }, [initialBatchId, isCollectionBatchEntry, open]);
+  }, [directToProgress, initialBatchId, isCollectionBatchEntry, open]);
+
+  useEffect(() => {
+    publishQueueRef.current = publishQueue;
+  }, [publishQueue]);
 
   useEffect(() => {
     restoredFromCenterRef.current = restoredFromCenter;
@@ -293,6 +391,30 @@ export function ProductPublishModal({
       }
       if ((firstTask.sourceBatchId ?? 0) > 0) {
         setSelectedBatchId(firstTask.sourceBatchId ?? 0);
+      }
+
+      if (directToProgress) {
+        let favoriteQueue: PublishQueueItem[] | null = null;
+        const firstBatchId = restorableTasks[0]?.sourceBatchId ?? 0;
+        const firstShopId = restorableTasks[0]?.shopId ?? 0;
+
+        if (publishQueueRef.current.length === 0 && firstBatchId > 0 && firstShopId > 0) {
+          favoriteQueue = await loadFavoriteQueue(firstBatchId, firstShopId);
+        }
+
+        setRestoredFromCenter(true);
+        setRecoveryMode("continue");
+        setPublishQueue((current) => {
+          const baseQueue = favoriteQueue && favoriteQueue.length > 0
+            ? favoriteQueue
+            : current;
+          return baseQueue.length > 0
+            ? mergeQueueWithRuntimeTasks(baseQueue, restorableTasks)
+            : mapRuntimeTasksToQueue(restorableTasks);
+        });
+        setStep4Phase("running");
+        setCurrentStep(4);
+        return;
       }
 
       if (recoveryModeRef.current === "restart") {
@@ -344,10 +466,10 @@ export function ProductPublishModal({
     return () => {
       cancelled = true;
     };
-  }, [initialBatchId, open]);
+  }, [directToProgress, initialBatchId, open]);
 
   const shopNameMap = useMemo(
-    () => new Map(shops.map((s) => [s.id, s.remark || s.name || s.code || s.platform])),
+    () => new Map(shops.map((s) => [s.id, formatShopLabel(s)])),
     [shops],
   );
 
@@ -370,18 +492,24 @@ export function ProductPublishModal({
     selectedTargetShop && selectedTargetShop.loginStatus !== "LOGGED_IN",
   );
 
+  const selectedBatchRepublishStats = selectedBatchId > 0
+    ? republishStatsByBatchId[selectedBatchId]
+    : undefined;
+  const selectedBatchRepublishStatsLoading = selectedBatchId > 0
+    && republishStatsLoadingBatchIds.includes(selectedBatchId);
+
   const isCollectionEntry = initialEntryScene === "collection";
   const stepItems = isCollectionBatchEntry
     ? [
         { title: "选择店铺" },
-        { title: "价格设置" },
+        { title: "发布配置" },
         { title: "发布进度" },
       ]
     : [
         { title: "选择数据源" },
         { title: selectedDataSource === "file" ? "导入文件" : "选择批次" },
         { title: "选择店铺" },
-        { title: "价格设置" },
+        { title: "发布配置" },
         { title: "发布进度" },
       ];
   const displayedStep = isCollectionBatchEntry
@@ -428,18 +556,57 @@ export function ProductPublishModal({
     });
   }, [open, selectedBatch, selectedDataSource, tbShops]);
 
-  const publishStats = useMemo(() => {
-    const total = publishQueue.length;
-    if (total === 0) return { progress: 0, successCount: 0, failedCount: 0, total };
-    const successCount = publishQueue.filter((i) => i.status === "SUCCESS").length;
-    const failedCount = publishQueue.filter((i) => i.status === "FAILED").length;
+  const runningPublishStats = useMemo(() => {
+    const dedupedQueue = dedupeQueueItems(publishQueue);
+    const total = dedupedQueue.length;
+    if (total === 0) return { progress: 0, successCount: 0, failedCount: 0, pendingCount: 0, total };
+    const successCount = dedupedQueue.filter((i) => i.status === "SUCCESS").length;
+    const failedCount = dedupedQueue.filter((i) => i.status === "FAILED").length;
+    const pendingCount = Math.max(0, total - successCount - failedCount);
     return {
       progress: Math.round(((successCount + failedCount) / total) * 100),
       successCount,
       failedCount,
+      pendingCount,
       total,
     };
   }, [publishQueue]);
+
+  useEffect(() => {
+    if (!open || selectedDataSource !== "batch" || !selectedBatchId) {
+      return;
+    }
+    if (republishStatsByBatchId[selectedBatchId] !== undefined || republishStatsLoadingBatchIds.includes(selectedBatchId)) {
+      return;
+    }
+
+    let cancelled = false;
+    setRepublishStatsLoadingBatchIds((current) => (
+      current.includes(selectedBatchId) ? current : [...current, selectedBatchId]
+    ));
+
+    void getPublishApi().getPublishBatchRepublishStats(selectedBatchId)
+      .then((stats) => {
+        if (cancelled) {
+          return;
+        }
+        setRepublishStatsByBatchId((current) => ({
+          ...current,
+          [selectedBatchId]: stats as PublishBatchRepublishStats,
+        }));
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (cancelled) {
+          return;
+        }
+        setRepublishStatsLoadingBatchIds((current) => current.filter((id) => id !== selectedBatchId));
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [open, republishStatsByBatchId, republishStatsLoadingBatchIds, selectedBatchId, selectedDataSource]);
 
   const markSelectedShopLoggedOut = (shopId: number) => {
     setShops((current) =>
@@ -449,6 +616,62 @@ export function ProductPublishModal({
           : shop,
       ),
     );
+  };
+
+  const handlePriceRatioChange = (value: string) => {
+    if (!/^\d*(\.\d{0,2})?$/.test(value)) {
+      return;
+    }
+    setPriceRatioInput(value);
+    if (value === "") {
+      return;
+    }
+    const numeric = Number(value);
+    if (Number.isFinite(numeric) && numeric > 0) {
+      setPriceSettings((current) => ({ ...current, floatRatio: Math.min(10, numeric) }));
+    }
+  };
+
+  const handlePriceAmountChange = (value: string) => {
+    if (!/^\d*(\.\d{0,2})?$/.test(value)) {
+      return;
+    }
+    setPriceAmountInput(value);
+    if (value === "") {
+      return;
+    }
+    const numeric = Number(value);
+    if (Number.isFinite(numeric) && numeric >= 0) {
+      setPriceSettings((current) => ({ ...current, floatAmount: numeric }));
+    }
+  };
+
+  const commitPriceRatioInput = () => {
+    const numeric = Number(priceRatioInput);
+    const nextValue = Number.isFinite(numeric) && numeric > 0
+      ? Math.min(10, Math.max(0.1, numeric))
+      : DEFAULT_PUBLISH_SETTINGS.floatRatio;
+    setPriceSettings((current) => ({ ...current, floatRatio: nextValue }));
+    setPriceRatioInput(formatEditableNumber(nextValue));
+  };
+
+  const commitPriceAmountInput = () => {
+    const numeric = Number(priceAmountInput);
+    const nextValue = Number.isFinite(numeric) && numeric >= 0
+      ? numeric
+      : DEFAULT_PUBLISH_SETTINGS.floatAmount;
+    setPriceSettings((current) => ({ ...current, floatAmount: nextValue }));
+    setPriceAmountInput(formatEditableNumber(nextValue));
+  };
+
+  const handleResetPriceSettings = () => {
+    setPriceSettings((current) => ({
+      ...current,
+      floatRatio: DEFAULT_PUBLISH_SETTINGS.floatRatio,
+      floatAmount: DEFAULT_PUBLISH_SETTINGS.floatAmount,
+    }));
+    setPriceRatioInput(formatEditableNumber(DEFAULT_PUBLISH_SETTINGS.floatRatio));
+    setPriceAmountInput(formatEditableNumber(DEFAULT_PUBLISH_SETTINGS.floatAmount));
   };
 
   // 第二步 → 第三步：保存价格设置，拉取喜欢的采集记录并生成预览队列
@@ -710,7 +933,7 @@ export function ProductPublishModal({
             sourceType: sourceType as Parameters<typeof publishApi.createPublishTask>[0]["sourceType"],
             sourceProductId: item.sourceProductId,
             sourceRecordId: item.sourceRecordId,
-            remark: `batch:${item.sourceBatchId};batchName:${encodeURIComponent(selectedBatch.name || `发布批次 #${item.sourceBatchId}`)};record:${item.sourceRecordId};targetShop:${item.shopId};entryScene:${initialEntryScene}`,
+            remark: `batch:${item.sourceBatchId};batchName:${encodeURIComponent(selectedBatch.name || `发布批次 #${item.sourceBatchId}`)};record:${item.sourceRecordId};targetShop:${item.shopId};entryScene:${initialEntryScene};publishStrategy:${priceSettings.strategy};priceRatio:${priceSettings.floatRatio};priceAmount:${priceSettings.floatAmount}`,
           });
 
           if (publishRunIdRef.current !== runId || stopRequestedRef.current) {
@@ -725,7 +948,9 @@ export function ProductPublishModal({
                 ? {
                     ...q,
                     taskId: createdTask.id,
+                    publishedTime: createdTask.createdTime || q.publishedTime,
                     status: "PUBLISHING",
+                    currentStepCode: createdTask.currentStepCode,
                     statusText: `任务 #${createdTask.id} 已创建`,
                   }
                 : q,
@@ -743,6 +968,7 @@ export function ProductPublishModal({
                   ? {
                       ...q,
                       status: event.status === "FAILED" ? "FAILED" : event.status === "SUCCESS" ? "SUCCESS" : "PUBLISHING",
+                      currentStepCode: event.stepCode,
                       statusText: event.status === PublishStepStatus.PENDING
                         ? "等待验证码，完成右侧校验后点击继续发布"
                         : event.message || q.statusText,
@@ -765,6 +991,8 @@ export function ProductPublishModal({
                     ...q,
                     status: finalTask.status === PublishTaskStatus.SUCCESS ? "SUCCESS" : "FAILED",
                     publishedItemId: finalTask.outerItemId || undefined,
+                    publishedTime: finalTask.updatedTime || finalTask.createdTime || q.publishedTime,
+                    currentStepCode: finalTask.currentStepCode,
                     statusText: finalTask.status === PublishTaskStatus.CANCELLED
                       ? "任务已取消"
                       : finalTask.outerItemId
@@ -856,6 +1084,118 @@ export function ProductPublishModal({
     }
   };
 
+  const loadTaskErrorDetails = async (taskId: number) => {
+    const current = taskErrorDetails[taskId];
+    if (current?.loading || current?.steps.length) {
+      return;
+    }
+
+    setTaskErrorDetails((prev) => ({
+      ...prev,
+      [taskId]: {
+        loading: true,
+        steps: prev[taskId]?.steps ?? [],
+        error: undefined,
+      },
+    }));
+
+    try {
+      const publishApi = getPublishApi();
+      const steps = await publishApi.listPublishSteps(taskId);
+      setTaskErrorDetails((prev) => ({
+        ...prev,
+        [taskId]: {
+          loading: false,
+          steps: (steps ?? []).map((step) => ({
+            id: step.id,
+            stepCode: step.stepCode,
+            status: step.status,
+            errorMessage: step.errorMessage,
+            completedAt: step.completedAt,
+          })),
+        },
+      }));
+    } catch (error) {
+      setTaskErrorDetails((prev) => ({
+        ...prev,
+        [taskId]: {
+          loading: false,
+          steps: [],
+          error: error instanceof Error ? error.message : "加载错误详情失败",
+        },
+      }));
+    }
+  };
+
+  const renderErrorDetailContent = (record: PublishQueueItem) => {
+    const taskId = record.taskId;
+    const detailState = taskId ? taskErrorDetails[taskId] : undefined;
+    const failedSteps = (detailState?.steps ?? []).filter(
+      (step) => step.status === PublishStepStatus.FAILED || Boolean(step.errorMessage),
+    );
+    const latestStep = detailState?.steps?.[detailState.steps.length - 1];
+    const lastStep = failedSteps[failedSteps.length - 1] ?? latestStep;
+    const stepLabel = localizePublishStepCode(lastStep?.stepCode || record.currentStepCode) ?? "未知阶段";
+    const stepError = lastStep?.errorMessage?.trim();
+    const fallbackError = record.error?.trim() || record.statusText?.trim() || "暂无详细原因";
+
+    return (
+      <div style={{ maxWidth: 420 }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: "var(--manager-text)", marginBottom: 10 }}>
+          发布失败详情
+        </div>
+        {taskId ? (
+          <div className="manager-muted" style={{ fontSize: 12, marginBottom: 10 }}>
+            任务 #{taskId}
+          </div>
+        ) : null}
+        {detailState?.loading ? (
+          <div style={{ padding: "8px 0" }}>
+            <Spin size="small" />
+          </div>
+        ) : null}
+        {!detailState?.loading && detailState?.error ? (
+          <div style={{ fontSize: 12, color: "#ff4d4f", lineHeight: 1.6, whiteSpace: "pre-wrap" }}>
+            {detailState.error}
+          </div>
+        ) : null}
+        {!detailState?.loading && !detailState?.error ? (
+          <div style={{ display: "grid", gap: 8 }}>
+            <div>
+              <div className="manager-muted" style={{ fontSize: 12, marginBottom: 4 }}>失败阶段</div>
+              <div style={{ fontSize: 13, color: "var(--manager-text)", lineHeight: 1.6 }}>
+                {stepLabel}
+              </div>
+            </div>
+            <div>
+              <div className="manager-muted" style={{ fontSize: 12, marginBottom: 4 }}>具体原因</div>
+              <div style={{ fontSize: 12, color: "var(--manager-text)", lineHeight: 1.7, whiteSpace: "pre-wrap" }}>
+                {stepError || fallbackError}
+              </div>
+            </div>
+            {failedSteps.length > 1 ? (
+              <div>
+                <div className="manager-muted" style={{ fontSize: 12, marginBottom: 4 }}>相关失败步骤</div>
+                <div style={{ display: "grid", gap: 6 }}>
+                  {failedSteps.map((step) => (
+                    <div key={step.id} style={{ fontSize: 12, lineHeight: 1.6 }}>
+                      <strong style={{ color: "var(--manager-text)" }}>
+                        {localizePublishStepCode(step.stepCode) ?? step.stepCode}
+                      </strong>
+                      <div style={{ color: "var(--manager-text-faint)", whiteSpace: "pre-wrap" }}>
+                        {step.errorMessage || "未记录详细错误"}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+    );
+  };
+
   // 发布队列表格列
   const queueColumns: ColumnsType<PublishQueueItem> = [
     {
@@ -880,16 +1220,46 @@ export function ProductPublishModal({
       },
     },
     {
+      title: "发布时间",
+      key: "publishedTime",
+      width: 180,
+      render: (_, record) => (
+        <span className="manager-muted" style={{ fontSize: 12 }}>
+          {formatPublishTime(record.publishedTime)}
+        </span>
+      ),
+    },
+    {
       title: "结果",
       key: "result",
       width: 260,
       render: (_, record) => {
         const resumeTaskId = record.taskId;
+        const resultText = record.error ?? record.statusText ?? (record.publishedItemId ? `淘宝商品 #${record.publishedItemId}` : "—");
+        const shouldShowErrorDetail = record.status === "FAILED" && Boolean(record.error || record.statusText);
         return (
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-            <span className="manager-muted" style={{ fontSize: 12 }}>
-              {record.error ?? record.statusText ?? (record.publishedItemId ? `淘宝商品 #${record.publishedItemId}` : "—")}
-            </span>
+            {shouldShowErrorDetail ? (
+              <Popover
+                trigger="hover"
+                placement="topLeft"
+                overlayStyle={{ maxWidth: 460 }}
+                content={renderErrorDetailContent(record)}
+                onOpenChange={(open) => {
+                  if (open && resumeTaskId) {
+                    void loadTaskErrorDetails(resumeTaskId);
+                  }
+                }}
+              >
+                <span className="manager-muted publish-result-text is-error" style={{ fontSize: 12 }}>
+                  {resultText}
+                </span>
+              </Popover>
+            ) : (
+              <span className="manager-muted publish-result-text" style={{ fontSize: 12 }}>
+                {resultText}
+              </span>
+            )}
             {resumeTaskId && (record.waitingForCaptcha || record.status === "FAILED") ? (
               <Button
                 size="small"
@@ -908,7 +1278,7 @@ export function ProductPublishModal({
 
   const progressStatus = publishRunning
     ? "active"
-    : publishStats.failedCount > 0 && publishStats.successCount === 0
+    : runningPublishStats.failedCount > 0 && runningPublishStats.successCount === 0
       ? "exception"
       : undefined;
 
@@ -1035,7 +1405,11 @@ export function ProductPublishModal({
                 <div className="publish-info-card" style={{ marginTop: 20 }}>
                   <Descriptions size="small" column={2} colon>
                     <Descriptions.Item label="批次名称">{selectedBatch.name}</Descriptions.Item>
-                    <Descriptions.Item label="采集数量">{selectedBatch.collectedCount ?? 0} 条（仅发布已关注）</Descriptions.Item>
+                    <Descriptions.Item label="采集数量">
+                      {selectedBatchRepublishStatsLoading
+                        ? "正在统计喜欢的商品..."
+                        : `${selectedBatchRepublishStats?.totalCount ?? 0} 条（服务端去重）`}
+                    </Descriptions.Item>
                     <Descriptions.Item label="所属店铺">
                       {shopNameMap.get(selectedBatch.shopId) ?? `#${selectedBatch.shopId}`}
                     </Descriptions.Item>
@@ -1102,7 +1476,7 @@ export function ProductPublishModal({
                 placeholder="请选择要发布到的淘宝店铺"
                 onChange={(value) => setSelectedTargetShopId(Number(value ?? 0))}
                 options={tbShops.map((shop) => ({
-                  label: `${shop.remark || shop.name || shop.code || `店铺 #${shop.id}`} · ID ${shop.id}${shop.loginStatus === "LOGGED_IN" ? "" : " · 未登录"}`,
+                  label: `${formatShopLabel(shop)} · ID ${shop.id}${shop.loginStatus === "LOGGED_IN" ? "" : " · 未登录"}`,
                   value: shop.id,
                 }))}
                 style={{ width: "100%" }}
@@ -1167,24 +1541,36 @@ export function ProductPublishModal({
             </div>
           )}
 
-          {/* ─── Step 3：价格浮动设置 ─────────────────────────────────── */}
+          {/* ─── Step 3：发布配置 ─────────────────────────────────── */}
           {currentStep === 3 && (
             <div>
-              <div className="manager-panel-title" style={{ marginBottom: 6 }}>价格浮动设置</div>
+              <div className="manager-panel-title" style={{ marginBottom: 6 }}>发布配置</div>
               <div className="manager-muted" style={{ marginBottom: 24, fontSize: 13 }}>
-                最终价格 = 原价 × 浮动比例 ± 浮动金额，设置后自动保存
+                这里统一设置价格调整和发布策略，设置后会自动保存
+              </div>
+
+              <div style={{ marginBottom: 24 }}>
+                <div className="publish-field-label">发布策略</div>
+                <Select
+                  value={priceSettings.strategy}
+                  onChange={(value) => setPriceSettings((p) => ({ ...p, strategy: value }))}
+                  options={[
+                    { label: "放入仓库", value: "warehouse" },
+                    { label: "立即上架", value: "immediate" },
+                  ]}
+                  style={{ width: "100%" }}
+                  size="large"
+                />
               </div>
 
               <div style={{ display: "flex", gap: 16, marginBottom: 24 }}>
                 <div style={{ flex: 1 }}>
                   <div className="publish-field-label">浮动比例</div>
-                  <InputNumber
-                    value={priceSettings.floatRatio}
-                    onChange={(v) => setPriceSettings((p) => ({ ...p, floatRatio: v ?? 1.3 }))}
-                    min={0.1}
-                    max={10}
-                    step={0.1}
-                    precision={2}
+                  <Input
+                    value={priceRatioInput}
+                    onChange={(event) => handlePriceRatioChange(event.target.value)}
+                    onBlur={commitPriceRatioInput}
+                    placeholder="例如 1.3"
                     style={{ width: "100%" }}
                     size="large"
                     addonAfter="×"
@@ -1192,12 +1578,11 @@ export function ProductPublishModal({
                 </div>
                 <div style={{ flex: 1 }}>
                   <div className="publish-field-label">浮动金额</div>
-                  <InputNumber
-                    value={priceSettings.floatAmount}
-                    onChange={(v) => setPriceSettings((p) => ({ ...p, floatAmount: v ?? 0 }))}
-                    min={0}
-                    step={0.5}
-                    precision={2}
+                  <Input
+                    value={priceAmountInput}
+                    onChange={(event) => handlePriceAmountChange(event.target.value)}
+                    onBlur={commitPriceAmountInput}
+                    placeholder="例如 0"
                     style={{ width: "100%" }}
                     size="large"
                     addonAfter="元"
@@ -1205,15 +1590,24 @@ export function ProductPublishModal({
                 </div>
               </div>
 
+              <div style={{ marginBottom: 16 }}>
+                <Button type="link" style={{ paddingInline: 0 }} onClick={handleResetPriceSettings}>
+                  恢复默认值（×1.3 + 0 元）
+                </Button>
+              </div>
+
               <div className="publish-info-card">
-                <div style={{ fontSize: 12, color: "var(--manager-text-faint)", marginBottom: 8 }}>价格计算公式预览</div>
+                <div style={{ fontSize: 12, color: "var(--manager-text-faint)", marginBottom: 8 }}>配置预览</div>
+                <div style={{ fontSize: 14, fontWeight: 600, color: "var(--manager-text)", marginBottom: 6 }}>
+                  发布策略：{priceSettings.strategy === "immediate" ? "立即上架" : "放入仓库"}
+                </div>
                 <div style={{ fontSize: 15, fontWeight: 600, color: "var(--manager-text)", marginBottom: 6 }}>
-                  最终价格 = 原价 × {priceSettings.floatRatio} ± {priceSettings.floatAmount} 元
+                  最终价格 = 原价 × {priceSettings.floatRatio} + {priceSettings.floatAmount} 元
                 </div>
                 <div className="manager-muted" style={{ fontSize: 12 }}>
                   示例：原价 100 元 → 约&nbsp;
                   <strong style={{ color: "var(--manager-text)" }}>
-                    {(100 * priceSettings.floatRatio).toFixed(2)} 元
+                    {(100 * priceSettings.floatRatio + priceSettings.floatAmount).toFixed(2)} 元
                   </strong>
                 </div>
               </div>
@@ -1265,10 +1659,15 @@ export function ProductPublishModal({
                         {shopNameMap.get(selectedTargetShopId) ?? "—"}
                       </Descriptions.Item>
                       <Descriptions.Item label="价格浮动">
-                        ×{priceSettings.floatRatio} ± {priceSettings.floatAmount} 元
+                        ×{priceSettings.floatRatio} + {priceSettings.floatAmount} 元
+                      </Descriptions.Item>
+                      <Descriptions.Item label="发布策略">
+                        {priceSettings.strategy === "immediate" ? "立即上架" : "放入仓库"}
                       </Descriptions.Item>
                       <Descriptions.Item label="采集总数">
-                        {selectedBatch?.collectedCount ?? 0} 条
+                        {selectedBatchRepublishStatsLoading
+                          ? "正在统计喜欢的商品..."
+                          : `${selectedBatchRepublishStats?.totalCount ?? runningPublishStats.total} 条`}
                       </Descriptions.Item>
                     </Descriptions>
                   </div>
@@ -1333,21 +1732,15 @@ export function ProductPublishModal({
                 showIcon
                 style={{ marginBottom: 16 }}
                 message="检测到上次未完成的发布任务"
-                description={`共发现 ${recoverableTasks.length} 条未完成或异常任务。你可以继续上次发布，也可以放弃旧任务并重新发起本次发布。`}
+                description={`当前批次按原商品ID去重后，共 ${selectedBatchRepublishStats?.totalCount ?? 0} 条喜欢商品；其中成功 ${selectedBatchRepublishStats?.successCount ?? 0} 条，未发布 ${selectedBatchRepublishStats?.pendingCount ?? 0} 条，失败 ${selectedBatchRepublishStats?.failedCount ?? 0} 条。你可以继续上次发布，也可以放弃旧任务并重新发起本次发布。`}
               />
 
               <div className="publish-info-card">
                 <Descriptions size="small" column={2} colon>
-                  <Descriptions.Item label="待恢复任务">{recoverableTasks.length} 条</Descriptions.Item>
-                  <Descriptions.Item label="进行中">
-                    {recoverableTasks.filter((task) => task.status === PublishTaskStatus.RUNNING).length} 条
-                  </Descriptions.Item>
-                  <Descriptions.Item label="待验证码">
-                    {recoverableTasks.filter((task) => task.waitingForCaptcha).length} 条
-                  </Descriptions.Item>
-                  <Descriptions.Item label="失败任务">
-                    {recoverableTasks.filter((task) => task.status === PublishTaskStatus.FAILED).length} 条
-                  </Descriptions.Item>
+                  <Descriptions.Item label="喜欢总数量">{selectedBatchRepublishStats?.totalCount ?? 0} 条</Descriptions.Item>
+                  <Descriptions.Item label="已发布成功">{selectedBatchRepublishStats?.successCount ?? 0} 条</Descriptions.Item>
+                  <Descriptions.Item label="未发布">{selectedBatchRepublishStats?.pendingCount ?? 0} 条</Descriptions.Item>
+                  <Descriptions.Item label="失败">{selectedBatchRepublishStats?.failedCount ?? 0} 条</Descriptions.Item>
                 </Descriptions>
               </div>
 
@@ -1398,10 +1791,13 @@ export function ProductPublishModal({
                       发布任务进行中
                     </span>
                     <div className="manager-muted" style={{ fontSize: 12, marginTop: 4 }}>
-                      共 {publishStats.total} 件 &nbsp;·&nbsp;
-                      <span style={{ color: "#52c41a" }}>成功 {publishStats.successCount}</span>
-                      {publishStats.failedCount > 0 && (
-                        <> &nbsp;·&nbsp; <span style={{ color: "#ff4d4f" }}>失败 {publishStats.failedCount}</span></>
+                      共 {runningPublishStats.total} 件 &nbsp;·&nbsp;
+                      <span style={{ color: "#52c41a" }}>成功 {runningPublishStats.successCount}</span>
+                      {runningPublishStats.pendingCount > 0 && (
+                        <> &nbsp;·&nbsp; <span style={{ color: "#1677ff" }}>待发布 {runningPublishStats.pendingCount}</span></>
+                      )}
+                      {runningPublishStats.failedCount > 0 && (
+                        <> &nbsp;·&nbsp; <span style={{ color: "#ff4d4f" }}>失败 {runningPublishStats.failedCount}</span></>
                       )}
                       {publishRunning && <> &nbsp;·&nbsp; 发布中…</>}
                     </div>
@@ -1416,7 +1812,7 @@ export function ProductPublishModal({
                   </div>
                 </div>
                 <Progress
-                  percent={publishStats.progress}
+                  percent={runningPublishStats.progress}
                   status={progressStatus}
                   strokeWidth={8}
                 />
@@ -1498,6 +1894,20 @@ export function ProductPublishModal({
           background: rgba(250, 173, 20, 0.12) !important;
         }
 
+        .publish-result-text {
+          display: inline-block;
+          max-width: 180px;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+
+        .publish-result-text.is-error {
+          cursor: help;
+          text-decoration: underline dotted rgba(255, 77, 79, 0.55);
+          text-underline-offset: 2px;
+        }
+
       `}</style>
     </>
   );
@@ -1542,8 +1952,85 @@ function shouldTrackRuntimeTask(task: PublishRuntimeTaskSnapshot): boolean {
   );
 }
 
+function buildSourceProductDedupeKey(
+  item: Pick<PublishQueueItem, "sourceProductId" | "sourceRecordId" | "taskId" | "key">
+  | Pick<PublishRuntimeTaskSnapshot, "sourceProductId" | "sourceRecordId" | "taskId">
+  | Pick<CollectRecordPreview, "sourceProductId" | "id">,
+): string {
+  if ("sourceProductId" in item) {
+    const sourceProductId = String(item.sourceProductId || "").trim();
+    if (sourceProductId) {
+      return `source:${sourceProductId}`;
+    }
+  }
+  if ("sourceRecordId" in item) {
+    const sourceRecordId = Number(item.sourceRecordId) || 0;
+    if (sourceRecordId > 0) {
+      return `record:${sourceRecordId}`;
+    }
+  }
+  if ("id" in item) {
+    const recordId = Number(item.id) || 0;
+    if (recordId > 0) {
+      return `record:${recordId}`;
+    }
+  }
+  if ("taskId" in item) {
+    const taskId = Number(item.taskId) || 0;
+    if (taskId > 0) {
+      return `task:${taskId}`;
+    }
+  }
+  if ("key" in item) {
+    const key = String(item.key || "").trim();
+    if (key) {
+      return `key:${key}`;
+    }
+  }
+  return "";
+}
+
+function dedupeFavoriteRecords(records: CollectRecordPreview[]): CollectRecordPreview[] {
+  const dedupedRecords = new Map<string, CollectRecordPreview>();
+  for (const record of records) {
+    const dedupeKey = buildSourceProductDedupeKey(record);
+    if (!dedupeKey || dedupedRecords.has(dedupeKey)) {
+      continue;
+    }
+    dedupedRecords.set(dedupeKey, record);
+  }
+  return Array.from(dedupedRecords.values());
+}
+
+function dedupeRuntimeTasks(tasks: PublishRuntimeTaskSnapshot[]): PublishRuntimeTaskSnapshot[] {
+  const latestTaskByProduct = new Map<string, PublishRuntimeTaskSnapshot>();
+  for (const task of tasks) {
+    const dedupeKey = buildSourceProductDedupeKey(task);
+    if (!dedupeKey) {
+      continue;
+    }
+    const previousTask = latestTaskByProduct.get(dedupeKey);
+    if (!previousTask || new Date(task.updatedAt).getTime() > new Date(previousTask.updatedAt).getTime()) {
+      latestTaskByProduct.set(dedupeKey, task);
+    }
+  }
+  return Array.from(latestTaskByProduct.values());
+}
+
+function dedupeQueueItems(items: PublishQueueItem[]): PublishQueueItem[] {
+  const dedupedQueue = new Map<string, PublishQueueItem>();
+  for (const item of items) {
+    const dedupeKey = buildSourceProductDedupeKey(item);
+    if (!dedupeKey || dedupedQueue.has(dedupeKey)) {
+      continue;
+    }
+    dedupedQueue.set(dedupeKey, item);
+  }
+  return Array.from(dedupedQueue.values());
+}
+
 function mapRuntimeTasksToQueue(tasks: PublishRuntimeTaskSnapshot[]): PublishQueueItem[] {
-  return tasks.map((task) => ({
+  return dedupeRuntimeTasks(tasks).map((task) => ({
     key: `runtime-task-${task.taskId}`,
     title: task.title || `发布任务 #${task.taskId}`,
     outerProductId: task.outerItemId || `TASK-${task.taskId}`,
@@ -1555,6 +2042,8 @@ function mapRuntimeTasksToQueue(tasks: PublishRuntimeTaskSnapshot[]): PublishQue
     status: mapRuntimeTaskStatusToQueueStatus(task),
     taskId: task.taskId,
     publishedItemId: task.outerItemId,
+    publishedTime: task.updatedAt,
+    currentStepCode: task.currentStepCode,
     statusText: buildRuntimeTaskStatusText(task),
     waitingForCaptcha: Boolean(task.waitingForCaptcha),
     error: task.status === PublishTaskStatus.FAILED ? task.errorMessage || task.statusText || "发布失败" : undefined,
@@ -1569,9 +2058,10 @@ function mergeQueueWithRuntimeTasks(
   current: PublishQueueItem[],
   tasks: PublishRuntimeTaskSnapshot[],
 ): PublishQueueItem[] {
-  const runtimeTaskIdMap = new Map(tasks.map((task) => [task.taskId, task]));
-  const runtimeRecordIdMap = new Map(tasks.map((task) => [task.sourceRecordId, task]));
-  const runtimeSourceProductIdMap = new Map(tasks.map((task) => [task.sourceProductId, task]));
+  const dedupedTasks = dedupeRuntimeTasks(tasks);
+  const runtimeTaskIdMap = new Map(dedupedTasks.map((task) => [task.taskId, task]));
+  const runtimeRecordIdMap = new Map(dedupedTasks.map((task) => [task.sourceRecordId, task]));
+  const runtimeSourceProductIdMap = new Map(dedupedTasks.map((task) => [task.sourceProductId, task]));
   return current.map((item) => {
     const runtimeTask = (
       (item.taskId ? runtimeTaskIdMap.get(item.taskId) : undefined)
@@ -1589,6 +2079,8 @@ function mergeQueueWithRuntimeTasks(
       taskId: runtimeTask.taskId || item.taskId,
       status: mapRuntimeTaskStatusToQueueStatus(runtimeTask),
       publishedItemId: runtimeTask.outerItemId || item.publishedItemId,
+      publishedTime: runtimeTask.updatedAt || item.publishedTime,
+      currentStepCode: runtimeTask.currentStepCode || item.currentStepCode,
       statusText: buildRuntimeTaskStatusText(runtimeTask),
       waitingForCaptcha: Boolean(runtimeTask.waitingForCaptcha),
       error: runtimeTask.status === PublishTaskStatus.FAILED
@@ -1604,7 +2096,7 @@ async function loadFavoriteQueue(
   batchName?: string,
 ): Promise<PublishQueueItem[]> {
   const favorites: CollectRecordPreview[] = await fetchCollectBatchFavoriteRecords(batchId);
-  return favorites.map((record, index) => ({
+  return dedupeFavoriteRecords(favorites).map((record, index) => ({
     key: `batch-${batchId}-record-${record.id}`,
     title: record.productName || `${batchName || `批次 ${batchId}`} 商品 ${index + 1}`,
     outerProductId: record.sourceProductId || `BATCH-${batchId}-${String(index + 1).padStart(3, "0")}`,
@@ -1631,7 +2123,51 @@ function buildRuntimeTaskStatusText(task: PublishRuntimeTaskSnapshot): string {
   if (task.status === PublishTaskStatus.SUCCESS && task.outerItemId) {
     return `淘宝商品 #${task.outerItemId}`;
   }
-  return task.errorMessage || task.statusText || task.currentStepCode || task.status;
+  return (
+    task.errorMessage
+    || localizePublishStepText(task.statusText)
+    || localizePublishStepCode(task.currentStepCode)
+    || task.status
+  );
+}
+
+function localizePublishStepText(text?: string): string | undefined {
+  if (!text) {
+    return undefined;
+  }
+  return localizePublishStepCode(text) || text;
+}
+
+function localizePublishStepCode(stepCode?: string): string | undefined {
+  const normalized = String(stepCode || "").trim().toUpperCase();
+  if (!normalized) {
+    return undefined;
+  }
+
+  const labelMap: Record<string, string> = {
+    [PublishStepCode.UNKNOWN]: "准备中",
+    [PublishStepCode.PARSE_SOURCE]: "解析源商品",
+    [PublishStepCode.UPLOAD_IMAGES]: "上传图片",
+    [PublishStepCode.SEARCH_CATEGORY]: "识别类目",
+    [PublishStepCode.FILL_DRAFT]: "填写草稿",
+    [PublishStepCode.EDIT_DRAFT]: "编辑草稿",
+    [PublishStepCode.PUBLISH]: "提交发布",
+  };
+
+  if (labelMap[normalized]) {
+    return labelMap[normalized];
+  }
+
+  if (normalized === "STEP") {
+    return "步骤处理中";
+  }
+
+  const stepMatch = normalized.match(/^STEP[_\-\s]*(\d+)$/);
+  if (stepMatch?.[1]) {
+    return `步骤 ${stepMatch[1]}`;
+  }
+
+  return undefined;
 }
 
 async function waitForPublishTaskFinish(
@@ -1647,7 +2183,7 @@ async function waitForPublishTaskFinish(
       taskId,
       stepCode: task.currentStepCode || PublishStepCode.UNKNOWN,
       status: mapTaskStatusToStepStatus(task.status),
-      message: task.errorMessage || task.currentStepCode || task.status,
+      message: task.errorMessage || localizePublishStepCode(task.currentStepCode) || task.status,
     };
     onProgress?.(event);
 

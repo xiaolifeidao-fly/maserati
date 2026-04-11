@@ -10,7 +10,7 @@ import {
 } from "@ant-design/icons";
 import { Avatar, Button, Empty, Layout, Popover, Space, Tag, Typography } from "antd";
 import { usePathname, useRouter } from "next/navigation";
-import { PropsWithChildren, useEffect, useState } from "react";
+import { PropsWithChildren, useEffect, useMemo, useState } from "react";
 import { getAuthState, logout } from "@/utils/auth";
 import { getPublishApi } from "@/utils/publish";
 import { getPublishWindowApi } from "@/utils/publish-window";
@@ -32,11 +32,28 @@ interface PublishBatchSummary {
 }
 
 interface PublishCenterState {
+  tasks: PublishRuntimeTaskSnapshot[];
+  messages: PublishCenterMessage[];
   runningCount: number;
   failedCount: number;
   abnormalCount: number;
   batchSummaries: PublishBatchSummary[];
 }
+
+interface PublishRuntimeTaskSnapshot {
+  taskId: number;
+  sourceBatchId?: number;
+}
+
+interface PublishCenterMessage {
+  id: string;
+  taskId: number;
+  createdAt: string;
+}
+
+type PublishCenterReadState = Record<string, string>;
+
+const PUBLISH_CENTER_READ_STORAGE_KEY = "publish-center-read-state-v1";
 
 const navigationItems = [
   {
@@ -86,12 +103,15 @@ export function ManagerShell({ children }: ManagerShellProps) {
   const [username, setUsername] = useState("已登录用户");
   const [loggingOut, setLoggingOut] = useState(false);
   const [publishCenterState, setPublishCenterState] = useState<PublishCenterState>({
+    tasks: [],
+    messages: [],
     runningCount: 0,
     failedCount: 0,
     abnormalCount: 0,
     batchSummaries: [],
   });
   const [publishCenterOpen, setPublishCenterOpen] = useState(false);
+  const [publishCenterReadState, setPublishCenterReadState] = useState<PublishCenterReadState>({});
 
   useEffect(() => {
     void (async () => {
@@ -99,6 +119,25 @@ export function ManagerShell({ children }: ManagerShellProps) {
       setDisplayName(session.displayName || session.username || "管理员");
       setUsername(session.username || "已登录用户");
     })();
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    try {
+      const rawValue = window.localStorage.getItem(PUBLISH_CENTER_READ_STORAGE_KEY);
+      if (!rawValue) {
+        return;
+      }
+      const parsed = JSON.parse(rawValue) as PublishCenterReadState;
+      if (parsed && typeof parsed === "object") {
+        setPublishCenterReadState(parsed);
+      }
+    } catch {
+      window.localStorage.removeItem(PUBLISH_CENTER_READ_STORAGE_KEY);
+    }
   }, []);
 
   useEffect(() => {
@@ -122,12 +161,61 @@ export function ManagerShell({ children }: ManagerShellProps) {
     };
   }, []);
 
+  const unreadCountByBatch = useMemo(() => {
+    const taskBatchMap = new Map<number, number>();
+    for (const task of publishCenterState.tasks) {
+      const batchId = Number(task.sourceBatchId) || 0;
+      if (batchId > 0) {
+        taskBatchMap.set(task.taskId, batchId);
+      }
+    }
+
+    const unreadMap = new Map<number, number>();
+    for (const message of publishCenterState.messages) {
+      const batchId = taskBatchMap.get(message.taskId);
+      if (!batchId) {
+        continue;
+      }
+
+      const lastReadAt = publishCenterReadState[String(batchId)];
+      const messageTime = new Date(message.createdAt).getTime();
+      const lastReadTime = lastReadAt ? new Date(lastReadAt).getTime() : 0;
+      if (messageTime <= lastReadTime) {
+        continue;
+      }
+
+      unreadMap.set(batchId, (unreadMap.get(batchId) || 0) + 1);
+    }
+
+    return unreadMap;
+  }, [publishCenterReadState, publishCenterState.messages, publishCenterState.tasks]);
+
+  const totalUnreadCount = useMemo(
+    () => Array.from(unreadCountByBatch.values()).reduce((sum, count) => sum + count, 0),
+    [unreadCountByBatch],
+  );
+
+  const markBatchAsRead = (batchId: number) => {
+    if (typeof window === "undefined" || batchId <= 0) {
+      return;
+    }
+
+    const nextState = {
+      ...publishCenterReadState,
+      [String(batchId)]: new Date().toISOString(),
+    };
+    setPublishCenterReadState(nextState);
+    window.localStorage.setItem(PUBLISH_CENTER_READ_STORAGE_KEY, JSON.stringify(nextState));
+  };
+
   const handleOpenPublishBatch = async (summary: PublishBatchSummary) => {
-    setPublishCenterOpen(false);
+    markBatchAsRead(summary.batchId);
     await getPublishWindowApi().openPublishWindow({
       batchId: summary.batchId,
       entryScene: summary.entryScene || "product",
+      initialView: "progress",
     });
+    setPublishCenterOpen(false);
   };
 
   const publishCenterContent = (
@@ -135,6 +223,7 @@ export function ManagerShell({ children }: ManagerShellProps) {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
         <strong style={{ color: "var(--manager-text)" }}>发布消息中心</strong>
         <Space size={8}>
+          <Tag color="red">未读 {totalUnreadCount}</Tag>
           <Tag color="blue">进行中 {publishCenterState.runningCount}</Tag>
           <Tag color="gold">失败 {publishCenterState.failedCount}</Tag>
         </Space>
@@ -145,53 +234,62 @@ export function ManagerShell({ children }: ManagerShellProps) {
       ) : (
         <div style={{ display: "grid", gap: 10, maxHeight: 420, overflowY: "auto", paddingRight: 4 }}>
           {publishCenterState.batchSummaries.map((item) => (
-            <button
-              key={item.batchId}
-              type="button"
-              onClick={() => void handleOpenPublishBatch(item)}
-              style={{
-                width: "100%",
-                padding: "10px 12px",
-                borderRadius: 12,
-                border: "1px solid rgba(170,192,238,0.2)",
-                background: "rgba(170,192,238,0.08)",
-                appearance: "none",
-                textAlign: "left",
-                cursor: "pointer",
-              }}
-            >
-              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
-                <div style={{ fontWeight: 600, color: "var(--manager-text)" }}>
-                  {item.batchName || `发布批次 #${item.batchId}`}
-                </div>
-                <Tag color="geekblue">批次 #{item.batchId}</Tag>
-              </div>
-              <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
-                <Tag color="blue">进行中 {item.runningCount}</Tag>
-                <Tag color="green">完成 {item.successCount}</Tag>
-                <Tag color="gold">失败 {item.failedCount}</Tag>
-              </div>
-              <div style={{ marginTop: 6, color: "var(--manager-text-soft)", fontSize: 12 }}>
-                共 {item.totalCount} 条任务，点击查看该批次发布详情
-              </div>
-              <div style={{ marginTop: 6, color: "var(--manager-text-faint)", fontSize: 11 }}>
-                {item.latestUpdatedAt.replace("T", " ").slice(0, 19)}
-              </div>
-            </button>
+            (() => {
+              const unreadCount = unreadCountByBatch.get(item.batchId) || 0;
+
+              return (
+                <button
+                  key={item.batchId}
+                  type="button"
+                  onClick={() => void handleOpenPublishBatch(item)}
+                  style={{
+                    width: "100%",
+                    padding: "10px 12px",
+                    borderRadius: 12,
+                    border: unreadCount > 0 ? "1px solid rgba(255,77,79,0.35)" : "1px solid rgba(170,192,238,0.2)",
+                    background: unreadCount > 0 ? "rgba(255,77,79,0.08)" : "rgba(170,192,238,0.08)",
+                    appearance: "none",
+                    textAlign: "left",
+                    cursor: "pointer",
+                  }}
+                >
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
+                    <div style={{ fontWeight: 600, color: "var(--manager-text)" }}>
+                      {item.batchName || `发布批次 #${item.batchId}`}
+                    </div>
+                    <Space size={6} wrap>
+                      <Tag color="geekblue">批次 #{item.batchId}</Tag>
+                      {unreadCount > 0 ? <Tag color="red">未读 {unreadCount}</Tag> : <Tag color="green">已读</Tag>}
+                    </Space>
+                  </div>
+                  <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <Tag color="blue">进行中 {item.runningCount}</Tag>
+                    <Tag color="green">完成 {item.successCount}</Tag>
+                    <Tag color="gold">失败 {item.failedCount}</Tag>
+                  </div>
+                  <div style={{ marginTop: 6, color: "var(--manager-text-soft)", fontSize: 12 }}>
+                    共 {item.totalCount} 条任务，点击查看该批次发布详情
+                  </div>
+                  <div style={{ marginTop: 6, color: "var(--manager-text-faint)", fontSize: 11 }}>
+                    {item.latestUpdatedAt.replace("T", " ").slice(0, 19)}
+                  </div>
+                </button>
+              );
+            })()
           ))}
         </div>
       )}
     </div>
   );
 
-  const publishCenterBadgeVisible = publishCenterState.runningCount > 0 || publishCenterState.failedCount > 0;
+  const publishCenterBadgeVisible = totalUnreadCount > 0;
 
   const publishCenterBadge = publishCenterBadgeVisible ? (
     <span
       style={{
         position: "absolute",
         top: -10,
-        right: -14,
+        right: -8,
         display: "inline-flex",
         overflow: "hidden",
         borderRadius: 999,
@@ -201,42 +299,22 @@ export function ManagerShell({ children }: ManagerShellProps) {
     >
       <span
         style={{
-          minWidth: 22,
+          minWidth: 24,
           height: 22,
           padding: "0 7px",
-          background: "#1677ff",
+          background: "#ff4d4f",
           color: "#fff",
           fontSize: 11,
           lineHeight: "22px",
           textAlign: "center",
           fontWeight: 700,
         }}
-        title="进行中的发布任务"
+        title="未读消息"
       >
-        {publishCenterState.runningCount}
-      </span>
-      <span
-        style={{
-          minWidth: 22,
-          height: 22,
-          padding: "0 7px",
-          background: "#faad14",
-          color: "#fff",
-          fontSize: 11,
-          lineHeight: "22px",
-          textAlign: "center",
-          fontWeight: 700,
-        }}
-        title="失败的发布任务"
-      >
-        {publishCenterState.failedCount}
+        {totalUnreadCount > 99 ? "99+" : totalUnreadCount}
       </span>
     </span>
   ) : null;
-
-  const handlePublishCenterOpenChange = (nextOpen: boolean) => {
-    setPublishCenterOpen(nextOpen);
-  };
 
   const publishCenterTrigger = (
     <div style={{ position: "relative" }}>
@@ -246,6 +324,10 @@ export function ManagerShell({ children }: ManagerShellProps) {
       {publishCenterBadge}
     </div>
   );
+
+  const handlePublishCenterOpenChange = (nextOpen: boolean) => {
+    setPublishCenterOpen(nextOpen);
+  };
 
   const handleLogout = async () => {
     setLoggingOut(true);

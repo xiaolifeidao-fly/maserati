@@ -16,6 +16,8 @@ function PublishWindowContent() {
   const batchId = Number(searchParams?.get("batchId") || 0);
   const entrySceneParam = searchParams?.get("entryScene");
   const entryScene = entrySceneParam === "collection" ? "collection" : "product";
+  const initialViewParam = searchParams?.get("initialView");
+  const initialView = initialViewParam === "progress" ? "progress" : "default";
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
@@ -34,6 +36,7 @@ function PublishWindowContent() {
           }}
           initialBatchId={batchId}
           initialEntryScene={entryScene}
+          initialView={initialView}
         />
       ) : null}
       <style jsx global>{`

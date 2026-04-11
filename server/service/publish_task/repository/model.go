@@ -10,6 +10,7 @@ type PublishTask struct {
 	db.BaseEntity
 	AppUserID       uint64 `gorm:"column:app_user_id;type:bigint unsigned;index:idx_pt_app_user_id" description:"客户端用户ID"`
 	ShopID          uint64 `gorm:"column:shop_id;type:bigint unsigned;index:idx_pt_shop_id" description:"店铺ID"`
+	CollectBatchID  uint64 `gorm:"column:collect_batch_id;type:bigint unsigned;index:idx_pt_collect_batch_id" description:"采集批次ID"`
 	ProductID       uint64 `gorm:"column:product_id;type:bigint unsigned;index:idx_pt_product_id" description:"关联商品ID(发布成功后填充)"`
 	SourceType      string `gorm:"column:source_type;type:varchar(16)" description:"源数据类型: TB|PXX"`
 	SourceProductID string `gorm:"column:source_product_id;type:varchar(128);index:idx_pt_source_product_id" description:"来源商品ID"`

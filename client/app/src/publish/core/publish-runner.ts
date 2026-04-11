@@ -1,4 +1,4 @@
-import { StepCode, StepStatus, TaskStatus } from '../types/publish-task';
+import { SourceType, StepCode, StepStatus, TaskStatus } from '../types/publish-task';
 import type {
   PublishProgressEvent,
   PublishStepRecord,
@@ -20,6 +20,7 @@ import {
   clearPublishProductLogs,
   publishError,
   publishInfo,
+  publishWarn,
   registerPublishTaskLogFile,
   summarizeForLog,
   unregisterPublishTaskLogFile,
@@ -29,6 +30,44 @@ import { requestBackend } from '@src/impl/shared/backend';
 import type { CollectSourceType } from '@eleapi/collect/collect.platform';
 import type { RawSourceData } from '../types/source-data';
 import { clearPublishStepPayloads } from '../runtime/publish-step-store';
+import type { PublishConfig, PublishPriceSettings, PublishStrategy } from '../types/publish-task';
+
+function parseTaskPublishConfig(remark?: string): PublishConfig {
+  const priceSettings: PublishPriceSettings = { floatRatio: 1.3, floatAmount: 0 };
+  let strategy: PublishStrategy = 'warehouse';
+
+  for (const part of String(remark ?? '').split(';')) {
+    const [rawKey, ...rest] = part.split(':');
+    const key = String(rawKey ?? '').trim();
+    const value = String(rest.join(':') ?? '').trim();
+    if (!key || !value) {
+      continue;
+    }
+
+    if (key === 'publishStrategy' && (value === 'warehouse' || value === 'immediate')) {
+      strategy = value;
+      continue;
+    }
+    if (key === 'priceRatio') {
+      const numeric = Number(value);
+      if (Number.isFinite(numeric) && numeric > 0) {
+        priceSettings.floatRatio = numeric;
+      }
+      continue;
+    }
+    if (key === 'priceAmount') {
+      const numeric = Number(value);
+      if (Number.isFinite(numeric)) {
+        priceSettings.floatAmount = numeric;
+      }
+    }
+  }
+
+  return {
+    strategy,
+    priceSettings,
+  };
+}
 
 /**
  * IPublishPersister — 发布状态持久化接口
@@ -112,6 +151,7 @@ export class PublishRunner {
     if (task.sourceProductId) {
       ctx.set('sourceProductId', task.sourceProductId);
     }
+    ctx.set('publishConfig', parseTaskPublishConfig(task.remark));
     publishInfo(`[task:${taskId}] publish summary started`, {
       shopId: task.shopId,
       taskStatus: task.status,
@@ -137,12 +177,17 @@ export class PublishRunner {
     const chain = this.buildChain();
     try {
       await chain.run(ctx, fromStep as StepCode | undefined);
+      await this.savePxxMapperAfterPublish(task, ctx);
 
       // 全部步骤完成
       await this.persister.updateTask(taskId, {
         status: TaskStatus.SUCCESS,
         outerItemId: ctx.get('publishedItemId'),
         currentStepCode: StepCode.PUBLISH,
+        productTitle: this.getProductTitle(ctx),
+        tbCatId: ctx.get('categoryId') ?? ctx.get('draftContext')?.catId,
+        categoryInfo: ctx.get('categoryInfo') ? JSON.stringify(ctx.get('categoryInfo')) : undefined,
+        tbDraftId: ctx.get('draftContext')?.draftId,
       });
       clearPublishStepPayloads(taskId);
       publishInfo(`[task:${taskId}] publish runner completed`, {
@@ -224,6 +269,55 @@ export class PublishRunner {
   private getProductTitle(ctx: StepContext): string | undefined {
     const product = ctx.get('product') as { title?: string } | undefined;
     return product?.title;
+  }
+
+  private async savePxxMapperAfterPublish(task: PublishTaskRecord, ctx: StepContext): Promise<void> {
+    if (task.sourceType !== SourceType.PXX) {
+      return;
+    }
+
+    const sourceProductId = String(this.getSourceProductId(ctx) ?? task.sourceProductId ?? '').trim();
+    const categoryInfo = ctx.get('categoryInfo');
+    if (!sourceProductId || !categoryInfo?.catId) {
+      return;
+    }
+
+    const categoryInfoJson = JSON.stringify(categoryInfo);
+    try {
+      const existing = await requestBackend<{ id: number }>(
+        'GET',
+        `/pxx-mapper-categories/source/${sourceProductId}`,
+        { publishLog: { taskId: task.id, label: 'find pxx mapper by sourceProductId' } },
+      );
+      await requestBackend('PUT', `/pxx-mapper-categories/${existing.id}`, {
+        data: {
+          sourceProductId,
+          tbCatId: categoryInfo.catId,
+          tbCatName: categoryInfo.catName,
+          categoryInfo: categoryInfoJson,
+        },
+        publishLog: { taskId: task.id, label: 'update pxx mapper by sourceProductId' },
+      });
+    } catch {
+      try {
+        await requestBackend('POST', '/pxx-mapper-categories', {
+          data: {
+            sourceProductId,
+            tbCatId: categoryInfo.catId,
+            tbCatName: categoryInfo.catName,
+            categoryInfo: categoryInfoJson,
+          },
+          publishLog: { taskId: task.id, label: 'create pxx mapper by sourceProductId' },
+        });
+      } catch (error) {
+        publishWarn(`[task:${task.id}] save pxx mapper after publish skipped`, {
+          taskId: task.id,
+          sourceProductId,
+          tbCatId: categoryInfo.catId,
+          error: summarizeForLog(error),
+        });
+      }
+    }
   }
 
   /**

@@ -1,6 +1,7 @@
 import type { NormalizedProduct } from '../types/source-data';
 import type { TbCategoryInfo, TbDraftContext, TbUploadedImageMeta } from '../types/draft';
 import type { TbWindowJsonDraftData } from '../types/tb-window-json';
+import type { PublishConfig } from '../types/publish-task';
 
 /**
  * FillerContext — 填充器共享上下文
@@ -9,6 +10,10 @@ import type { TbWindowJsonDraftData } from '../types/tb-window-json';
  * 填充器通过修改 draftPayload 字段向草稿追加数据。
  */
 export interface FillerContext {
+  /** 当前发布任务 ID（用于日志路由） */
+  readonly taskId: number;
+  /** 第三方平台店铺 ID（用于查询 address_template） */
+  readonly platformShopId: string;
   /** 归一化商品数据（只读） */
   readonly product: NormalizedProduct;
   /** 淘宝类目信息（只读） */
@@ -19,8 +24,12 @@ export interface FillerContext {
   readonly uploadedDetailImages: string[];
   /** 上传后的详情图元信息 */
   readonly uploadedDetailImageMetas?: TbUploadedImageMeta[];
+  /** 上传后的 SKU 图片 URL 映射（原始 URL → 淘宝 URL） */
+  readonly uploadedSkuImageMap?: Record<string, string>;
   /** 草稿上下文（含 catId / startTraceId / draftId 等） */
   readonly draftContext: TbDraftContext;
+  /** 发布配置（价格调整、发布策略） */
+  readonly publishConfig?: PublishConfig;
   /** 发布页面 window.Json 解析结果（含实际表单字段、类目属性、SKU 选项等） */
   readonly tbWindowJson?: TbWindowJsonDraftData;
   /**

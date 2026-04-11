@@ -22,6 +22,7 @@ export class PublishWindowApi extends ElectronApi {
   async openPublishWindow(options?: {
     batchId?: number;
     entryScene?: 'collection' | 'product';
+    initialView?: 'default' | 'progress';
   }): Promise<{ opened: boolean }> {
     return this.invokeApi('openPublishWindow', options);
   }

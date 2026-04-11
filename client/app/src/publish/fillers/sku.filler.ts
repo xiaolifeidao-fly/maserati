@@ -1,14 +1,12 @@
 import type { IFiller, FillerContext } from './filler.interface';
 import type { NormalizedSku } from '../types/source-data';
-
-function parseYuanPrice(value: string): number {
-  const numeric = Number(String(value || '').replace(/[^\d.]/g, ''));
-  return Number.isFinite(numeric) ? numeric : 0;
-}
+import type { TbSaleSpecUiMode } from '../types/draft';
+import { findLowestPositivePrice, formatPrice, parsePriceNumber } from './price.utils';
 
 interface CustomSalePropItem {
   text: string;
   value: number;
+  img?: string;
 }
 
 interface CustomSalePropGroup {
@@ -32,6 +30,24 @@ interface SkuDimension {
   name: string;
   text: string;
   items: CustomSalePropItem[];
+}
+
+interface SkuResolvedProp extends CustomSalePropItem {
+  name: string;
+}
+
+interface GeneratedCustomPropSeed {
+  timestamp: string;
+  random: string;
+}
+
+export interface GeneratedSkuPayload {
+  customSaleProp: Array<{
+    name: string;
+    text: string;
+    items: CustomSalePropItem[];
+  }>;
+  sku: Array<Record<string, unknown>>;
 }
 
 /**
@@ -58,10 +74,21 @@ export class SkuFiller implements IFiller {
 
     if (!skuList.length) return;
 
-    const dimensions = this.buildCustomSaleProps(skuList, draftPayload['customSaleProp']);
-    const skuInfoList = skuList
-      .map((sku, index) => this.buildSkuEntry(sku, index, dimensions))
-      .filter((item): item is Record<string, unknown> => Boolean(item));
+    const generated = buildCustomSalePropPayload(
+      skuList,
+      draftPayload['customSaleProp'],
+      ctx.uploadedSkuImageMap ?? {},
+      ctx.draftContext.saleSpecUiMode ?? 'unknown',
+    );
+    const dimensions = generated.customSaleProp;
+    const skuInfoList = generated.sku;
+
+    const lowestSkuPrice = findLowestPositivePrice(skuList.map(item => item.price));
+    if (lowestSkuPrice !== null) {
+      // draft.price 始终跟随最低 SKU 价，并复用发布配置里的价格上浮规则。
+      draftPayload['price'] = formatPrice(lowestSkuPrice, ctx.publishConfig?.priceSettings);
+    }
+    draftPayload['quantity'] = String(skuList.reduce((sum, item) => sum + (item.stock ?? 0), 0));
 
     if (skuInfoList.length === 0) return;
 
@@ -77,141 +104,292 @@ export class SkuFiller implements IFiller {
       setBySku: false,
       newVersion: true,
     };
-    draftPayload['sku'] = skuInfoList;
-
-    const prices = skuList.map(item => parseYuanPrice(item.price)).filter(price => price > 0);
-    if (prices.length > 0) {
-      draftPayload['price'] = Math.min(...prices).toFixed(2);
-    }
-    draftPayload['quantity'] = String(skuList.reduce((sum, item) => sum + (item.stock ?? 0), 0));
+    draftPayload['sku'] = skuInfoList.map((item, index) => ({
+      ...item,
+      skuPrice: formatPrice(
+        parsePriceNumber(item.skuPrice ?? skuList[index]?.price ?? '0'),
+        ctx.publishConfig?.priceSettings,
+      ),
+    }));
   }
+}
 
-  private buildCustomSaleProps(
-    skuList: NormalizedSku[],
-    existingValue: unknown,
-  ): SkuDimension[] {
-    const existingGroups = Array.isArray(existingValue)
-      ? (existingValue as ExistingCustomSalePropGroup[])
-      : [];
-    const dimensions: Array<{ name: string; values: string[] }> = [];
+export function buildCustomSalePropPayload(
+  skuList: NormalizedSku[],
+  existingValue: unknown,
+  skuImageUrlMap: Record<string, string> = {},
+  saleSpecUiMode: TbSaleSpecUiMode = 'unknown',
+): GeneratedSkuPayload {
+  const existingGroups = Array.isArray(existingValue)
+    ? (existingValue as ExistingCustomSalePropGroup[])
+    : [];
+  const rawDimensions: Array<{ name: string; values: string[] }> = [];
 
-    for (const sku of skuList) {
-      for (const [index, spec] of (sku.specs ?? []).entries()) {
-        const specName = String(spec.name ?? '').trim();
-        const specValue = String(spec.value ?? '').trim();
-        if (!specName || !specValue) continue;
+  for (const sku of skuList) {
+    for (const [index, spec] of (sku.specs ?? []).entries()) {
+      const specName = String(spec.name ?? '').trim();
+      const specValue = String(spec.value ?? '').trim();
+      if (!specName || !specValue) continue;
 
-        const current = dimensions[index];
-        if (!current) {
-          dimensions[index] = { name: specName, values: [specValue] };
-          continue;
-        }
+      const current = rawDimensions[index];
+      if (!current) {
+        rawDimensions[index] = { name: specName, values: [specValue] };
+        continue;
+      }
 
-        if (!current.name) {
-          current.name = specName;
-        }
-        if (!current.values.includes(specValue)) {
-          current.values.push(specValue);
-        }
+      if (!current.name) {
+        current.name = specName;
+      }
+      if (!current.values.includes(specValue)) {
+        current.values.push(specValue);
       }
     }
-
-    return dimensions
-      .filter(dimension => dimension.name && dimension.values.length > 0)
-      .map((dimension, index) => {
-        const existingGroup = this.findExistingGroup(existingGroups, dimension.name, index);
-        const items = dimension.values.map((value, itemIndex) => {
-          const existingItem = existingGroup?.items?.find(item => String(item?.text ?? '').trim() === value);
-          const resolvedValue = this.toNumericValue(existingItem?.value) ?? -(itemIndex + 1);
-          return {
-            text: value,
-            value: resolvedValue,
-          };
-        });
-
-        return {
-          name: this.resolveCustomPropName(existingGroup?.name, index),
-          text: dimension.name,
-          items,
-        };
-      });
   }
 
-  private buildSkuEntry(
-    sku: NormalizedSku,
-    index: number,
-    dimensions: SkuDimension[],
-  ): Record<string, unknown> | null {
-    const props = dimensions.map(dimension => {
-      const matchedSpec = (sku.specs ?? []).find(spec => String(spec.name ?? '').trim() === dimension.text);
-      const valueText = String(matchedSpec?.value ?? '').trim();
-      if (!valueText) return null;
-
-      const matchedItem = dimension.items.find(item => item.text === valueText);
-      if (!matchedItem) return null;
+  const customPropSeed = buildCustomPropSeed();
+  const multiDimensionGroups = rawDimensions
+    .filter(dimension => dimension.name && dimension.values.length > 0)
+    .map((dimension, index) => {
+      const existingGroup = findExistingGroup(existingGroups, dimension.name, index);
+      const items = dimension.values.map((value, itemIndex) => {
+        const existingItem = existingGroup?.items?.find(item => String(item?.text ?? '').trim() === value);
+        const resolvedValue = toNumericValue(existingItem?.value) ?? -(itemIndex + 1);
+        return {
+          text: value,
+          value: resolvedValue,
+        };
+      });
 
       return {
-        name: dimension.name,
-        text: dimension.text,
-        value: matchedItem.value,
+        name: resolveCustomPropName(existingGroup?.name, index, customPropSeed),
+        text: dimension.name,
+        items,
       };
     });
 
-    if (props.some(item => !item) || props.length === 0) {
-      return null;
-    }
+  const dimensions = saleSpecUiMode === 'custom-spec'
+    ? flattenDimensionsForCustomSpec(skuList, existingGroups, multiDimensionGroups, skuImageUrlMap)
+    : multiDimensionGroups;
 
-    const resolvedProps = props.filter((item): item is NonNullable<typeof item> => Boolean(item));
+  const skuInfoList = skuList
+    .map((sku, index) => buildSkuEntry(sku, index, dimensions, skuImageUrlMap))
+    .filter((item): item is Record<string, unknown> => Boolean(item));
 
+  return {
+    customSaleProp: dimensions.map(({ name, text, items }) => ({ name, text, items })),
+    sku: skuInfoList,
+  };
+}
+
+function buildSkuEntry(
+  sku: NormalizedSku,
+  index: number,
+  dimensions: SkuDimension[],
+  skuImageUrlMap: Record<string, string> = {},
+): Record<string, unknown> | null {
+  const props = dimensions.map(dimension => resolveSkuPropForDimension(sku, dimension, skuImageUrlMap));
+
+  if (props.some(item => !item) || props.length === 0) {
+    return null;
+  }
+
+  const resolvedProps = props.filter((item): item is NonNullable<typeof item> => Boolean(item));
+
+  const skuPicture = buildSkuPicture(sku.imgUrl, skuImageUrlMap);
+
+  return {
+    cspuId: null,
+    skuPrice: parsePriceNumber(sku.price).toFixed(2),
+    action: {
+      selected: true,
+    },
+    skuId: null,
+    skuStatus: 1,
+    skuStock: sku.stock ?? 0,
+    skuQuality: {
+      text: '单品',
+      value: 'mainSku',
+    },
+    skuMaterialParamControl: null,
+    skuCustomize: {
+      text: '否',
+      value: 0,
+    },
+    disabled: null,
+    skuPicture,
+    props: resolvedProps,
+    salePropKey: resolvedProps.map(prop => `${prop.name}-${prop.value}`).join('_'),
+    errorInfo: {},
+    suggestionInfo: {},
+    _originalIndex: index,
+  };
+}
+
+function buildSkuPicture(
+  imgUrl: string | undefined,
+  skuImageUrlMap: Record<string, string>,
+): Array<{ url: string }> {
+  const originalUrl = imgUrl?.trim();
+  if (!originalUrl) return [];
+
+  const tbUrl = skuImageUrlMap[originalUrl] ?? originalUrl;
+  return [{ url: tbUrl }];
+}
+
+function resolveSkuPropForDimension(
+  sku: NormalizedSku,
+  dimension: SkuDimension,
+  skuImageUrlMap: Record<string, string>,
+): SkuResolvedProp | null {
+  const matchedSpec = (sku.specs ?? []).find(spec => String(spec.name ?? '').trim() === dimension.text);
+  const valueText = String(matchedSpec?.value ?? '').trim();
+
+  if (valueText) {
+    const matchedItem = dimension.items.find(item => item.text === valueText);
+    if (!matchedItem) return null;
     return {
-      cspuId: null,
-      skuPrice: parseYuanPrice(sku.price).toFixed(2),
-      action: {
-        selected: true,
-      },
-      skuId: null,
-      skuStatus: 1,
-      skuStock: sku.stock ?? 0,
-      skuMaterialParamControl: null,
-      skuCustomize: {
-        text: '否',
-        value: 0,
-      },
-      disabled: null,
-      props: resolvedProps,
-      salePropKey: resolvedProps.map(prop => `${prop.name}-${prop.value}`).join('_'),
-      errorInfo: {},
-      suggestionInfo: {},
-      _originalIndex: index,
+      name: dimension.name,
+      text: matchedItem.text,
+      value: matchedItem.value,
+      ...(matchedItem.img ? { img: matchedItem.img } : {}),
     };
   }
 
-  private findExistingGroup(
-    groups: ExistingCustomSalePropGroup[],
-    name: string,
-    index: number,
-  ): ExistingCustomSalePropGroup | undefined {
-    return groups.find(group => String(group?.text ?? '').trim() === name) ?? groups[index];
+  if (dimensionsRepresentFlattenedCombo(dimension)) {
+    const comboText = buildCombinedSpecText(sku);
+    if (!comboText) return null;
+    const matchedItem = dimension.items.find(item => item.text === comboText);
+    if (!matchedItem) return null;
+    return {
+      name: dimension.name,
+      text: matchedItem.text,
+      value: matchedItem.value,
+      ...(matchedItem.img ? { img: matchedItem.img } : {}),
+    };
   }
 
-  private resolveCustomPropName(existingName: string | undefined, index: number): string {
-    const normalized = String(existingName ?? '').trim();
-    if (normalized && normalized !== 'custom_-1') {
-      return normalized;
-    }
+  return null;
+}
 
-    return `custom_${Date.now() + index}`;
+function flattenDimensionsForCustomSpec(
+  skuList: NormalizedSku[],
+  existingGroups: ExistingCustomSalePropGroup[],
+  multiDimensionGroups: SkuDimension[],
+  skuImageUrlMap: Record<string, string>,
+): SkuDimension[] {
+  if (multiDimensionGroups.length <= 1) {
+    return multiDimensionGroups.map(group => ({
+      ...group,
+      items: group.items.map(item => ({
+        ...item,
+        img: findItemImageByText(skuList, item.text, skuImageUrlMap),
+      })),
+    }));
   }
 
-  private toNumericValue(value: string | number | undefined): number | undefined {
-    if (typeof value === 'number' && Number.isFinite(value)) {
-      return value;
+  const existingGroup = findExistingGroup(existingGroups, '商品规格', 0) ?? existingGroups[0];
+  const seed = buildCustomPropSeed();
+  const itemMap = new Map<string, CustomSalePropItem>();
+
+  for (const sku of skuList) {
+    const text = buildCombinedSpecText(sku);
+    if (!text || itemMap.has(text)) {
+      continue;
     }
 
-    if (typeof value === 'string' && /^-?\d+$/.test(value.trim())) {
-      return Number(value);
-    }
+    const existingItem = existingGroup?.items?.find(item => String(item?.text ?? '').trim() === text);
+    itemMap.set(text, {
+      text,
+      value: toNumericValue(existingItem?.value) ?? -(itemMap.size + 1),
+      img: resolveSkuImageUrl(sku.imgUrl, skuImageUrlMap),
+    });
+  }
 
+  if (itemMap.size === 0) {
+    return multiDimensionGroups;
+  }
+
+  return [{
+    name: resolveCustomPropName(existingGroup?.name, 0, seed),
+    text: String(existingGroup?.text ?? '').trim() || '商品规格',
+    items: Array.from(itemMap.values()),
+  }];
+}
+
+function buildCombinedSpecText(sku: NormalizedSku): string {
+  return (sku.specs ?? [])
+    .map(spec => String(spec.value ?? '').trim())
+    .filter(Boolean)
+    .join('');
+}
+
+function findItemImageByText(
+  skuList: NormalizedSku[],
+  text: string,
+  skuImageUrlMap: Record<string, string>,
+): string | undefined {
+  const matchedSku = skuList.find(sku => {
+    const directText = (sku.specs ?? [])
+      .map(spec => String(spec.value ?? '').trim())
+      .find(value => value === text);
+    return Boolean(directText);
+  });
+
+  return resolveSkuImageUrl(matchedSku?.imgUrl, skuImageUrlMap);
+}
+
+function resolveSkuImageUrl(
+  imgUrl: string | undefined,
+  skuImageUrlMap: Record<string, string>,
+): string | undefined {
+  const originalUrl = String(imgUrl ?? '').trim();
+  if (!originalUrl) {
     return undefined;
   }
+  return skuImageUrlMap[originalUrl] ?? originalUrl;
+}
+
+function dimensionsRepresentFlattenedCombo(dimension: SkuDimension): boolean {
+  return String(dimension.text).trim() === '商品规格';
+}
+
+function findExistingGroup(
+  groups: ExistingCustomSalePropGroup[],
+  name: string,
+  index: number,
+): ExistingCustomSalePropGroup | undefined {
+  return groups.find(group => String(group?.text ?? '').trim() === name) ?? groups[index];
+}
+
+function resolveCustomPropName(
+  existingName: string | undefined,
+  index: number,
+  seed: GeneratedCustomPropSeed,
+): string {
+  const normalized = String(existingName ?? '').trim();
+  if (normalized && normalized !== 'custom_-1') {
+    return normalized;
+  }
+
+  const suffix = `${seed.timestamp}${seed.random}${String(index + 1).padStart(2, '0')}`;
+  return `custom_${suffix}`;
+}
+
+function buildCustomPropSeed(): GeneratedCustomPropSeed {
+  const timestamp = String(Date.now());
+  const random = String(Math.floor(Math.random() * 90) + 10);
+
+  return { timestamp, random };
+}
+
+function toNumericValue(value: string | number | undefined): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === 'string' && /^-?\d+$/.test(value.trim())) {
+    return Number(value);
+  }
+
+  return undefined;
 }

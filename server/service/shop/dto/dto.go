@@ -7,6 +7,7 @@ type ShopDTO struct {
 	AppUserID              uint64 `json:"appUserId"`
 	Code                   string `json:"code"`
 	Name                   string `json:"name"`
+	Nickname               string `json:"nickname"`
 	Platform               string `json:"platform"`
 	Remark                 string `json:"remark"`
 	PlatformShopID         string `json:"platformShopId"`
@@ -51,6 +52,7 @@ type ShopLoginDTO struct {
 	ShopID         uint64 `json:"shopId"`
 	AppUserID      uint64 `json:"appUserId"`
 	Name           string `json:"name"`
+	Nickname       string `json:"nickname"`
 	Code           string `json:"code"`
 	Platform       string `json:"platform"`
 	PlatformShopID string `json:"platformShopId"`

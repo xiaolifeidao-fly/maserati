@@ -102,7 +102,7 @@ export function useShopManagement() {
         type: "info",
         shopId: id,
         title: "登录窗口已打开",
-        description: `${currentShop?.remark || currentShop?.name || currentShop?.code || `店铺 #${id}`} 正在等待完成淘宝登录，本页会自动刷新同步结果。`,
+        description: `${currentShop?.remark || currentShop?.nickname || currentShop?.name || currentShop?.code || `店铺 #${id}`} 正在等待完成淘宝登录，本页会自动刷新同步结果。`,
       });
       void monitorShopLogin(id, currentShop);
       return result;
@@ -124,8 +124,8 @@ export function useShopManagement() {
             shopId: id,
             title: "店铺登录已同步",
             description: latestShop.businessId
-              ? `${latestShop.remark || latestShop.name || latestShop.code || `店铺 #${id}`} 已登录成功，业务ID已同步，可以继续完成授权。`
-              : `${latestShop.remark || latestShop.name || latestShop.code || `店铺 #${id}`} 已登录成功，如需继续请完成授权绑定。`,
+              ? `${latestShop.remark || latestShop.nickname || latestShop.name || latestShop.code || `店铺 #${id}`} 已登录成功，业务ID已同步，可以继续完成授权。`
+              : `${latestShop.remark || latestShop.nickname || latestShop.name || latestShop.code || `店铺 #${id}`} 已登录成功，如需继续请完成授权绑定。`,
           });
           return;
         }
@@ -144,7 +144,7 @@ export function useShopManagement() {
       type: "info",
       shopId: id,
       title: "仍在等待登录完成",
-      description: `${currentShop?.remark || currentShop?.name || currentShop?.code || `店铺 #${id}`} 的登录窗口仍可继续操作，完成后本页刷新即可看到最新状态。`,
+      description: `${currentShop?.remark || currentShop?.nickname || currentShop?.name || currentShop?.code || `店铺 #${id}`} 的登录窗口仍可继续操作，完成后本页刷新即可看到最新状态。`,
     });
   };
 

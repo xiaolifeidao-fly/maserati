@@ -43,15 +43,15 @@ type AddressQueryDTO struct {
 
 type AddressTemplateDTO struct {
 	baseDTO.BaseDTO
-	UserID     string `json:"userId"`
-	AddressID  uint64 `json:"addressId"`
-	TemplateID string `json:"templateId"`
+	PlatformShopID string `json:"platformShopId"`
+	AddressID      uint64 `json:"addressId"`
+	TemplateID     string `json:"templateId"`
 }
 
 type CreateAddressTemplateDTO struct {
-	UserID     string `json:"userId"`
-	AddressID  uint64 `json:"addressId"`
-	TemplateID string `json:"templateId"`
+	PlatformShopID string `json:"platformShopId"`
+	AddressID      uint64 `json:"addressId"`
+	TemplateID     string `json:"templateId"`
 }
 
 type UpdateAddressTemplateDTO struct {

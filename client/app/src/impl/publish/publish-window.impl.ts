@@ -15,6 +15,7 @@ export class PublishWindowImpl extends PublishWindowApi {
   async openPublishWindow(options?: {
     batchId?: number;
     entryScene?: 'collection' | 'product';
+    initialView?: 'default' | 'progress';
   }): Promise<{ opened: boolean }> {
     openPublishWindow(options);
     return { opened: true };

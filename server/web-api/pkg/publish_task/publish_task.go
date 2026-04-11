@@ -25,6 +25,7 @@ func NewPublishTaskHandler() *PublishTaskHandler {
 func (h *PublishTaskHandler) RegisterHandler(engine *gin.RouterGroup) {
 	// 发布任务
 	engine.GET("/publish-tasks", h.listTasks)
+	engine.GET("/publish-tasks/batches/:id/republish-stats", h.getBatchRepublishStats)
 	engine.GET("/publish-tasks/:id", h.getTask)
 	engine.POST("/publish-tasks", h.createTask)
 	engine.PUT("/publish-tasks/:id", h.updateTask)
@@ -58,6 +59,17 @@ func (h *PublishTaskHandler) getTask(c *gin.Context) {
 		commonRouter.ToError(c, "publish task not found")
 		return
 	}
+	commonRouter.ToJson(c, r, e)
+}
+
+func (h *PublishTaskHandler) getBatchRepublishStats(c *gin.Context) {
+	batchID, ok := parseID(c, "id")
+	if !ok {
+		return
+	}
+	var appUserID uint64
+	applyAppUserID(c, &appUserID)
+	r, e := h.service.GetBatchRepublishStats(uint64(batchID), appUserID)
 	commonRouter.ToJson(c, r, e)
 }
 

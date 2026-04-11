@@ -18,9 +18,9 @@ func (a *Address) Init()             { a.BaseEntity.Init() }
 // AddressTemplate 地址模版表
 type AddressTemplate struct {
 	db.BaseEntity
-	UserID     string `gorm:"column:user_id;type:varchar(30);index:idx_user_address_id" description:"用户ID"`
-	AddressID  uint64 `gorm:"column:address_id;type:bigint unsigned;not null;index:idx_user_address_id" description:"地址ID"`
-	TemplateID string `gorm:"column:template_id;type:varchar(50);not null" description:"模版ID"`
+	PlatformShopID string `gorm:"column:platform_shop_id;type:varchar(100);index:idx_shop_address_id" description:"第三方店铺ID"`
+	AddressID      uint64 `gorm:"column:address_id;type:bigint unsigned;not null;index:idx_shop_address_id" description:"地址ID"`
+	TemplateID     string `gorm:"column:template_id;type:varchar(50);not null" description:"模版ID"`
 }
 
 func (a *AddressTemplate) TableName() string { return "address_template" }

@@ -193,6 +193,7 @@ function MainImagePanel({
   onPreview,
   onUpload,
   onReplace,
+  readonly = false,
 }: {
   images: string[];
   allImages?: string[];
@@ -200,6 +201,7 @@ function MainImagePanel({
   onPreview: (url: string) => void;
   onUpload: (index: number) => void;
   onReplace: (index: number, url: string) => void;
+  readonly?: boolean;
 }) {
   const slots = normalizeMainImages(images);
   const selectedImages = images.filter(Boolean);
@@ -251,7 +253,7 @@ function MainImagePanel({
                           ? "已选满 5 张"
                           : "点击选为主图"
                   }
-                  onClick={() => !maxReached && toggleCandidate(url)}
+                  onClick={() => !readonly && !maxReached && toggleCandidate(url)}
                   style={{
                     width: 80,
                     height: 80,
@@ -264,7 +266,7 @@ function MainImagePanel({
                           : "1.5px solid #e2e8f0",
                     position: "relative",
                     overflow: "hidden",
-                    cursor: maxReached ? "not-allowed" : "pointer",
+                    cursor: readonly ? "default" : maxReached ? "not-allowed" : "pointer",
                     flexShrink: 0,
                     opacity: maxReached ? 0.45 : 1,
                     transition: "border-color 0.15s, opacity 0.15s",
@@ -301,7 +303,7 @@ function MainImagePanel({
               );
             })}
           </div>
-          {replaceTargetIndex !== null ? (
+          {!readonly && replaceTargetIndex !== null ? (
             <div style={{ marginTop: 10 }}>
               <Button size="small" onClick={() => setReplaceTargetIndex(null)}>
                 取消替换
@@ -410,31 +412,33 @@ function MainImagePanel({
                 {hasImage ? (
                   <>
                     <ImageActionButton icon={<EyeOutlined />} title="预览大图" onClick={() => onPreview(url)} />
-                    {hasCandidates ? (
+                    {!readonly && hasCandidates ? (
                       <ImageActionButton
                         icon={<SwapOutlined />}
                         title="从候选图替换"
                         onClick={() => setReplaceTargetIndex(index)}
                       />
                     ) : null}
-                    <ImageActionButton
-                      icon={<DeleteOutlined />}
-                      title="删除图片"
-                      danger
-                      onClick={() => {
-                        const next = [...slots];
-                        next[index] = "";
-                        onChange(next.filter(Boolean));
-                        if (replaceTargetIndex === index) {
-                          setReplaceTargetIndex(null);
-                        }
-                      }}
-                    />
+                    {!readonly ? (
+                      <ImageActionButton
+                        icon={<DeleteOutlined />}
+                        title="删除图片"
+                        danger
+                        onClick={() => {
+                          const next = [...slots];
+                          next[index] = "";
+                          onChange(next.filter(Boolean));
+                          if (replaceTargetIndex === index) {
+                            setReplaceTargetIndex(null);
+                          }
+                        }}
+                      />
+                    ) : null}
                   </>
                 ) : null}
               </div>
 
-              {!hasCandidates || hasImage ? (
+              {!readonly && (!hasCandidates || hasImage) ? (
                 <div
                   style={{
                     position: "absolute",
@@ -469,12 +473,14 @@ function DetailImagePanel({
   onPreview,
   onReplace,
   onAdd,
+  readonly = false,
 }: {
   images: string[];
   onChange: (next: string[]) => void;
   onPreview: (url: string) => void;
   onReplace: (index: number) => void;
   onAdd: () => void;
+  readonly?: boolean;
 }) {
   const [draggingIndex, setDraggingIndex] = useState<number | null>(null);
 
@@ -497,11 +503,11 @@ function DetailImagePanel({
       {images.map((url, index) => (
         <div
           key={`detail-image-${index}-${url}`}
-          draggable
-          onDragStart={() => handleDragStart(index)}
-          onDragOver={(event) => event.preventDefault()}
-          onDrop={() => handleDrop(index)}
-          onDragEnd={handleDragEnd}
+          draggable={!readonly}
+          onDragStart={() => !readonly && handleDragStart(index)}
+          onDragOver={(event) => !readonly && event.preventDefault()}
+          onDrop={() => !readonly && handleDrop(index)}
+          onDragEnd={() => !readonly && handleDragEnd()}
           style={{
             width: 150,
             height: 150,
@@ -513,7 +519,7 @@ function DetailImagePanel({
             background: "#f8fafc",
             position: "relative",
             overflow: "hidden",
-            cursor: "grab",
+            cursor: readonly ? "default" : "grab",
             boxShadow: draggingIndex === index ? "0 10px 24px rgba(59,130,246,0.15)" : "none",
           }}
         >
@@ -565,15 +571,17 @@ function DetailImagePanel({
               right: 8,
             }}
           >
-            <ImageActionButton
-              icon={<DeleteOutlined />}
-              title="删除图片"
-              danger
-              onClick={() => onChange(images.filter((_, currentIndex) => currentIndex !== index))}
-            />
+            {!readonly ? (
+              <ImageActionButton
+                icon={<DeleteOutlined />}
+                title="删除图片"
+                danger
+                onClick={() => onChange(images.filter((_, currentIndex) => currentIndex !== index))}
+              />
+            ) : null}
           </div>
 
-          <div
+          {!readonly ? <div
             style={{
               position: "absolute",
               right: 8,
@@ -583,11 +591,11 @@ function DetailImagePanel({
             <Button size="small" icon={<SwapOutlined />} onClick={() => onReplace(index)}>
               替换
             </Button>
-          </div>
+          </div> : null}
         </div>
       ))}
 
-      <button
+      {!readonly ? <button
         type="button"
         onClick={onAdd}
         style={{
@@ -608,7 +616,7 @@ function DetailImagePanel({
       >
         <PlusOutlined style={{ fontSize: 22 }} />
         <span style={{ fontSize: 13, fontWeight: 600 }}>添加图片</span>
-      </button>
+      </button> : null}
     </div>
   );
 }
@@ -616,9 +624,11 @@ function DetailImagePanel({
 function AttributeRows({
   attributes,
   onChange,
+  readonly = false,
 }: {
   attributes: AttributeItem[];
   onChange: (attrs: AttributeItem[]) => void;
+  readonly?: boolean;
 }) {
   if (attributes.length === 0) {
     return <div style={{ padding: "16px 0", textAlign: "center", color: "#cbd5e1", fontSize: 12 }}>暂无属性数据</div>;
@@ -638,7 +648,8 @@ function AttributeRows({
               size="small"
               value={attr.value}
               options={attr.options.map((opt) => ({ value: opt }))}
-              onChange={(value) => updateValue(idx, value)}
+              onChange={(value) => !readonly && updateValue(idx, value)}
+              open={readonly ? false : undefined}
               filterOption={(input, option) =>
                 String(option?.value ?? "").toLowerCase().includes(input.toLowerCase())
               }
@@ -648,7 +659,8 @@ function AttributeRows({
             <Input
               size="small"
               value={attr.value}
-              onChange={(e) => updateValue(idx, e.target.value)}
+              onChange={(e) => !readonly && updateValue(idx, e.target.value)}
+              readOnly={readonly}
               style={{ fontSize: 12 }}
             />
           )}
@@ -661,9 +673,11 @@ function AttributeRows({
 function SkuTable({
   skuList,
   onChange,
+  readonly = false,
 }: {
   skuList: SkuItem[];
   onChange: (skus: SkuItem[]) => void;
+  readonly?: boolean;
 }) {
   if (skuList.length === 0) {
     return <div style={{ padding: "16px 0", textAlign: "center", color: "#cbd5e1", fontSize: 12 }}>暂无规格数据</div>;
@@ -783,7 +797,8 @@ function SkuTable({
               <Input
                 size="small"
                 value={column.name}
-                onChange={(event) => updateColumnName(column.key, event.target.value)}
+                onChange={(event) => !readonly && updateColumnName(column.key, event.target.value)}
+                readOnly={readonly}
                 style={{ fontSize: 12 }}
               />
             </div>
@@ -828,7 +843,8 @@ function SkuTable({
                   <Input
                     size="small"
                     value={currentValue}
-                    onChange={(event) => updateSpecValue(idx, column.key, event.target.value)}
+                    onChange={(event) => !readonly && updateSpecValue(idx, column.key, event.target.value)}
+                    readOnly={readonly}
                     style={{ fontSize: 12, flex: 1, minWidth: 0 }}
                   />
                 </div>
@@ -839,9 +855,11 @@ function SkuTable({
                 size="small"
                 value={sku.price}
                 onChange={(e) => {
+                  if (readonly) return;
                   const next = skuList.map((item, index) => (index === idx ? { ...item, price: e.target.value } : item));
                   onChange(next);
                 }}
+                readOnly={readonly}
                 style={{ fontSize: 12, textAlign: "center" }}
                 prefix={<span style={{ color: "#e11d48", fontSize: 11 }}>¥</span>}
               />
@@ -851,11 +869,13 @@ function SkuTable({
                 size="small"
                 value={String(sku.stock)}
                 onChange={(e) => {
+                  if (readonly) return;
                   const next = skuList.map((item, index) =>
                     index === idx ? { ...item, stock: Number(e.target.value.replace(/\D/g, "")) || 0 } : item,
                   );
                   onChange(next);
                 }}
+                readOnly={readonly}
                 style={{ fontSize: 12, textAlign: "center" }}
               />
             </div>
@@ -870,9 +890,10 @@ export interface ProductDetailEditorProps {
   data: StandardProductData | null;
   loading?: boolean;
   onChange?: (next: StandardProductData) => void;
+  readonly?: boolean;
 }
 
-export function ProductDetailEditor({ data, loading = false, onChange }: ProductDetailEditorProps) {
+export function ProductDetailEditor({ data, loading = false, onChange, readonly = false }: ProductDetailEditorProps) {
   const [local, setLocal] = useState<StandardProductData | null>(data);
   const [previewImage, setPreviewImage] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -950,13 +971,15 @@ export function ProductDetailEditor({ data, loading = false, onChange }: Product
 
   return (
     <>
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept="image/*"
-        style={{ display: "none" }}
-        onChange={handleFileSelected}
-      />
+      {!readonly ? (
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          style={{ display: "none" }}
+          onChange={handleFileSelected}
+        />
+      ) : null}
       <div
         style={{
           flex: 1,
@@ -983,6 +1006,7 @@ export function ProductDetailEditor({ data, loading = false, onChange }: Product
                 onChange={(e) => patch({ title: e.target.value })}
                 maxLength={60}
                 showCount
+                readOnly={readonly}
                 autoSize={{ minRows: 2, maxRows: 4 }}
                 placeholder="请输入宝贝标题（最多60字）"
                 style={{ fontSize: 13 }}
@@ -998,6 +1022,7 @@ export function ProductDetailEditor({ data, loading = false, onChange }: Product
                 onChange={(e) => patch({ subTitle: e.target.value })}
                 maxLength={30}
                 showCount
+                readOnly={readonly}
                 placeholder="品牌 + 品类词 + 利益点（最多30字）"
                 style={{ fontSize: 13 }}
               />
@@ -1025,6 +1050,7 @@ export function ProductDetailEditor({ data, loading = false, onChange }: Product
               slots[index] = url;
               patch({ mainImages: slots.filter(Boolean).slice(0, 5) });
             }}
+            readonly={readonly}
           />
         </CollapsibleSection>
 
@@ -1039,15 +1065,16 @@ export function ProductDetailEditor({ data, loading = false, onChange }: Product
             onPreview={(url) => setPreviewImage(url)}
             onReplace={(index) => triggerUpload("detail", index)}
             onAdd={() => triggerUpload("detail", -1)}
+            readonly={readonly}
           />
         </CollapsibleSection>
 
         <CollapsibleSection title="商品属性" count={local.attributes.length ? `${local.attributes.length} 项` : undefined}>
-          <AttributeRows attributes={local.attributes} onChange={(attributes) => patch({ attributes })} />
+          <AttributeRows attributes={local.attributes} onChange={(attributes) => patch({ attributes })} readonly={readonly} />
         </CollapsibleSection>
 
         <CollapsibleSection title="销售规格" count={local.skuList.length ? `${local.skuList.length} 个 SKU` : undefined}>
-          <SkuTable skuList={local.skuList} onChange={(skuList) => patch({ skuList })} />
+          <SkuTable skuList={local.skuList} onChange={(skuList) => patch({ skuList })} readonly={readonly} />
         </CollapsibleSection>
 
         <CollapsibleSection title="物流信息">
@@ -1059,6 +1086,7 @@ export function ProductDetailEditor({ data, loading = false, onChange }: Product
                 onChange={(e) => patch({ logistics: { ...local.logistics, shipping: e.target.value } })}
                 placeholder="如：包邮 / ¥5.00"
                 size="small"
+                readOnly={readonly}
                 style={{ fontSize: 12 }}
               />
             </div>
@@ -1071,6 +1099,7 @@ export function ProductDetailEditor({ data, loading = false, onChange }: Product
                 onChange={(e) => patch({ logistics: { ...local.logistics, deliveryTime: e.target.value } })}
                 placeholder="如：48小时内"
                 size="small"
+                readOnly={readonly}
                 style={{ fontSize: 12 }}
               />
             </div>
@@ -1083,6 +1112,7 @@ export function ProductDetailEditor({ data, loading = false, onChange }: Product
                 onChange={(e) => patch({ logistics: { ...local.logistics, refundPolicy: e.target.value } })}
                 placeholder="退换货政策"
                 size="small"
+                readOnly={readonly}
                 style={{ fontSize: 12 }}
               />
             </div>
@@ -1095,6 +1125,7 @@ export function ProductDetailEditor({ data, loading = false, onChange }: Product
                 onChange={(e) => patch({ logistics: { ...local.logistics, shipFrom: e.target.value } })}
                 placeholder="如：广东 深圳"
                 size="small"
+                readOnly={readonly}
                 style={{ fontSize: 12 }}
               />
             </div>

@@ -159,28 +159,51 @@ class PublishCenterStore {
         batchName: task.sourceBatchName,
         entryScene: task.entryScene,
         runningCount: 0,
+        pendingCount: 0,
         successCount: 0,
         failedCount: 0,
         totalCount: 0,
         latestUpdatedAt: task.updatedAt,
       };
-
-      next.batchName = next.batchName || task.sourceBatchName;
-      next.entryScene = next.entryScene || task.entryScene;
-      next.totalCount += 1;
-      if (new Date(task.updatedAt).getTime() > new Date(next.latestUpdatedAt).getTime()) {
-        next.latestUpdatedAt = task.updatedAt;
-      }
-
-      if (task.status === TaskStatus.SUCCESS) {
-        next.successCount += 1;
-      } else if (task.status === TaskStatus.FAILED || task.status === TaskStatus.CANCELLED) {
-        next.failedCount += 1;
-      } else {
-        next.runningCount += 1;
-      }
-
       summaryMap.set(batchId, next);
+    }
+
+    for (const [batchId, summary] of summaryMap) {
+      const latestTaskByProduct = new Map<string, PublishRuntimeTaskSnapshot>();
+      const tasksInBatch = tasks.filter((task) => (Number(task.sourceBatchId) || 0) === batchId);
+      for (const task of tasksInBatch) {
+        const productKey = String(task.sourceProductId || task.sourceRecordId || task.taskId || "").trim();
+        if (!productKey) {
+          continue;
+        }
+        const previousTask = latestTaskByProduct.get(productKey);
+        if (!previousTask || new Date(task.updatedAt).getTime() > new Date(previousTask.updatedAt).getTime()) {
+          latestTaskByProduct.set(productKey, task);
+        }
+      }
+
+      summary.batchName = summary.batchName || tasksInBatch.find((task) => task.sourceBatchName)?.sourceBatchName;
+      summary.entryScene = summary.entryScene || tasksInBatch.find((task) => task.entryScene)?.entryScene;
+      summary.totalCount = latestTaskByProduct.size;
+      summary.runningCount = 0;
+      summary.pendingCount = 0;
+      summary.successCount = 0;
+      summary.failedCount = 0;
+
+      for (const task of latestTaskByProduct.values()) {
+        if (new Date(task.updatedAt).getTime() > new Date(summary.latestUpdatedAt).getTime()) {
+          summary.latestUpdatedAt = task.updatedAt;
+        }
+        if (task.status === TaskStatus.SUCCESS) {
+          summary.successCount += 1;
+        } else if (task.status === TaskStatus.FAILED || task.status === TaskStatus.CANCELLED) {
+          summary.failedCount += 1;
+        } else if (task.status === TaskStatus.PENDING) {
+          summary.pendingCount += 1;
+        } else {
+          summary.runningCount += 1;
+        }
+      }
     }
 
     return Array.from(summaryMap.values()).sort((a, b) => (

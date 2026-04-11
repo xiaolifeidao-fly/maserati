@@ -1,9 +1,5 @@
 import type { IFiller, FillerContext } from './filler.interface';
-
-function parseYuanPrice(value: string): number {
-  const numeric = Number(String(value || '').replace(/[^\d.]/g, ''));
-  return Number.isFinite(numeric) ? numeric : 0;
-}
+import { findLowestPositivePrice, formatPrice } from './price.utils';
 
 /**
  * BasicInfoFiller — 基本信息填充器
@@ -52,9 +48,9 @@ export class BasicInfoFiller implements IFiller {
 
     // 一口价取 SKU 最低价，SKU 模式下平台会再结合 sku 明细计算价格区间
     if (product.skuList.length > 0) {
-      const prices = product.skuList.map(s => parseYuanPrice(s.price)).filter(p => p > 0);
-      if (prices.length > 0) {
-        draftPayload['price'] = Math.min(...prices).toFixed(2);
+      const lowestSkuPrice = findLowestPositivePrice(product.skuList.map(s => s.price));
+      if (lowestSkuPrice !== null) {
+        draftPayload['price'] = formatPrice(lowestSkuPrice, ctx.publishConfig?.priceSettings);
       }
     }
   }

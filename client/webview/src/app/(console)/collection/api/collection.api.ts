@@ -29,6 +29,10 @@ export async function fetchCollectBatch(id: number) {
   return getCollectApi().getCollectBatch(id);
 }
 
+export async function fetchCollectRecord(id: number) {
+  return getCollectApi().getCollectRecord(id);
+}
+
 export async function createCollectBatch(payload: CollectBatchPayload) {
   return getCollectApi().createCollectBatch(payload);
 }

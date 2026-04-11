@@ -15,7 +15,10 @@
       "Bash(./node_modules/.bin/tsc --noEmit)",
       "Bash(/Users/fly/.nvm/versions/node/v22.14.0/bin/node /Users/fly/.nvm/versions/node/v22.14.0/lib/node_modules/typescript/bin/tsc --noEmit)",
       "Bash(/Users/fly/.nvm/versions/node/v22.6.0/bin/tsc --noEmit)",
-      "Bash(/Users/fly/.nvm/versions/node/v22.6.0/bin/node node_modules/.bin/tsc --noEmit)"
+      "Bash(/Users/fly/.nvm/versions/node/v22.6.0/bin/node node_modules/.bin/tsc --noEmit)",
+      "Bash(xargs cat:*)",
+      "Bash(find /Users/fly/Documents/develop/project/private/taobao/maserati -type f -name \"*.ts\" -exec grep -l \"class DoorSkuDTO\\\\|interface DoorSkuDTO\" {} \\\\;)",
+      "Bash(find /Users/fly/Documents/develop/project/private/taobao/maserati -type f -name \"*.ts\" -exec grep -l \"class SkuFileDetail\\\\|interface SkuFileDetail\" {} \\\\;)"
     ]
   }
 }

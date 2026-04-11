@@ -9,6 +9,7 @@ import type {
   PublishTaskQuery,
   PublishProgressEvent,
   PublishCenterState,
+  PublishBatchRepublishStats,
 } from '../../../app/src/publish/types/publish-task';
 import type { PageResult } from '../commerce/commerce.api';
 
@@ -35,6 +36,11 @@ export class PublishApi extends ElectronApi {
   @InvokeType(Protocols.INVOKE)
   async getPublishTask(id: number): Promise<PublishTaskRecord> {
     return this.invokeApi('getPublishTask', id);
+  }
+
+  @InvokeType(Protocols.INVOKE)
+  async getPublishBatchRepublishStats(batchId: number): Promise<PublishBatchRepublishStats> {
+    return this.invokeApi('getPublishBatchRepublishStats', batchId);
   }
 
   @InvokeType(Protocols.INVOKE)

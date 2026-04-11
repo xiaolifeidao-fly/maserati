@@ -2,6 +2,7 @@ package logistics
 
 import (
 	commonRouter "common/middleware/routers"
+	"log"
 	"net/http"
 	logisticsService "service/logistics"
 	logisticsDTO "service/logistics/dto"
@@ -46,7 +47,14 @@ func (h *LogisticsHandler) listAddresses(c *gin.Context) {
 		commonRouter.ToError(c, "参数错误")
 		return
 	}
+	log.Printf("[logistics] listAddresses keywords=%q countryCode=%q provinceCode=%q cityCode=%q pageIndex=%d pageSize=%d",
+		q.Keywords, q.CountryCode, q.ProvinceCode, q.CityCode, q.PageIndex, q.PageSize)
 	r, e := h.service.ListAddresses(q)
+	if e != nil {
+		log.Printf("[logistics] listAddresses error: %v", e)
+	} else {
+		log.Printf("[logistics] listAddresses result total=%d", r.Total)
+	}
 	commonRouter.ToJson(c, r, e)
 }
 
@@ -107,8 +115,14 @@ func (h *LogisticsHandler) deleteAddress(c *gin.Context) {
 // ─── AddressTemplate Handlers ─────────────────────────────────────────────────
 
 func (h *LogisticsHandler) listTemplates(c *gin.Context) {
-	userID := c.Query("userId")
-	r, e := h.service.ListTemplatesByUserID(userID)
+	platformShopID := c.Query("platformShopId")
+	log.Printf("[logistics] listTemplates platformShopId=%q", platformShopID)
+	r, e := h.service.ListTemplatesByPlatformShopID(platformShopID)
+	if e != nil {
+		log.Printf("[logistics] listTemplates error: %v", e)
+	} else {
+		log.Printf("[logistics] listTemplates result count=%d", len(r))
+	}
 	commonRouter.ToJson(c, r, e)
 }
 
@@ -131,7 +145,14 @@ func (h *LogisticsHandler) createTemplate(c *gin.Context) {
 		commonRouter.ToError(c, "参数错误")
 		return
 	}
+	log.Printf("[logistics] createTemplate platformShopId=%q addressId=%d templateId=%q",
+		req.PlatformShopID, req.AddressID, req.TemplateID)
 	r, e := h.service.CreateTemplate(&req)
+	if e != nil {
+		log.Printf("[logistics] createTemplate error: %v", e)
+	} else {
+		log.Printf("[logistics] createTemplate ok id=%d", r.Id)
+	}
 	commonRouter.ToJson(c, r, e)
 }
 

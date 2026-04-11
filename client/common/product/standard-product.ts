@@ -98,6 +98,213 @@ function firstNonEmpty(...values: unknown[]) {
   return undefined;
 }
 
+function extractTbAttributes(detailRes: Record<string, unknown>): AttributeItem[] {
+  const plusViewVO = (detailRes.plusViewVO as Record<string, unknown> | undefined) ?? {};
+  const industryParamVO = (plusViewVO.industryParamVO as Record<string, unknown> | undefined) ?? {};
+  const basicParamList = ensureArray(industryParamVO.basicParamList as unknown[]);
+
+  const attributes = basicParamList
+    .map((item) => {
+      const current = item as Record<string, unknown>;
+      return {
+        name: String(current.propertyName || current.name || "").trim(),
+        value: String(current.valueName || current.value || "").trim(),
+      };
+    })
+    .filter((item) => item.name && item.value);
+
+  if (attributes.length > 0) {
+    return attributes;
+  }
+
+  const componentsVO = (detailRes.componentsVO as Record<string, unknown> | undefined) ?? {};
+  const extensionInfoVO = (componentsVO.extensionInfoVO as Record<string, unknown> | undefined) ?? {};
+  const infos = ensureArray(extensionInfoVO.infos as unknown[]);
+  const baseProps = infos.find((item) => {
+    const current = item as Record<string, unknown>;
+    return String(current.type || "").trim() === "BASE_PROPS";
+  }) as Record<string, unknown> | undefined;
+
+  return ensureArray(baseProps?.items as unknown[])
+    .map((item) => {
+      const current = item as Record<string, unknown>;
+      const text = ensureArray(current.text as unknown[])
+        .map((entry) => String(entry ?? "").trim())
+        .filter(Boolean)
+        .join("、");
+      return {
+        name: String(current.title || current.name || "").trim(),
+        value: text,
+      };
+    })
+    .filter((item) => item.name && item.value);
+}
+
+function extractTbDescImages(descData: unknown): string[] {
+  if (!descData || typeof descData !== "object") {
+    return [];
+  }
+
+  const typedDesc = descData as Record<string, unknown>;
+  const components = (typedDesc.components as Record<string, unknown> | undefined) ?? {};
+  const layout = ensureArray(components.layout as unknown[]);
+  const componentData = (components.componentData as Record<string, unknown> | undefined) ?? {};
+
+  const orderedImages = layout
+    .filter((item) => {
+      const current = item as Record<string, unknown>;
+      return String(current.key || "").trim() === "desc_single_image";
+    })
+    .map((item) => {
+      const current = item as Record<string, unknown>;
+      const component = (componentData[String(current.ID || "")] as Record<string, unknown> | undefined) ?? {};
+      const model = (component.model as Record<string, unknown> | undefined) ?? {};
+      return normalizeImageUrl(model.picUrl || model.imageUrl || model.url || model.src);
+    })
+    .filter(Boolean);
+
+  if (orderedImages.length > 0) {
+    return orderedImages;
+  }
+
+  return Object.values(componentData)
+    .map((item) => {
+      const component = item as Record<string, unknown>;
+      const model = (component.model as Record<string, unknown> | undefined) ?? {};
+      return normalizeImageUrl(model.picUrl || model.imageUrl || model.url || model.src);
+    })
+    .filter(Boolean);
+}
+
+function extractTbSkuList(detailRes: Record<string, unknown>): SkuItem[] {
+  const skuBase = (detailRes.skuBase as Record<string, unknown> | undefined) ?? {};
+  const skuCore = (detailRes.skuCore as Record<string, unknown> | undefined) ?? {};
+  const skuProps = ensureArray(skuBase.props as unknown[]);
+  const skuItems = ensureArray(skuBase.skus as unknown[]);
+  const sku2info = (skuCore.sku2info as Record<string, Record<string, unknown>> | undefined) ?? {};
+
+  const skuValueMap = new Map<
+    string,
+    {
+      propId?: string;
+      propName: string;
+      valueId?: string;
+      valueName: string;
+      imageUrl?: string;
+    }
+  >();
+
+  for (const item of skuProps) {
+    const currentProp = item as Record<string, unknown>;
+    const propId = String(currentProp.pid || "").trim();
+    const propName = String(currentProp.name || currentProp.propName || "").trim();
+    if (!propName) {
+      continue;
+    }
+
+    for (const value of ensureArray(currentProp.values as unknown[])) {
+      const currentValue = value as Record<string, unknown>;
+      const valueId = String(currentValue.vid || "").trim();
+      const valueName = String(currentValue.name || currentValue.valueName || "").trim();
+      if (!valueName) {
+        continue;
+      }
+
+      skuValueMap.set(`${propId}:${valueId}`, {
+        propId: propId || undefined,
+        propName,
+        valueId: valueId || undefined,
+        valueName,
+        imageUrl: normalizeImageUrl(
+          currentValue.image || currentValue.imageUrl || currentValue.bigImageUrl || currentValue.sku_url,
+        ) || undefined,
+      });
+    }
+  }
+
+  return skuItems.map((item) => {
+    const currentSku = item as Record<string, unknown>;
+    const skuId = String(currentSku.skuId || currentSku.id || "").trim();
+    const propPath = String(currentSku.propPath || currentSku.properties || "").trim();
+    const skuInfo = (sku2info[skuId] || {}) as Record<string, unknown>;
+    const subPrice = (skuInfo.subPrice as Record<string, unknown> | undefined) ?? {};
+    const priceInfo = (skuInfo.price as Record<string, unknown> | undefined) ?? {};
+    const specs = propPath
+      .split(";")
+      .map((segment) => segment.trim())
+      .filter(Boolean)
+      .map((segment) => {
+        const matched = skuValueMap.get(segment);
+        const [propId, valueId] = segment.split(":");
+        return {
+          propId: matched?.propId || propId || undefined,
+          name: matched?.propName || "规格",
+          valueId: matched?.valueId || valueId || undefined,
+          value: matched?.valueName || segment,
+          imageUrl: matched?.imageUrl,
+        };
+      });
+
+    const imgUrl =
+      specs.find((spec) => spec.imageUrl)?.imageUrl ||
+      normalizeImageUrl(currentSku.imgUrl || currentSku.thumbUrl || currentSku.skuImgUrl) ||
+      undefined;
+
+    return {
+      spec: specs.map((spec) => spec.value).join(" / ") || String(currentSku.skuName || currentSku.specName || skuId),
+      specs,
+      price: normalizePrice(
+        firstNonEmpty(subPrice.priceMoney, subPrice.priceText, priceInfo.priceMoney, priceInfo.priceText),
+      ),
+      originalPrice: normalizePrice(
+        firstNonEmpty(priceInfo.priceMoney, priceInfo.priceText, subPrice.priceMoney, subPrice.priceText),
+      ) || undefined,
+      stock: Number(skuInfo.quantity || currentSku.stock || currentSku.stockNum || 0),
+      imgUrl,
+      skuId: skuId || undefined,
+      propPath: propPath || undefined,
+    };
+  });
+}
+
+function extractTbCategory(detailRes: Record<string, unknown>, rawData: Record<string, unknown>) {
+  const componentsVO = (detailRes.componentsVO as Record<string, unknown> | undefined) ?? {};
+  const categoryVO = (componentsVO.categoryVO as Record<string, unknown> | undefined) ?? {};
+  const pcTrade = (detailRes.pcTrade as Record<string, unknown> | undefined) ?? {};
+  const pcBuyParams = (pcTrade.pcBuyParams as Record<string, unknown> | undefined) ?? {};
+  const categoryFromRaw = (rawData.category as Record<string, unknown> | undefined) ?? {};
+
+  const categoryId = String(
+    firstNonEmpty(
+      categoryFromRaw.categoryId,
+      pcBuyParams.rootCatId,
+      categoryVO.categoryId,
+      detailRes.categoryId,
+    ) ?? "",
+  ).trim();
+  const categoryName = String(
+    firstNonEmpty(
+      categoryFromRaw.categoryName,
+      categoryVO.categoryName,
+      detailRes.categoryName,
+    ) ?? "",
+  ).trim();
+  const categoryPath = String(
+    firstNonEmpty(
+      categoryFromRaw.categoryPath,
+      categoryVO.categoryPath,
+      detailRes.categoryPath,
+      categoryName,
+    ) ?? "",
+  ).trim();
+
+  return {
+    categoryId,
+    categoryName,
+    categoryPath,
+  };
+}
+
 function tryAttrList(val: unknown): AttributeItem[] | null {
   if (!Array.isArray(val)) return null;
   const result = val
@@ -410,48 +617,56 @@ export function convertTbToStandard(
     sourceUrl?: string;
   }
 ): StandardProductData {
-  const item = rawData as Record<string, unknown>;
+  const detailContainer = (rawData.detailData as Record<string, unknown> | undefined) ?? rawData;
+  const detailRes = ((detailContainer.res as Record<string, unknown> | undefined) ?? detailContainer) as Record<string, unknown>;
+  const item = (detailRes.item as Record<string, unknown> | undefined) ?? rawData;
+  const componentsVO = (detailRes.componentsVO as Record<string, unknown> | undefined) ?? {};
+  const deliveryVO = (componentsVO.deliveryVO as Record<string, unknown> | undefined) ?? {};
+  const headImageVO = (componentsVO.headImageVO as Record<string, unknown> | undefined) ?? {};
+  const descData = rawData.descData;
+  const { categoryPath } = extractTbCategory(detailRes, rawData);
 
-  const mainImages = tryImageList(item.pics || item.images || item.picList);
-  const detailImages = tryImageList(item.detailPics || item.descImages || item.detail_imgs);
-  const skuList: SkuItem[] = [];
-  const attributes: AttributeItem[] = [];
-
-  if (Array.isArray(item.props)) {
-    for (const p of item.props as Record<string, unknown>[]) {
-      const name = String(p.name || p.propName || "");
-      const value = String(p.value || p.propValue || "");
-      if (name && value) attributes.push({ name, value });
+  const mainImages = (() => {
+    const headImages = tryImageList(headImageVO.images);
+    if (headImages.length > 0) {
+      return headImages;
     }
-  }
-
-  if (Array.isArray(item.skus)) {
-    for (const s of item.skus as Record<string, unknown>[]) {
-      const priceRaw = Number(s.price || s.promotionPrice || 0);
-      skuList.push({
-        spec: String(s.properties_name || s.spec || s.skuName || ""),
-        price: priceRaw >= 10 ? (priceRaw / 100).toFixed(2) : priceRaw.toFixed(2),
-        stock: Number(s.quantity || s.stock || 0),
-        imgUrl: String(s.url || "") || undefined,
-      });
+    return tryImageList(item.images || item.pics || item.picList);
+  })();
+  const detailImages = (() => {
+    const descImages = extractTbDescImages(descData);
+    if (descImages.length > 0) {
+      return descImages;
     }
-  }
+    return tryImageList(item.detailPics || item.descImages || item.detail_imgs);
+  })();
+  const attributes = extractTbAttributes(detailRes);
+  const skuList = extractTbSkuList(detailRes);
+
+  const fallbackSkuInfo = ((detailRes.skuCore as Record<string, unknown> | undefined)?.sku2info as Record<string, Record<string, unknown>> | undefined)?.["0"] ?? {};
+  const logisticsTime = String(
+    firstNonEmpty(
+      deliveryVO.deliveryTime,
+      fallbackSkuInfo.logisticsTime,
+      item.deliveryTime,
+    ) ?? "",
+  ).trim();
 
   return {
-    sourceId: meta?.sourceProductId ?? String(item.itemId || item.id || ""),
+    sourceId: meta?.sourceProductId ?? String(item.itemId || item.id || rawData.itemId || ""),
     sourceUrl: meta?.sourceUrl,
     title: meta?.productName || String(item.title || item.name || ""),
-    subTitle: String(item.subTitle || item.sub_title || "") || undefined,
-    category: String(item.categoryPath || item.catPath || "") || undefined,
+    subTitle: String(item.subTitle || item.sub_title || item.subtitle || "") || undefined,
+    category: categoryPath || String(item.categoryPath || item.catPath || "") || undefined,
     mainImages,
     detailImages,
     attributes,
     skuList,
     logistics: {
-      shipping: String(item.freight || "") || undefined,
-      deliveryTime: String(item.deliveryTime || "") || undefined,
-      refundPolicy: String(item.refundPolicy || "") || undefined,
-      shipFrom: String(item.location || item.shipFrom || "") || undefined,
+      shipping: String(deliveryVO.freight || item.freight || "") || undefined,
+      deliveryTime: logisticsTime || undefined,
+      refundPolicy: String(item.refundPolicy || item.returnPolicy || "") || undefined,
+      shipFrom: String(deliveryVO.deliveryFromAddr || item.location || item.shipFrom || "") || undefined,
     },
   };
 }

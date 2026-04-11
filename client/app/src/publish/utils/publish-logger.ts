@@ -230,8 +230,21 @@ export function summarizeForLog(value: unknown): unknown {
   return normalizeValue(value, new WeakSet<object>());
 }
 
+function toLocalISOString(date: Date): string {
+  const pad = (n: number, len = 2): string => String(n).padStart(len, '0');
+  const offsetMin = -date.getTimezoneOffset();
+  const sign = offsetMin >= 0 ? '+' : '-';
+  const absMin = Math.abs(offsetMin);
+  const offsetStr = `${sign}${pad(Math.floor(absMin / 60))}:${pad(absMin % 60)}`;
+  return (
+    `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}` +
+    `T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}.${pad(date.getMilliseconds(), 3)}` +
+    offsetStr
+  );
+}
+
 function writeLog(level: 'INFO' | 'WARN' | 'ERROR', message: string, meta?: unknown): void {
-  const ts = new Date().toISOString();
+  const ts = toLocalISOString(new Date());
   writer.write(formatLogEntry(ts, level, message, meta), buildRoutingMeta(message, meta));
 }
 

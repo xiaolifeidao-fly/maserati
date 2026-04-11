@@ -20,6 +20,7 @@ let captchaPanelVisible = false;
 type PublishWindowOpenOptions = {
   batchId?: number;
   entryScene?: 'collection' | 'product';
+  initialView?: 'default' | 'progress';
 };
 
 // ─── 工具函数 ─────────────────────────────────────────────────────────────────
@@ -69,6 +70,9 @@ function buildPublishWindowUrl(options?: PublishWindowOpenOptions): string {
   }
   if (options?.entryScene) {
     pageUrl.searchParams.set('entryScene', options.entryScene);
+  }
+  if (options?.initialView) {
+    pageUrl.searchParams.set('initialView', options.initialView);
   }
 
   return pageUrl.toString();

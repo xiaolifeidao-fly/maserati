@@ -148,6 +148,7 @@ func toShopDTO(entity *shopRepository.Shop) *shopDTO.ShopDTO {
 		AppUserID:              entity.AppUserID,
 		Code:                   entity.Code,
 		Name:                   entity.Name,
+		Nickname:               entity.Nickname,
 		Platform:               entity.Platform,
 		Remark:                 entity.Remark,
 		PlatformShopID:         entity.PlatformShopID,
@@ -377,6 +378,7 @@ func (s *ShopService) LoginShop(req *shopDTO.ShopLoginDTO) (*shopDTO.ShopDTO, er
 		return nil, fmt.Errorf("request is nil")
 	}
 	name := strings.TrimSpace(req.Name)
+	nickname := strings.TrimSpace(req.Nickname)
 	platform := strings.TrimSpace(req.Platform)
 	platformShopID := strings.TrimSpace(req.PlatformShopID)
 	businessID := strings.TrimSpace(req.BusinessID)
@@ -403,6 +405,11 @@ func (s *ShopService) LoginShop(req *shopDTO.ShopLoginDTO) (*shopDTO.ShopDTO, er
 		entity.Active = 1
 		entity.AppUserID = req.AppUserID
 		entity.Name = name
+		if nickname != "" {
+			entity.Nickname = nickname
+		} else if entity.Nickname == "" {
+			entity.Nickname = name
+		}
 		entity.Platform = platform
 		if platformShopID != "" {
 			entity.PlatformShopID = platformShopID
@@ -441,6 +448,7 @@ func (s *ShopService) LoginShop(req *shopDTO.ShopLoginDTO) (*shopDTO.ShopDTO, er
 			AppUserID:           req.AppUserID,
 			Code:                strings.TrimSpace(req.Code),
 			Name:                name,
+			Nickname:            firstNonEmpty(nickname, name),
 			Platform:            platform,
 			PlatformShopID:      platformShopID,
 			BusinessID:          businessID,
@@ -468,6 +476,7 @@ func (s *ShopService) LoginShop(req *shopDTO.ShopLoginDTO) (*shopDTO.ShopDTO, er
 	entity.Active = 1
 	entity.AppUserID = req.AppUserID
 	entity.Name = name
+	entity.Nickname = firstNonEmpty(nickname, name, entity.Nickname)
 	entity.Platform = platform
 	entity.PlatformShopID = platformShopID
 	entity.BusinessID = businessID
@@ -486,6 +495,15 @@ func (s *ShopService) LoginShop(req *shopDTO.ShopLoginDTO) (*shopDTO.ShopDTO, er
 		return nil, saveErr
 	}
 	return toShopDTO(saved), nil
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
 }
 
 func (s *ShopService) AuthorizeShop(id uint, req *shopDTO.ShopAuthorizeDTO) (*shopDTO.ShopDTO, error) {

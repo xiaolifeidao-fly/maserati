@@ -27,6 +27,8 @@ const DOWNLOAD_UA =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 const MAX_RETRIES = 3;
 const RETRY_DELAY_MS = 2000;
+const DEFAULT_IMAGE_EXTENSION = '.jpg';
+const PNG_IMAGE_EXTENSION = '.png';
 
 interface ProcessedImageResult {
   localPath: string;
@@ -81,16 +83,34 @@ export class UploadImagesStep extends PublishStep {
     const existingDetailMetas = ctx.get('uploadedDetailImageMetas') ?? [];
     const mainImages = product.mainImages;
     const detailImages = product.detailImages;
+    const skuImages = [...new Set(
+      product.skuList
+        .map(s => s.imgUrl)
+        .filter((url): url is string => Boolean(url?.trim())),
+    )];
 
-    const allImages = [...new Set([...mainImages, ...detailImages])];
+    const allImages = [...new Set([...mainImages, ...detailImages, ...skuImages])];
     const toUpload = allImages.filter(img => !existingMap[img]);
 
     if (toUpload.length === 0) {
+      // 即使跳过上传，也确保 ctx 中的图片 URL 列表使用 existingMap 中的淘宝 URL
+      const uploadedMainImages = mainImages.map(img => existingMap[img] ?? img);
+      const uploadedDetailImages = detailImages.map(img => existingMap[img] ?? img);
+      const uploadedSkuImageMap: Record<string, string> = {};
+      for (const url of skuImages) {
+        if (existingMap[url]) {
+          uploadedSkuImageMap[url] = existingMap[url];
+        }
+      }
+      ctx.set('uploadedMainImages', uploadedMainImages);
+      ctx.set('uploadedDetailImages', uploadedDetailImages);
+      ctx.set('uploadedSkuImageMap', uploadedSkuImageMap);
       throw new StepSkippedError(this.stepCode, '图片已全部上传，跳过');
     }
 
     const imageUrlMap: Record<string, string> = { ...existingMap };
     const detailImageMetaMap = new Map<string, TbUploadedImageMeta>();
+    const skuImageMetaMap = new Map<string, TbUploadedImageMeta>();
     const tbUploadFailures: Array<Record<string, unknown>> = [];
     for (const meta of existingDetailMetas) {
       const originalKey = meta.originalUrl?.trim();
@@ -123,13 +143,29 @@ export class UploadImagesStep extends PublishStep {
       }
 
       const mainImageSet = new Set(mainImages);
+      const skuImageSet = new Set(skuImages);
+      const batchTimestamp = Date.now();
+      let fileSequence = 0;
+      const sourceProductId = this.sanitizeFileNamePart(
+        product.sourceId?.trim() || ctx.get('sourceProductId')?.trim() || 'unknown',
+      );
 
       // ── 逐张下载 → 处理 → 上传 ──────────────────────────────────────────────
       for (const originalUrl of toActuallyUpload) {
         const isMain = mainImageSet.has(originalUrl);
+        const imageType = this.resolveImageType(originalUrl, mainImageSet, skuImageSet);
         let processedImage: ProcessedImageResult | null = null;
         try {
-          processedImage = await this.downloadAndProcess(originalUrl, isMain, tempDir);
+          fileSequence += 1;
+          processedImage = await this.downloadAndProcess(
+            originalUrl,
+            isMain,
+            tempDir,
+            sourceProductId,
+            batchTimestamp,
+            fileSequence,
+            imageType,
+          );
           if (!processedImage) {
             continue;
           }
@@ -152,8 +188,13 @@ export class UploadImagesStep extends PublishStep {
                 size: uploadedImage.size ?? processedImage.size,
                 imageId: uploadedImage.imageId,
               };
-              detailImageMetaMap.set(originalUrl, meta);
-              detailImageMetaMap.set(uploadedImage.url, meta);
+              if (skuImageSet.has(originalUrl)) {
+                skuImageMetaMap.set(originalUrl, meta);
+                skuImageMetaMap.set(uploadedImage.url, meta);
+              } else {
+                detailImageMetaMap.set(originalUrl, meta);
+                detailImageMetaMap.set(uploadedImage.url, meta);
+              }
             }
           } else {
             tbUploadFailures.push({
@@ -180,6 +221,12 @@ export class UploadImagesStep extends PublishStep {
 
     const uploadedMainImages = mainImages.map(img => imageUrlMap[img] ?? img);
     const uploadedDetailImages = detailImages.map(img => imageUrlMap[img] ?? img);
+    const uploadedSkuImageMap: Record<string, string> = {};
+    for (const url of skuImages) {
+      if (imageUrlMap[url]) {
+        uploadedSkuImageMap[url] = imageUrlMap[url];
+      }
+    }
     const uploadedDetailImageMetas = detailImages.map((originalUrl, index) => {
       const uploadedUrl = uploadedDetailImages[index];
       const meta = detailImageMetaMap.get(originalUrl) ?? detailImageMetaMap.get(uploadedUrl);
@@ -196,15 +243,17 @@ export class UploadImagesStep extends PublishStep {
     ctx.set('uploadedMainImages', uploadedMainImages);
     ctx.set('uploadedDetailImages', uploadedDetailImages);
     ctx.set('uploadedDetailImageMetas', uploadedDetailImageMetas);
+    ctx.set('uploadedSkuImageMap', uploadedSkuImageMap);
     ctx.set('imageUrlMap', imageUrlMap);
 
     return {
       status: StepStatus.SUCCESS,
-      message: `图片上传完成，主图 ${uploadedMainImages.length} 张，详情图 ${uploadedDetailImages.length} 张`,
+      message: `图片上传完成，主图 ${uploadedMainImages.length} 张，详情图 ${uploadedDetailImages.length} 张，SKU 图 ${skuImages.length} 张`,
       outputData: {
         uploadedMainImages,
         uploadedDetailImages,
         uploadedDetailImageMetas,
+        uploadedSkuImageMap,
         imageUrlMap,
         tbUploadFailures,
       },
@@ -261,11 +310,12 @@ export class UploadImagesStep extends PublishStep {
     url: string,
     isMain: boolean,
     tempDir: string,
+    sourceProductId: string,
+    timestamp: number,
+    sequence: number,
+    imageType: 'main' | 'detail' | 'sku',
   ): Promise<ProcessedImageResult | null> {
     try {
-      const hash = this.hashUrl(url);
-      const tempPath = path.join(tempDir, `${hash}.jpg`);
-
       const response = await axios.get<ArrayBuffer>(url, {
         responseType: 'arraybuffer',
         timeout: 30000,
@@ -273,7 +323,10 @@ export class UploadImagesStep extends PublishStep {
       });
 
       const buffer = Buffer.from(response.data);
-      const processedImage = await this.processImage(buffer, isMain);
+      const extension = this.resolveImageExtension(url, response.headers['content-type']);
+      const fileName = `${sourceProductId}_${timestamp}_${sequence}_${imageType}${extension}`;
+      const tempPath = path.join(tempDir, fileName);
+      const processedImage = await this.processImage(buffer, isMain, extension);
       fs.writeFileSync(tempPath, processedImage.buffer);
       return {
         localPath: tempPath,
@@ -294,6 +347,7 @@ export class UploadImagesStep extends PublishStep {
   private async processImage(
     buffer: Buffer,
     isMain: boolean,
+    extension: string,
   ): Promise<{ buffer: Buffer; width: number; height: number }> {
     const image = await Jimp.read(buffer);
     const { width, height } = image.bitmap;
@@ -303,7 +357,9 @@ export class UploadImagesStep extends PublishStep {
       image.scaleToFit({ w: maxW, h: maxH });
     }
 
-    const output = await image.getBuffer(JimpMime.jpeg, { quality: 90 });
+    const output = extension === PNG_IMAGE_EXTENSION
+      ? await image.getBuffer(JimpMime.png)
+      : await image.getBuffer(JimpMime.jpeg, { quality: 90 });
     return {
       buffer: output,
       width: image.bitmap.width,
@@ -491,5 +547,78 @@ export class UploadImagesStep extends PublishStep {
 
   private hashUrl(url: string): string {
     return crypto.createHash('sha256').update(url).digest('hex');
+  }
+
+  private resolveImageType(
+    originalUrl: string,
+    mainImageSet: Set<string>,
+    skuImageSet: Set<string>,
+  ): 'main' | 'detail' | 'sku' {
+    if (mainImageSet.has(originalUrl)) {
+      return 'main';
+    }
+    if (skuImageSet.has(originalUrl)) {
+      return 'sku';
+    }
+    return 'detail';
+  }
+
+  private resolveImageExtension(url: string, contentType?: string): string {
+    const normalizedFromUrl = this.normalizeImageExtension(this.extractLastExtension(url));
+    if (normalizedFromUrl) {
+      return normalizedFromUrl;
+    }
+
+    const normalizedFromContentType = this.normalizeImageExtensionFromContentType(contentType);
+    return normalizedFromContentType ?? DEFAULT_IMAGE_EXTENSION;
+  }
+
+  private extractLastExtension(url: string): string {
+    const raw = String(url || '').trim();
+    if (!raw) {
+      return '';
+    }
+
+    try {
+      const normalizedUrl = raw.startsWith('//') ? `https:${raw}` : raw;
+      const parsedUrl = new URL(normalizedUrl);
+      const fileName = path.basename(parsedUrl.pathname);
+      return path.extname(fileName).toLowerCase();
+    } catch {
+      const cleanUrl = raw.split('#')[0]?.split('?')[0] ?? '';
+      return path.extname(path.basename(cleanUrl)).toLowerCase();
+    }
+  }
+
+  private normalizeImageExtension(extension: string): string | null {
+    switch (extension.toLowerCase()) {
+      case '.jpg':
+      case '.jpeg':
+      case '.jfif':
+        return DEFAULT_IMAGE_EXTENSION;
+      case '.png':
+        return PNG_IMAGE_EXTENSION;
+      default:
+        return null;
+    }
+  }
+
+  private normalizeImageExtensionFromContentType(contentType?: string): string | null {
+    const normalized = String(contentType || '').toLowerCase().split(';')[0].trim();
+    switch (normalized) {
+      case 'image/jpeg':
+      case 'image/jpg':
+      case 'image/pjpeg':
+        return DEFAULT_IMAGE_EXTENSION;
+      case 'image/png':
+        return PNG_IMAGE_EXTENSION;
+      default:
+        return null;
+    }
+  }
+
+  private sanitizeFileNamePart(value: string): string {
+    const sanitized = value.replace(/[^a-zA-Z0-9_-]+/g, '_').replace(/^_+|_+$/g, '');
+    return sanitized || 'unknown';
   }
 }

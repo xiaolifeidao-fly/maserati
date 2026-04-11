@@ -129,6 +129,11 @@ export class CollectApi extends ElectronApi {
   }
 
   @InvokeType(Protocols.INVOKE)
+  async getCollectRecord(id: number): Promise<CollectRecordPreview> {
+    return this.invokeApi("getCollectRecord", id);
+  }
+
+  @InvokeType(Protocols.INVOKE)
   async updateCollectRecord(id: number, payload: CollectRecordUpdatePayload): Promise<CollectRecordPreview> {
     return this.invokeApi("updateCollectRecord", id, payload);
   }

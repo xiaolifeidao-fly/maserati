@@ -8,7 +8,6 @@ type ProductDTO struct {
 	ShopID          uint64 `json:"shopId"`
 	CategoryID      uint64 `json:"categoryId"`
 	CollectRecordID uint64 `json:"collectRecordId"`
-	PublishRecordID uint64 `json:"publishRecordId"`
 	Title           string `json:"title"`
 	OuterProductID  string `json:"outerProductId"`
 	Status          string `json:"status"`
@@ -19,7 +18,6 @@ type CreateProductDTO struct {
 	ShopID          uint64 `json:"shopId"`
 	CategoryID      uint64 `json:"categoryId"`
 	CollectRecordID uint64 `json:"collectRecordId"`
-	PublishRecordID uint64 `json:"publishRecordId"`
 	Title           string `json:"title"`
 	OuterProductID  string `json:"outerProductId"`
 	Status          string `json:"status"`
@@ -30,7 +28,6 @@ type UpdateProductDTO struct {
 	ShopID          *uint64 `json:"shopId,omitempty"`
 	CategoryID      *uint64 `json:"categoryId,omitempty"`
 	CollectRecordID *uint64 `json:"collectRecordId,omitempty"`
-	PublishRecordID *uint64 `json:"publishRecordId,omitempty"`
 	Title           *string `json:"title,omitempty"`
 	OuterProductID  *string `json:"outerProductId,omitempty"`
 	Status          *string `json:"status,omitempty"`
@@ -44,7 +41,6 @@ type ProductQueryDTO struct {
 	ShopID          uint64 `form:"shopId"`
 	CategoryID      uint64 `form:"categoryId"`
 	CollectRecordID uint64 `form:"collectRecordId"`
-	PublishRecordID uint64 `form:"publishRecordId"`
 	Title           string `form:"title"`
 	OuterProductID  string `form:"outerProductId"`
 	Status          string `form:"status"`
