@@ -1,29 +1,29 @@
 :root {
   color-scheme: light;
-  --manager-bg: #eef5fb;
-  --manager-bg-soft: #e2edf8;
-  --manager-surface: rgba(255, 255, 255, 0.94);
-  --manager-surface-strong: #ffffff;
-  --manager-panel: rgba(248, 251, 255, 0.96);
-  --manager-panel-strong: rgba(241, 247, 255, 0.99);
-  --manager-panel-muted: rgba(246, 250, 255, 0.86);
-  --manager-panel-glow: rgba(58, 117, 214, 0.14);
-  --manager-border: rgba(128, 164, 214, 0.24);
-  --manager-border-strong: rgba(96, 139, 196, 0.32);
-  --manager-text: #1a3552;
-  --manager-text-soft: rgba(26, 53, 82, 0.72);
-  --manager-text-faint: rgba(26, 53, 82, 0.46);
-  --manager-primary: #2f6fec;
-  --manager-primary-strong: #1f5fd7;
-  --manager-accent: #7fb3ff;
-  --manager-accent-strong: #5e98f1;
-  --manager-success: #2fa87c;
-  --manager-warning: #d3a038;
+  --manager-bg: #f6ede3;
+  --manager-bg-soft: #efe3d6;
+  --manager-surface: rgba(255, 251, 246, 0.94);
+  --manager-surface-strong: #fffdfa;
+  --manager-panel: rgba(255, 248, 239, 0.96);
+  --manager-panel-strong: rgba(255, 244, 232, 0.99);
+  --manager-panel-muted: rgba(255, 250, 244, 0.88);
+  --manager-panel-glow: rgba(217, 107, 43, 0.14);
+  --manager-border: rgba(191, 143, 108, 0.24);
+  --manager-border-strong: rgba(156, 104, 69, 0.32);
+  --manager-text: #2f221b;
+  --manager-text-soft: rgba(47, 34, 27, 0.72);
+  --manager-text-faint: rgba(47, 34, 27, 0.48);
+  --manager-primary: #d96b2b;
+  --manager-primary-strong: #b85622;
+  --manager-accent: #f2bf72;
+  --manager-accent-strong: #e2a24d;
+  --manager-success: #2f8f67;
+  --manager-warning: #d99a1d;
   --manager-danger: #d85b6b;
   --manager-shadow:
-    0 24px 64px rgba(57, 97, 145, 0.1),
-    0 2px 8px rgba(57, 97, 145, 0.04);
-  --manager-grid: rgba(111, 153, 212, 0.08);
+    0 24px 64px rgba(102, 64, 33, 0.12),
+    0 2px 8px rgba(102, 64, 33, 0.05);
+  --manager-grid: rgba(180, 138, 103, 0.08);
 }
 
 * {
@@ -43,8 +43,13 @@ body {
 }
 
 body {
-  font-family: "Trebuchet MS", "Segoe UI", "SF Pro Text", "PingFang SC", "Hiragino Sans GB",
+  font-family: "Avenir Next", "SF Pro Text", "PingFang SC", "Hiragino Sans GB",
     "Microsoft YaHei", sans-serif;
+  background:
+    radial-gradient(circle at 12% 10%, rgba(242, 191, 114, 0.22), transparent 24%),
+    radial-gradient(circle at 88% 8%, rgba(217, 107, 43, 0.12), transparent 22%),
+    radial-gradient(circle at 50% 100%, rgba(141, 84, 48, 0.08), transparent 28%),
+    linear-gradient(180deg, #fff8ef 0%, #f8efe4 42%, #f1e5d8 100%);
 }
 
 body::before {
@@ -86,7 +91,7 @@ select {
 }
 
 .manager-shell-card {
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.99), rgba(246, 250, 255, 0.98));
+  background: linear-gradient(180deg, rgba(255, 252, 248, 0.99), rgba(255, 246, 236, 0.98));
   border: 1px solid var(--manager-border);
   box-shadow: var(--manager-shadow);
   backdrop-filter: blur(20px) saturate(110%);
@@ -99,8 +104,8 @@ select {
   position: absolute;
   inset: 0;
   background:
-    linear-gradient(135deg, rgba(127, 179, 255, 0.12), transparent 32%),
-    linear-gradient(315deg, rgba(47, 111, 236, 0.07), transparent 30%);
+    linear-gradient(135deg, rgba(242, 191, 114, 0.14), transparent 32%),
+    linear-gradient(315deg, rgba(217, 107, 43, 0.08), transparent 30%);
   pointer-events: none;
 }
 
@@ -119,9 +124,9 @@ select {
   position: absolute;
   inset: 0;
   background:
-    radial-gradient(circle at 15% 18%, rgba(140, 168, 226, 0.14), transparent 22%),
-    radial-gradient(circle at 82% 12%, rgba(170, 192, 238, 0.18), transparent 18%),
-    radial-gradient(circle at 72% 72%, rgba(93, 125, 246, 0.08), transparent 18%);
+    radial-gradient(circle at 15% 18%, rgba(242, 191, 114, 0.18), transparent 22%),
+    radial-gradient(circle at 82% 12%, rgba(233, 157, 77, 0.14), transparent 18%),
+    radial-gradient(circle at 72% 72%, rgba(217, 107, 43, 0.08), transparent 18%);
   pointer-events: none;
 }
 
@@ -154,10 +159,10 @@ select {
   position: relative;
   border-radius: 26px;
   padding: 24px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(246, 250, 255, 0.97));
-  border: 1px solid rgba(128, 164, 214, 0.16);
+  background: linear-gradient(180deg, rgba(255, 252, 248, 0.98), rgba(255, 247, 239, 0.97));
+  border: 1px solid rgba(191, 143, 108, 0.16);
   box-shadow:
-    0 20px 50px rgba(57, 97, 145, 0.08),
+    0 20px 50px rgba(102, 64, 33, 0.08),
     inset 0 1px 0 rgba(255, 255, 255, 0.9);
   overflow: hidden;
 }
@@ -167,8 +172,8 @@ select {
   position: absolute;
   inset: 0;
   background:
-    linear-gradient(125deg, rgba(127, 179, 255, 0.12), transparent 28%),
-    linear-gradient(305deg, rgba(47, 111, 236, 0.05), transparent 22%);
+    linear-gradient(125deg, rgba(242, 191, 114, 0.14), transparent 28%),
+    linear-gradient(305deg, rgba(217, 107, 43, 0.05), transparent 22%);
   pointer-events: none;
 }
 
@@ -199,8 +204,8 @@ select {
 .manager-kpi-card {
   border-radius: 20px;
   padding: 18px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.84), rgba(245, 249, 255, 0.92));
-  border: 1px solid rgba(128, 164, 214, 0.16);
+  background: linear-gradient(180deg, rgba(255, 251, 246, 0.84), rgba(255, 246, 237, 0.92));
+  border: 1px solid rgba(191, 143, 108, 0.16);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9);
 }
 
@@ -217,8 +222,8 @@ select {
   min-height: 38px;
   padding: 8px 14px;
   border-radius: 999px;
-  border: 1px solid rgba(128, 164, 214, 0.18);
-  background: rgba(252, 254, 255, 0.82);
+  border: 1px solid rgba(191, 143, 108, 0.18);
+  background: rgba(255, 250, 244, 0.82);
   color: var(--manager-text-soft);
   font-size: 13px;
   font-weight: 600;
@@ -228,7 +233,7 @@ select {
   color: #fffaf4;
   border-color: transparent;
   background: linear-gradient(135deg, var(--manager-primary), var(--manager-accent-strong));
-  box-shadow: 0 10px 24px rgba(255, 122, 69, 0.22);
+  box-shadow: 0 10px 24px rgba(217, 107, 43, 0.22);
 }
 
 .manager-muted {
@@ -292,7 +297,7 @@ select {
   display: inline-flex;
   align-items: center;
   gap: 10px;
-  color: rgba(51, 99, 163, 0.86);
+  color: rgba(140, 78, 33, 0.88);
   font-size: 11px;
   letter-spacing: 0.2em;
   text-transform: uppercase;
@@ -309,7 +314,7 @@ select {
   width: 30px;
   height: 2px;
   border-radius: 999px;
-  background: linear-gradient(90deg, rgba(127, 179, 255, 0.22), rgba(47, 111, 236, 0.9));
+  background: linear-gradient(90deg, rgba(242, 191, 114, 0.3), rgba(217, 107, 43, 0.9));
 }
 
 .manager-wordmark {
@@ -319,15 +324,15 @@ select {
 }
 
 .manager-wordmark strong {
-  font-family: "Trebuchet MS", "Avenir Next", "Segoe UI", "PingFang SC", sans-serif;
+  font-family: "Avenir Next", "SF Pro Display", "PingFang SC", sans-serif;
   font-size: clamp(28px, 3vw, 42px);
   line-height: 0.98;
   letter-spacing: 0.02em;
-  color: #234d80;
+  color: #60351f;
 }
 
 .manager-wordmark span {
-  color: rgba(35, 77, 128, 0.5);
+  color: rgba(96, 53, 31, 0.5);
   font-size: 11px;
   letter-spacing: 0.18em;
   text-transform: uppercase;
@@ -340,9 +345,9 @@ select {
   position: relative;
   background:
     radial-gradient(circle at 30% 30%, rgba(255, 255, 255, 0.72), transparent 24%),
-    linear-gradient(145deg, rgba(127, 179, 255, 0.98), rgba(47, 111, 236, 0.94));
+    linear-gradient(145deg, rgba(242, 191, 114, 0.98), rgba(217, 107, 43, 0.94));
   box-shadow:
-    0 16px 36px rgba(47, 111, 236, 0.18),
+    0 16px 36px rgba(217, 107, 43, 0.22),
     inset 0 1px 0 rgba(255, 255, 255, 0.4);
 }
 
@@ -365,8 +370,8 @@ select {
   gap: 8px;
   padding: 8px 12px;
   border-radius: 999px;
-  background: rgba(244, 247, 253, 0.98);
-  border: 1px solid rgba(145, 171, 212, 0.24);
+  background: rgba(255, 248, 239, 0.98);
+  border: 1px solid rgba(191, 143, 108, 0.24);
   color: var(--manager-text-soft);
   font-size: 12px;
   letter-spacing: 0.04em;
@@ -377,7 +382,7 @@ select {
   height: 7px;
   border-radius: 999px;
   background: linear-gradient(135deg, var(--manager-accent), var(--manager-primary));
-  box-shadow: 0 0 12px rgba(93, 125, 246, 0.22);
+  box-shadow: 0 0 12px rgba(217, 107, 43, 0.22);
 }
 
 .manager-brand-frame {
@@ -389,7 +394,7 @@ select {
   position: absolute;
   inset: 18px;
   border-radius: 24px;
-  border: 1px solid rgba(145, 171, 212, 0.16);
+  border: 1px solid rgba(191, 143, 108, 0.16);
   pointer-events: none;
 }
 
@@ -444,9 +449,9 @@ select {
 .manager-metric-chip {
   border-radius: 20px;
   padding: 16px 18px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(243, 247, 252, 0.98));
-  border: 1px solid rgba(145, 171, 212, 0.2);
-  box-shadow: 0 12px 28px rgba(103, 133, 182, 0.08);
+  background: linear-gradient(180deg, rgba(255, 252, 248, 0.98), rgba(255, 246, 236, 0.98));
+  border: 1px solid rgba(191, 143, 108, 0.2);
+  box-shadow: 0 12px 28px rgba(102, 64, 33, 0.08);
 }
 
 .manager-metric-chip-compact {
@@ -460,7 +465,7 @@ select {
 .manager-progress-rail {
   height: 8px;
   border-radius: 999px;
-  background: rgba(184, 199, 230, 0.32);
+  background: rgba(215, 183, 154, 0.32);
   overflow: hidden;
 }
 
@@ -469,7 +474,7 @@ select {
   height: 100%;
   border-radius: inherit;
   background: linear-gradient(90deg, var(--manager-primary), var(--manager-accent));
-  box-shadow: 0 0 20px rgba(93, 125, 246, 0.18);
+  box-shadow: 0 0 20px rgba(217, 107, 43, 0.18);
 }
 
 .manager-table .ant-table {
@@ -478,27 +483,27 @@ select {
 }
 
 .manager-table .ant-table-container {
-  border: 1px solid rgba(145, 171, 212, 0.18);
+  border: 1px solid rgba(191, 143, 108, 0.18);
   border-radius: 22px;
   overflow: hidden;
 }
 
 .manager-table .ant-table-thead > tr > th {
-  background: rgba(236, 242, 250, 0.96) !important;
+  background: rgba(255, 244, 232, 0.96) !important;
   color: var(--manager-text-soft) !important;
-  border-bottom: 1px solid rgba(145, 171, 212, 0.16) !important;
+  border-bottom: 1px solid rgba(191, 143, 108, 0.16) !important;
   font-size: 12px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
 .manager-table .ant-table-tbody > tr > td {
-  background: rgba(255, 255, 255, 0.98) !important;
-  border-bottom: 1px solid rgba(145, 171, 212, 0.1) !important;
+  background: rgba(255, 252, 248, 0.98) !important;
+  border-bottom: 1px solid rgba(191, 143, 108, 0.1) !important;
 }
 
 .manager-table .ant-table-tbody > tr:hover > td {
-  background: rgba(244, 248, 253, 0.98) !important;
+  background: rgba(255, 247, 239, 0.98) !important;
 }
 
 .manager-filter-input.ant-input-affix-wrapper,
@@ -511,8 +516,8 @@ select {
 .manager-form-skin .ant-input-number,
 .manager-form-skin .ant-input-number-input,
 .manager-form-skin .ant-input-textarea textarea {
-  background: rgba(248, 250, 255, 0.98) !important;
-  border-color: rgba(145, 171, 212, 0.26) !important;
+  background: rgba(255, 250, 244, 0.98) !important;
+  border-color: rgba(191, 143, 108, 0.26) !important;
   color: var(--manager-text) !important;
   box-shadow: none !important;
 }
@@ -533,8 +538,8 @@ select {
 }
 
 .manager-form-skin .ant-modal-content {
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(243, 247, 252, 0.98)) !important;
-  border: 1px solid rgba(145, 171, 212, 0.22);
+  background: linear-gradient(180deg, rgba(255, 252, 248, 0.98), rgba(255, 246, 236, 0.98)) !important;
+  border: 1px solid rgba(191, 143, 108, 0.22);
   box-shadow: var(--manager-shadow);
 }
 
@@ -560,8 +565,8 @@ select {
   position: absolute;
   inset: 0;
   background:
-    radial-gradient(circle at 18% 20%, rgba(140, 168, 226, 0.12), transparent 24%),
-    radial-gradient(circle at 84% 24%, rgba(170, 192, 238, 0.12), transparent 18%);
+    radial-gradient(circle at 18% 20%, rgba(242, 191, 114, 0.16), transparent 24%),
+    radial-gradient(circle at 84% 24%, rgba(217, 107, 43, 0.12), transparent 18%);
   pointer-events: none;
 }
 
@@ -571,13 +576,13 @@ select {
   padding: clamp(24px, 4vw, 48px);
   position: relative;
   overflow: hidden;
-  border: 1px solid rgba(145, 171, 212, 0.2);
+  border: 1px solid rgba(191, 143, 108, 0.2);
   background:
-    radial-gradient(circle at 22% 16%, rgba(154, 177, 227, 0.18), transparent 24%),
-    radial-gradient(circle at 78% 18%, rgba(188, 203, 236, 0.18), transparent 18%),
-    linear-gradient(135deg, rgba(248, 250, 255, 0.98) 0%, rgba(238, 244, 252, 0.96) 54%, rgba(228, 236, 248, 0.97) 100%);
+    radial-gradient(circle at 22% 16%, rgba(242, 191, 114, 0.2), transparent 24%),
+    radial-gradient(circle at 78% 18%, rgba(217, 107, 43, 0.14), transparent 18%),
+    linear-gradient(135deg, rgba(255, 250, 244, 0.98) 0%, rgba(248, 239, 228, 0.96) 54%, rgba(242, 230, 217, 0.97) 100%);
   box-shadow:
-    0 36px 90px rgba(103, 133, 182, 0.16),
+    0 36px 90px rgba(102, 64, 33, 0.16),
     inset 0 1px 0 rgba(255, 255, 255, 0.72);
 }
 
@@ -586,10 +591,10 @@ select {
   width: 100%;
   border-radius: 36px;
   padding: 24px;
-  background: linear-gradient(180deg, rgba(252, 254, 255, 0.99), rgba(243, 248, 255, 0.99));
-  border: 1px solid rgba(128, 164, 214, 0.16);
+  background: linear-gradient(180deg, rgba(255, 252, 248, 0.99), rgba(250, 241, 232, 0.99));
+  border: 1px solid rgba(191, 143, 108, 0.16);
   box-shadow:
-    0 36px 88px rgba(57, 97, 145, 0.1),
+    0 36px 88px rgba(102, 64, 33, 0.1),
     inset 0 1px 0 rgba(255, 255, 255, 0.92);
 }
 
@@ -599,8 +604,8 @@ select {
   inset: 0;
   border-radius: inherit;
   background:
-    radial-gradient(circle at 12% 18%, rgba(127, 179, 255, 0.14), transparent 20%),
-    radial-gradient(circle at 88% 12%, rgba(94, 152, 241, 0.1), transparent 18%);
+    radial-gradient(circle at 12% 18%, rgba(242, 191, 114, 0.16), transparent 20%),
+    radial-gradient(circle at 88% 12%, rgba(217, 107, 43, 0.1), transparent 18%);
   pointer-events: none;
 }
 
@@ -609,7 +614,10 @@ select {
   flex-direction: column;
   gap: 18px;
   border-radius: 30px;
-  padding: 20px 22px;
+  padding: 22px 24px;
+  background:
+    radial-gradient(circle at top left, rgba(242, 191, 114, 0.16), transparent 26%),
+    linear-gradient(180deg, rgba(255, 251, 246, 0.98), rgba(255, 243, 230, 0.96));
 }
 
 .manager-commerce-top {
@@ -638,6 +646,7 @@ select {
   max-width: 520px;
   flex: 1;
   min-width: 260px;
+  line-height: 1.7;
 }
 
 .manager-crest-commerce::before {
@@ -652,8 +661,8 @@ select {
 }
 
 .manager-commerce-nav-item {
-  border: 1px solid rgba(128, 164, 214, 0.16);
-  background: rgba(251, 253, 255, 0.9);
+  border: 1px solid rgba(191, 143, 108, 0.16);
+  background: rgba(255, 250, 244, 0.92);
   border-radius: 22px;
   padding: 14px 16px;
   display: flex;
@@ -666,8 +675,8 @@ select {
 
 .manager-commerce-nav-item:hover {
   transform: translateY(-1px);
-  border-color: rgba(47, 111, 236, 0.26);
-  box-shadow: 0 14px 28px rgba(57, 97, 145, 0.08);
+  border-color: rgba(217, 107, 43, 0.26);
+  box-shadow: 0 14px 28px rgba(102, 64, 33, 0.08);
 }
 
 .manager-commerce-nav-item strong {
@@ -684,9 +693,9 @@ select {
 }
 
 .manager-commerce-nav-item.is-active {
-  background: linear-gradient(135deg, rgba(47, 111, 236, 0.96), rgba(94, 152, 241, 0.92));
+  background: linear-gradient(135deg, rgba(217, 107, 43, 0.98), rgba(242, 191, 114, 0.92));
   border-color: transparent;
-  box-shadow: 0 18px 34px rgba(47, 111, 236, 0.18);
+  box-shadow: 0 18px 34px rgba(217, 107, 43, 0.22);
 }
 
 .manager-commerce-nav-item.is-active strong,
@@ -714,18 +723,19 @@ select {
   gap: 8px;
   padding: 10px 14px;
   border-radius: 999px;
-  background: rgba(241, 247, 255, 0.9);
-  border: 1px solid rgba(128, 164, 214, 0.18);
-  color: #325c90;
+  background: rgba(255, 247, 239, 0.9);
+  border: 1px solid rgba(191, 143, 108, 0.18);
+  color: #8a4a21;
   font-weight: 600;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
 }
 
 .manager-commerce-icon-button {
   width: 50px;
   height: 50px;
-  border: 1px solid rgba(128, 164, 214, 0.18);
+  border: 1px solid rgba(191, 143, 108, 0.18);
   border-radius: 16px;
-  background: rgba(255, 255, 255, 0.98);
+  background: rgba(255, 252, 248, 0.98);
   color: var(--manager-primary);
   font-size: 18px;
   cursor: pointer;
@@ -737,8 +747,8 @@ select {
   gap: 12px;
   padding: 8px 10px 8px 8px;
   border-radius: 18px;
-  border: 1px solid rgba(128, 164, 214, 0.16);
-  background: rgba(255, 255, 255, 0.97);
+  border: 1px solid rgba(191, 143, 108, 0.16);
+  background: rgba(255, 252, 248, 0.97);
 }
 
 .manager-commerce-hero {
@@ -753,8 +763,8 @@ select {
 .manager-commerce-hero-spotlight {
   padding: 24px;
   border-radius: 26px;
-  background: linear-gradient(180deg, rgba(243, 248, 255, 0.98), rgba(251, 253, 255, 0.98));
-  border: 1px solid rgba(128, 164, 214, 0.18);
+  background: linear-gradient(180deg, rgba(255, 245, 233, 0.98), rgba(255, 251, 246, 0.98));
+  border: 1px solid rgba(191, 143, 108, 0.18);
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -766,10 +776,10 @@ select {
   border-radius: 18px;
   display: grid;
   place-items: center;
-  background: linear-gradient(135deg, rgba(47, 111, 236, 0.96), rgba(94, 152, 241, 0.92));
+  background: linear-gradient(135deg, rgba(217, 107, 43, 0.98), rgba(242, 191, 114, 0.92));
   color: #fdfefe;
   font-size: 22px;
-  box-shadow: 0 18px 32px rgba(47, 111, 236, 0.18);
+  box-shadow: 0 18px 32px rgba(217, 107, 43, 0.18);
 }
 
 .manager-commerce-primary-button.ant-btn {
@@ -777,14 +787,14 @@ select {
   height: 46px;
   border: none;
   border-radius: 14px;
-  background: linear-gradient(135deg, #2f6fec, #5e98f1);
+  background: linear-gradient(135deg, #d96b2b, #f0ae4d);
   font-weight: 700;
 }
 
 .manager-commerce-secondary-button.ant-btn {
   border-radius: 12px;
-  border-color: rgba(128, 164, 214, 0.2);
-  color: #3f6899;
+  border-color: rgba(191, 143, 108, 0.2);
+  color: #8a4a21;
 }
 
 .manager-commerce-metric-card {
@@ -835,8 +845,8 @@ select {
   width: 10px;
   height: 10px;
   border-radius: 999px;
-  background: linear-gradient(135deg, #2f6fec, #7fb3ff);
-  box-shadow: 0 0 0 6px rgba(47, 111, 236, 0.08);
+  background: linear-gradient(135deg, #d96b2b, #f2bf72);
+  box-shadow: 0 0 0 6px rgba(217, 107, 43, 0.08);
 }
 
 .manager-commerce-action-list {
@@ -852,8 +862,8 @@ select {
   align-items: flex-start;
   padding: 16px;
   border-radius: 20px;
-  background: rgba(249, 252, 255, 0.94);
-  border: 1px solid rgba(128, 164, 214, 0.16);
+  background: rgba(255, 250, 244, 0.94);
+  border: 1px solid rgba(191, 143, 108, 0.16);
 }
 
 .manager-commerce-action-index {
@@ -862,7 +872,7 @@ select {
   display: grid;
   place-items: center;
   border-radius: 16px;
-  background: linear-gradient(135deg, rgba(47, 111, 236, 0.96), rgba(94, 152, 241, 0.94));
+  background: linear-gradient(135deg, rgba(217, 107, 43, 0.98), rgba(242, 191, 114, 0.94));
   color: #fdfefe;
   font-weight: 800;
 }
@@ -882,12 +892,12 @@ select {
 .manager-commerce-health-item {
   padding: 14px 16px;
   border-radius: 18px;
-  background: rgba(247, 251, 255, 0.88);
-  border: 1px solid rgba(128, 164, 214, 0.16);
+  background: rgba(255, 249, 242, 0.88);
+  border: 1px solid rgba(191, 143, 108, 0.16);
 }
 
 .manager-commerce-highlight-card {
-  background: linear-gradient(180deg, rgba(242, 247, 255, 0.98), rgba(251, 253, 255, 0.98));
+  background: linear-gradient(180deg, rgba(255, 243, 229, 0.98), rgba(255, 250, 244, 0.98));
 }
 
 .manager-commerce-highlight-grid {
@@ -904,9 +914,9 @@ select {
   min-height: 44px;
   padding: 10px 12px;
   border-radius: 14px;
-  background: rgba(250, 253, 255, 0.78);
-  border: 1px solid rgba(128, 164, 214, 0.14);
-  color: #3f6899;
+  background: rgba(255, 251, 246, 0.78);
+  border: 1px solid rgba(191, 143, 108, 0.14);
+  color: #8a4a21;
 }
 
 @media (max-width: 1280px) {
@@ -994,8 +1004,8 @@ select {
   height: 52px;
   padding-inline: 18px;
   border-radius: 16px;
-  background: rgba(248, 250, 255, 0.98) !important;
-  border: 1px solid rgba(145, 171, 212, 0.24) !important;
+  background: rgba(255, 250, 244, 0.98) !important;
+  border: 1px solid rgba(191, 143, 108, 0.24) !important;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.88);
 }
 
@@ -1012,8 +1022,8 @@ select {
   padding-inline: 24px;
   border-radius: 16px;
   border: none;
-  background: linear-gradient(135deg, #5d7df6 0%, #6d8cff 100%);
-  box-shadow: 0 16px 28px rgba(93, 125, 246, 0.22);
+  background: linear-gradient(135deg, #d96b2b 0%, #f0ae4d 100%);
+  box-shadow: 0 16px 28px rgba(217, 107, 43, 0.22);
 }
 
 .manager-stagger-1,

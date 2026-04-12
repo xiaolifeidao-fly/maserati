@@ -14,7 +14,6 @@ import {
 } from "@ant-design/icons";
 import {
   Alert,
-  Button,
   Form,
   Input,
   Modal,
@@ -28,6 +27,7 @@ import {
 import type { ColumnsType } from "antd/es/table";
 import { type ShopPayload, type ShopRecord } from "../api/shop.api";
 import { useShopManagement } from "../hooks/useShopManagement";
+import { IconOnlyButton } from "@/components/manager-shell/IconOnlyButton";
 import { formatDateTime } from "@/utils/format";
 
 interface ShopFormValues extends ShopPayload {}
@@ -248,31 +248,22 @@ export function ShopManagementPanel() {
       render: (value?: string) => formatDateTime(value),
     },
     {
-      title: "下一步",
-      key: "nextStep",
-      width: 220,
-      render: (_, record) => {
-        const stage = getShopStage(record);
-        return <span className="manager-muted">{stage.description}</span>;
-      },
-    },
-    {
       title: "操作",
       key: "actions",
       fixed: "right",
       width: 260,
       render: (_, record) => (
         <Space size={4} wrap>
-          <Button type="text" icon={<LinkOutlined />} loading={loggingShopId === record.id} onClick={() => void handleLogin(record)}>
-            外部登录
-          </Button>
-          <Button type="text" icon={<KeyOutlined />} onClick={() => openAuthorizeModal(record)}>
-            授权
-          </Button>
-          <Button type="text" icon={<ArrowRightOutlined />} onClick={() => router.push(`/collection?shopId=${record.id}`)}>
-            去采集
-          </Button>
-          <Button type="text" icon={<EditOutlined />} onClick={() => openEditModal(record)} />
+          <IconOnlyButton
+            type="text"
+            icon={<LinkOutlined />}
+            tooltip="打开外部登录"
+            loading={loggingShopId === record.id}
+            onClick={() => void handleLogin(record)}
+          />
+          <IconOnlyButton type="text" icon={<KeyOutlined />} tooltip="激活码授权" onClick={() => openAuthorizeModal(record)} />
+          <IconOnlyButton type="text" icon={<ArrowRightOutlined />} tooltip="进入采集管理" onClick={() => router.push(`/collection?shopId=${record.id}`)} />
+          <IconOnlyButton type="text" icon={<EditOutlined />} tooltip="编辑店铺" onClick={() => openEditModal(record)} />
           <Popconfirm
             title="确认删除这个店铺记录吗？"
             description="删除后该店铺会从当前列表移除，请确认后继续。"
@@ -287,7 +278,7 @@ export function ShopManagementPanel() {
               }
             }}
           >
-            <Button danger type="text" icon={<DeleteOutlined />} />
+            <IconOnlyButton danger type="text" icon={<DeleteOutlined />} tooltip="删除店铺" />
           </Popconfirm>
         </Space>
       ),
@@ -356,15 +347,9 @@ export function ShopManagementPanel() {
               ]}
               style={{ width: 150 }}
             />
-            <Button type="primary" icon={<SearchOutlined />} onClick={() => void refresh({ pageIndex: 1, ...filters })}>
-              查询
-            </Button>
-            <Button icon={<ReloadOutlined />} onClick={() => void refresh()}>
-              刷新
-            </Button>
-            <Button type="primary" icon={<PlusOutlined />} onClick={openCreateModal}>
-              新增店铺
-            </Button>
+            <IconOnlyButton type="primary" icon={<SearchOutlined />} tooltip="查询店铺" onClick={() => void refresh({ pageIndex: 1, ...filters })} />
+            <IconOnlyButton icon={<ReloadOutlined />} tooltip="刷新店铺列表" onClick={() => void refresh()} />
+            <IconOnlyButton type="primary" icon={<PlusOutlined />} tooltip="新增店铺" onClick={openCreateModal} />
           </Space>
 
           <Tag style={{ color: "var(--manager-text-soft)", background: "rgba(170,192,238,0.16)", border: "none" }}>
@@ -379,7 +364,7 @@ export function ShopManagementPanel() {
           loading={loading || submitting}
           dataSource={safeShops}
           columns={columns}
-          scroll={{ x: 1540 }}
+          scroll={{ x: 1320 }}
           pagination={{
             current: query.pageIndex,
             pageSize: query.pageSize,

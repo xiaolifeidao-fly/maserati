@@ -39,6 +39,7 @@ import {
 import { convertRawDataToStandard } from "./standard-product.types";
 import { normalizeCollectSourceType, type CollectSourceType } from "../api/collection.api";
 import { ProductDetailEditor } from "./ProductDetailEditor";
+import { IconOnlyButton } from "@/components/manager-shell/IconOnlyButton";
 
 type FeedSource = "server" | "injected";
 
@@ -576,6 +577,14 @@ export function CollectionWorkspaceLeftPanel({
                       )}
                     </div>
                     <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                      {(record.source === "manual" || record.source === "file") && (
+                        <Tag
+                          color={record.source === "manual" ? "blue" : "gold"}
+                          style={{ marginInlineEnd: 0, borderRadius: 999 }}
+                        >
+                          {record.source === "manual" ? "手动采集" : "文件来源"}
+                        </Tag>
+                      )}
                       {record.sourceProductId && (
                         <span style={{ fontSize: 11, color: "#94a3b8", fontFamily: "monospace" }}>
                           #{record.sourceProductId.slice(0, 10)}
@@ -819,21 +828,23 @@ export function CollectionWorkspaceRightPanel({
         {selectedRecord && (
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
             {!isControlled && isTbWorkspace && (
-              <Button
+              <IconOnlyButton
                 size="small"
+                icon={<CloseOutlined />}
+                tooltip="收起右侧详情面板"
                 onClick={() => void handleClosePanel()}
                 loading={closingPanel}
                 style={{
                   border: "none",
                   boxShadow: "0 8px 24px rgba(57,97,145,0.12)",
                 }}
-              >
-                <CloseOutlined />
-              </Button>
+              />
             )}
-            <Button
+            <IconOnlyButton
               type="primary"
               size="small"
+              icon={<InboxOutlined />}
+              tooltip="保存商品详情"
               onClick={() => void handleSave()}
               loading={saving}
               disabled={dataLoading || !editedData}
@@ -841,9 +852,7 @@ export function CollectionWorkspaceRightPanel({
                 border: "none",
                 boxShadow: "0 8px 24px rgba(47,111,236,0.14)",
               }}
-            >
-              保存
-            </Button>
+            />
 
             {/* 收藏按钮 */}
             <button
@@ -1133,18 +1142,10 @@ export function CollectionTestingPanel() {
         </div>
 
         <Space wrap>
-          <Button icon={<LeftOutlined />} loading={navigatingAction === "back"} onClick={() => void handleWorkspaceNavigation("back")}>
-            后退
-          </Button>
-          <Button icon={<RightOutlined />} loading={navigatingAction === "forward"} onClick={() => void handleWorkspaceNavigation("forward")}>
-            前进
-          </Button>
-          <Button icon={<HomeOutlined />} loading={navigatingAction === "home"} onClick={() => void handleWorkspaceNavigation("home")}>
-            首页
-          </Button>
-          <Button icon={<ReloadOutlined />} loading={navigatingAction === "refresh"} onClick={() => void handleWorkspaceNavigation("refresh")}>
-            刷新
-          </Button>
+          <IconOnlyButton icon={<LeftOutlined />} tooltip="后退" loading={navigatingAction === "back"} onClick={() => void handleWorkspaceNavigation("back")} />
+          <IconOnlyButton icon={<RightOutlined />} tooltip="前进" loading={navigatingAction === "forward"} onClick={() => void handleWorkspaceNavigation("forward")} />
+          <IconOnlyButton icon={<HomeOutlined />} tooltip="首页" loading={navigatingAction === "home"} onClick={() => void handleWorkspaceNavigation("home")} />
+          <IconOnlyButton icon={<ReloadOutlined />} tooltip="刷新" loading={navigatingAction === "refresh"} onClick={() => void handleWorkspaceNavigation("refresh")} />
         </Space>
       </div>
 
@@ -1164,12 +1165,8 @@ export function CollectionTestingPanel() {
             onPressEnter={handleSearch}
             style={{ width: 280, maxWidth: "100%" }}
           />
-          <Button type="primary" icon={<SearchOutlined />} onClick={handleSearch}>
-            搜索
-          </Button>
-          <Button icon={<ReloadOutlined />} onClick={handleReset}>
-            刷新
-          </Button>
+          <IconOnlyButton type="primary" icon={<SearchOutlined />} tooltip="搜索商品" onClick={handleSearch} />
+          <IconOnlyButton icon={<ReloadOutlined />} tooltip="重置并刷新" onClick={handleReset} />
           <Tag style={{ marginInlineStart: 0, border: "none", background: "rgba(170,192,238,0.16)", color: "var(--manager-text-soft)" }}>
             注入 {filteredInjectedRecords.length} 条 / 服务端 {serverTotal} 条
           </Tag>
@@ -1236,14 +1233,14 @@ export function CollectionTestingPanel() {
                   bottom: 8,
                 }}
               >
-                <Button
+                <IconOnlyButton
                   type="text"
                   size="small"
                   icon={<EyeOutlined style={{ fontSize: 16 }} />}
+                  tooltip="查看商品详情"
                   onClick={() => void handleViewDetail(record)}
-                  title="查看商品详情"
                 />
-                <Button
+                <IconOnlyButton
                   type="text"
                   size="small"
                   loading={Boolean(togglingKeys[record.clientKey])}
@@ -1254,6 +1251,7 @@ export function CollectionTestingPanel() {
                       <HeartOutlined style={{ color: "#cbd5e1", fontSize: 16 }} />
                     )
                   }
+                  tooltip={record.isFavorite ? "取消收藏" : "收藏商品"}
                   onClick={() => void handleToggleFavorite(record)}
                 />
               </div>

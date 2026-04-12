@@ -1,7 +1,7 @@
 import type { IFiller, FillerContext } from './filler.interface';
 import type { NormalizedSku } from '../types/source-data';
 import type { TbSaleSpecUiMode } from '../types/draft';
-import { findLowestPositivePrice, formatPrice, parsePriceNumber } from './price.utils';
+import { findLowestPositivePriceInStock, formatPrice, parsePriceNumber } from './price.utils';
 
 interface CustomSalePropItem {
   text: string;
@@ -39,6 +39,27 @@ interface SkuResolvedProp extends CustomSalePropItem {
 interface GeneratedCustomPropSeed {
   timestamp: string;
   random: string;
+}
+
+interface SkuCombineContentProp {
+  propKey: string;
+  propValue: string;
+}
+
+interface SkuCombineContentProduct {
+  title: string;
+  imageUrl: string;
+  spuId: number;
+  spuDetailUrl: string;
+  id: number;
+  barcode: string;
+  primaryKey: string;
+  props: SkuCombineContentProp[];
+  count: number;
+}
+
+export interface SkuCombineContentPayload {
+  products: SkuCombineContentProduct[];
 }
 
 export interface GeneratedSkuPayload {
@@ -83,9 +104,9 @@ export class SkuFiller implements IFiller {
     const dimensions = generated.customSaleProp;
     const skuInfoList = generated.sku;
 
-    const lowestSkuPrice = findLowestPositivePrice(skuList.map(item => item.price));
+    const lowestSkuPrice = findLowestPositivePriceInStock(skuList);
     if (lowestSkuPrice !== null) {
-      // draft.price 始终跟随最低 SKU 价，并复用发布配置里的价格上浮规则。
+      // draft.price 始终跟随有库存 SKU 的最低价，并复用发布配置里的价格上浮规则。
       draftPayload['price'] = formatPrice(lowestSkuPrice, ctx.publishConfig?.priceSettings);
     }
     draftPayload['quantity'] = String(skuList.reduce((sum, item) => sum + (item.stock ?? 0), 0));
@@ -110,8 +131,38 @@ export class SkuFiller implements IFiller {
         parsePriceNumber(item.skuPrice ?? skuList[index]?.price ?? '0'),
         ctx.publishConfig?.priceSettings,
       ),
+      ...(ctx.tbWindowJson?.isSkuCombineContentEnable
+        ? { skuCombineContent: buildDefaultSkuCombineContent() }
+        : {}),
     }));
   }
+}
+
+export function buildDefaultSkuCombineContent(): SkuCombineContentPayload {
+  return {
+    products: [
+      {
+        title: '豆有味 巧比杯蘸酱饼干 500g*1包',
+        imageUrl: 'https://img.alicdn.com/imgextra/i4/695637589/O1CN011uTIVk25vomqYsItl_!!695637589.jpg',
+        spuId: 8243324590,
+        spuDetailUrl: 'https://spu.taobao.com/product/spuDetail.htm?spuId=8243324590&providerId=8&hasWrapper=1&readonly=true',
+        id: 1000570517373614,
+        barcode: '0000000000000',
+        primaryKey: 'id:1000570517373614',
+        props: [
+          {
+            propKey: '品名',
+            propValue: '巧比杯蘸酱饼干',
+          },
+          {
+            propKey: '净含量',
+            propValue: '500.00g',
+          },
+        ],
+        count: 1,
+      },
+    ],
+  };
 }
 
 export function buildCustomSalePropPayload(

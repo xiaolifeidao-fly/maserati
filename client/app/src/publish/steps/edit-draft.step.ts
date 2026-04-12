@@ -219,7 +219,7 @@ export class EditDraftStep extends PublishStep {
         ? (prop.dataSource as Array<{ value?: unknown; text?: string }>)
         : undefined;
       if (dataSource?.length) {
-        catPropData[prop.name] = dataSource[0];
+        catPropData[prop.name] = prop.uiType === 'checkbox' ? [dataSource[0]] : dataSource[0];
       }
     }
 

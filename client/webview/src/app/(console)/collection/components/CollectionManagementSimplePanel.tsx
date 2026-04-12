@@ -7,22 +7,38 @@ import {
   DeleteOutlined,
   EditOutlined,
   EyeOutlined,
+  ImportOutlined,
   PlayCircleOutlined,
   PlusOutlined,
   ReloadOutlined,
   SearchOutlined,
+  UploadOutlined,
 } from "@ant-design/icons";
-import { Button, Form, Input, Modal, Popconfirm, Select, Space, Table, Tag, message } from "antd";
+import { Button, Form, Input, Modal, Popconfirm, Progress, Select, Space, Table, Tag, Upload, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import { type CollectBatchRecord, normalizeCollectSourceType, startCollection as startCollectionByRoute, type CollectSourceType } from "../api/collection.api";
+import type { UploadFile, UploadProps } from "antd/es/upload/interface";
+import {
+  importCollectBatchZip,
+  type ImportCollectBatchProgress,
+  subscribeImportCollectProgress,
+  type CollectBatchRecord,
+  normalizeCollectSourceType,
+  startCollection as startCollectionByRoute,
+  type CollectSourceType,
+} from "../api/collection.api";
 import { useCollectionManagement } from "../hooks/useCollectionManagement";
 import { BatchDetailModal } from "./BatchDetailModal";
+import { IconOnlyButton } from "@/components/manager-shell/IconOnlyButton";
 import { getPublishWindowApi } from "@/utils/publish-window";
 import { formatDateTime } from "@/utils/format";
 
 interface CollectionFormValues {
   name: string;
   shopId: number;
+}
+
+interface ImportFormValues {
+  shopType: "tb" | "pdd";
 }
 
 function formatShopLabel(shop?: {
@@ -55,6 +71,7 @@ function buildBatchSerial(record: Pick<CollectBatchRecord, "id" | "createdTime" 
 export function CollectionManagementSimplePanel() {
   const searchParams = useSearchParams();
   const [form] = Form.useForm<CollectionFormValues>();
+  const [importForm] = Form.useForm<ImportFormValues>();
   const { collections, shops, total, query, loading, submitting, refresh, saveCollection, removeCollection } =
     useCollectionManagement();
   const [filters, setFilters] = useState({
@@ -66,6 +83,11 @@ export function CollectionManagementSimplePanel() {
   const [detailBatch, setDetailBatch] = useState<CollectBatchRecord | null>(null);
   const [detailSourceType, setDetailSourceType] = useState<CollectSourceType>("unknown");
   const [editingRecord, setEditingRecord] = useState<CollectBatchRecord | null>(null);
+  const [importingRecord, setImportingRecord] = useState<CollectBatchRecord | null>(null);
+  const [importModalOpen, setImportModalOpen] = useState(false);
+  const [importFileList, setImportFileList] = useState<UploadFile[]>([]);
+  const [importSubmitting, setImportSubmitting] = useState(false);
+  const [importProgress, setImportProgress] = useState<ImportCollectBatchProgress | null>(null);
   const [startingBatchId, setStartingBatchId] = useState(0);
   const shopMap = useMemo(() => new Map(shops.map((item) => [item.id, item])), [shops]);
 
@@ -76,6 +98,17 @@ export function CollectionManagementSimplePanel() {
       void refresh({ pageIndex: 1, shopId: initialShopId });
     }
   }, [searchParams]);
+
+  useEffect(() => {
+    void subscribeImportCollectProgress((progress) => {
+      setImportProgress((current) => {
+        if (!importingRecord?.id || progress.batchId !== importingRecord.id) {
+          return current;
+        }
+        return progress;
+      });
+    });
+  }, [importingRecord?.id]);
 
   const openCreateModal = () => {
     setEditingRecord(null);
@@ -136,11 +169,72 @@ export function CollectionManagementSimplePanel() {
     });
   };
 
+  const openImportModal = (record: CollectBatchRecord) => {
+    const shop = shopMap.get(record.shopId);
+    const defaultShopType = normalizeCollectSourceType(shop?.platform) === "tb" ? "tb" : "pdd";
+    setImportingRecord(record);
+    setImportFileList([]);
+    setImportProgress(null);
+    importForm.setFieldsValue({ shopType: defaultShopType });
+    setImportModalOpen(true);
+  };
+
   const openDetailModal = (record: CollectBatchRecord) => {
     const shop = shopMap.get(record.shopId);
     setDetailBatch(record);
     setDetailSourceType(normalizeCollectSourceType(shop?.platform));
     setDetailModalOpen(true);
+  };
+
+  const uploadProps: UploadProps = {
+    accept: ".zip,application/zip",
+    beforeUpload: (file) => {
+      setImportFileList([file]);
+      return false;
+    },
+    onRemove: () => {
+      setImportFileList([]);
+    },
+    fileList: importFileList,
+    maxCount: 1,
+  };
+
+  const handleImportSubmit = async () => {
+    if (!importingRecord?.id) {
+      return;
+    }
+    const values = await importForm.validateFields();
+    const currentFile = importFileList[0]?.originFileObj as (File & { path?: string }) | undefined;
+    const filePath = String(currentFile?.path || "").trim();
+    if (!filePath) {
+      message.error("请先选择 zip 文件");
+      return;
+    }
+
+    setImportSubmitting(true);
+    try {
+      const result = await importCollectBatchZip(importingRecord.id, {
+        shopType: values.shopType,
+        filePath,
+      });
+      const successParts = [`新增 ${result.importedCount || 0} 条`, `更新 ${result.updatedCount || 0} 条`];
+      if ((result.skippedCount || 0) > 0) {
+        successParts.push(`跳过 ${result.skippedCount} 条`);
+      }
+      message.success(`导入完成，${successParts.join("，")}`);
+      if (Array.isArray(result.errors) && result.errors.length > 0) {
+        message.warning(result.errors.slice(0, 3).join("；"));
+      }
+      setImportModalOpen(false);
+      setImportingRecord(null);
+      setImportFileList([]);
+      setImportProgress(null);
+      await refresh();
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "导入 zip 失败");
+    } finally {
+      setImportSubmitting(false);
+    }
   };
 
   const columns: ColumnsType<CollectBatchRecord> = [
@@ -184,24 +278,20 @@ export function CollectionManagementSimplePanel() {
       title: "操作",
       key: "actions",
       fixed: "right",
-      width: 260,
+      width: 300,
       render: (_, record) => (
         <Space size={4} wrap>
-          <Button
+          <IconOnlyButton
             type="text"
             icon={<PlayCircleOutlined />}
+            tooltip="开始采集"
             loading={startingBatchId === record.id}
             onClick={() => void startCollection(record)}
-          >
-            开始采集
-          </Button>
-          <Button type="text" icon={<EyeOutlined />} onClick={() => openDetailModal(record)}>
-            详情
-          </Button>
-          <Button type="text" icon={<ArrowRightOutlined />} onClick={() => openPublishModal(record)}>
-            去发布
-          </Button>
-          <Button type="text" icon={<EditOutlined />} onClick={() => openEditModal(record)} />
+          />
+          <IconOnlyButton type="text" icon={<EyeOutlined />} tooltip="查看详情" onClick={() => openDetailModal(record)} />
+          <IconOnlyButton type="text" icon={<ImportOutlined />} tooltip="导入 zip" onClick={() => openImportModal(record)} />
+          <IconOnlyButton type="text" icon={<ArrowRightOutlined />} tooltip="去发布" onClick={() => openPublishModal(record)} />
+          <IconOnlyButton type="text" icon={<EditOutlined />} tooltip="编辑采集批次" onClick={() => openEditModal(record)} />
           <Popconfirm
             title="确认删除这条采集批次吗？"
             okText="删除"
@@ -215,7 +305,7 @@ export function CollectionManagementSimplePanel() {
               }
             }}
           >
-            <Button danger type="text" icon={<DeleteOutlined />} />
+            <IconOnlyButton danger type="text" icon={<DeleteOutlined />} tooltip="删除采集批次" />
           </Popconfirm>
         </Space>
       ),
@@ -224,24 +314,6 @@ export function CollectionManagementSimplePanel() {
 
   return (
     <div className="manager-page-stack">
-      <section className="manager-data-card">
-        <div className="manager-flow-hero">
-          <div>
-            <div className="manager-section-label">Step 2</div>
-            <h2 className="manager-display-title" style={{ margin: "10px 0 8px" }}>
-              先建采集批次，再启动采集
-            </h2>
-          </div>
-        </div>
-
-        <div className="manager-step-strip">
-          <div className="manager-step-pill">1. 选择已接入店铺</div>
-          <div className="manager-step-pill is-active">2. 建立采集批次</div>
-          <div className="manager-step-pill">3. 启动采集</div>
-          <div className="manager-step-pill">4. 带批次去发布</div>
-        </div>
-      </section>
-
       <section className="manager-data-card">
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap", justifyContent: "space-between" }}>
           <Space wrap size={12}>
@@ -260,9 +332,10 @@ export function CollectionManagementSimplePanel() {
               options={shops.map((item) => ({ label: formatShopLabel(item), value: item.id }))}
               style={{ width: 180 }}
             />
-            <Button
+            <IconOnlyButton
               type="primary"
               icon={<SearchOutlined />}
+              tooltip="查询采集批次"
               onClick={() =>
                 void refresh({
                   pageIndex: 1,
@@ -270,21 +343,16 @@ export function CollectionManagementSimplePanel() {
                   shopId: filters.shopId || undefined,
                 })
               }
-            >
-              查询
-            </Button>
-            <Button
+            />
+            <IconOnlyButton
               icon={<ReloadOutlined />}
+              tooltip="重置并刷新采集批次"
               onClick={() => {
                 setFilters({ keyword: "", shopId: 0 });
                 void refresh({ pageIndex: 1, name: "", shopId: undefined, status: "" });
               }}
-            >
-              刷新
-            </Button>
-            <Button type="primary" icon={<PlusOutlined />} onClick={openCreateModal}>
-              新增采集批次
-            </Button>
+            />
+            <IconOnlyButton type="primary" icon={<PlusOutlined />} tooltip="新增采集批次" onClick={openCreateModal} />
           </Space>
 
           <Tag style={{ color: "var(--manager-text-soft)", background: "rgba(170,192,238,0.16)", border: "none" }}>
@@ -342,6 +410,59 @@ export function CollectionManagementSimplePanel() {
         sourceType={detailSourceType}
         onClose={() => setDetailModalOpen(false)}
       />
+
+      <Modal
+        title={importingRecord ? `导入采集数据 · ${importingRecord.name}` : "导入采集数据"}
+        open={importModalOpen}
+        onCancel={() => {
+          setImportModalOpen(false);
+          setImportingRecord(null);
+          setImportFileList([]);
+          setImportProgress(null);
+        }}
+        onOk={() => void handleImportSubmit()}
+        confirmLoading={importSubmitting}
+        destroyOnClose
+      >
+        <Form<ImportFormValues> form={importForm} layout="vertical" preserve={false}>
+          <Form.Item name="shopType" label="店铺类型" rules={[{ required: true, message: "请选择店铺类型" }]}>
+            <Select
+              options={[
+                { label: "tb", value: "tb" },
+                { label: "pdd", value: "pdd" },
+              ]}
+            />
+          </Form.Item>
+          <Form.Item label="zip 文件" required>
+            <Upload {...uploadProps}>
+              <Button icon={<UploadOutlined />}>选择 zip 文件</Button>
+            </Upload>
+            <div className="manager-muted" style={{ marginTop: 8 }}>
+              zip 解压后应为多个 JSON 文件，文件名格式为 {"{原商品ID}.json"}。
+            </div>
+          </Form.Item>
+          {importSubmitting || importProgress ? (
+            <div
+              style={{
+                marginTop: 8,
+                padding: 12,
+                borderRadius: 12,
+                background: "rgba(241,245,249,0.9)",
+                border: "1px solid rgba(148,163,184,0.18)",
+              }}
+            >
+              <Progress percent={importProgress?.percent ?? 0} status={importProgress?.status === "failed" ? "exception" : undefined} />
+              <div className="manager-muted" style={{ marginTop: 8 }}>
+                {importProgress?.message || "准备开始导入"}
+              </div>
+              <div className="manager-muted" style={{ marginTop: 4 }}>
+                已处理 {importProgress?.processed ?? 0} / {importProgress?.total ?? 0}
+                {importProgress?.currentFile ? `，当前文件：${importProgress.currentFile}` : ""}
+              </div>
+            </div>
+          ) : null}
+        </Form>
+      </Modal>
 
     </div>
   );

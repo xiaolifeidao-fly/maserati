@@ -1,9 +1,20 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Modal, message } from "antd";
-import { CollectBatchRecord, CollectRecordPreview, CollectionWorkspaceState, type CollectSourceType } from "../api/collection.api";
-import { fetchCollectBatchRecords, previewCollectedRecord, updateCollectRecord } from "../api/collection.api";
+import { Modal, Tabs, message } from "antd";
+import {
+  CollectBatchRecord,
+  CollectRecordPreview,
+  CollectionWorkspaceState,
+  type CollectSourceType,
+  type CollectRecordSource,
+} from "../api/collection.api";
+import {
+  fetchCollectBatchRecords,
+  normalizeCollectRecordSource,
+  previewCollectedRecord,
+  updateCollectRecord,
+} from "../api/collection.api";
 import { CollectionWorkspaceLeftPanel } from "./CollectionTestingPanel";
 import { CollectionWorkspaceRightPanel } from "./CollectionTestingPanel";
 
@@ -19,6 +30,7 @@ export function BatchDetailModal({ open, batch, sourceType, focusRecordId = 0, o
   const [records, setRecords] = useState<CollectRecordPreview[]>([]);
   const [loading, setLoading] = useState(false);
   const [selectedRecordId, setSelectedRecordId] = useState(0);
+  const [activeSource, setActiveSource] = useState<CollectRecordSource>("manual");
 
   const syncElectronPreview = async (record: CollectRecordPreview | null) => {
     if (!record?.sourceProductId) {
@@ -43,7 +55,9 @@ export function BatchDetailModal({ open, batch, sourceType, focusRecordId = 0, o
       const saved = await updateCollectRecord(record.id, { isFavorite: nextFavorite });
       setRecords((current) =>
         current.map((item) =>
-          item.id === record.id ? Object.assign(new CollectRecordPreview(), { ...item, ...saved }) : item,
+          item.id === record.id
+            ? Object.assign(new CollectRecordPreview(), { ...item, ...saved, source: normalizeCollectRecordSource(saved.source) })
+            : item,
         ),
       );
     } catch (error) {
@@ -55,6 +69,12 @@ export function BatchDetailModal({ open, batch, sourceType, focusRecordId = 0, o
   };
 
   useEffect(() => {
+    if (open) {
+      setActiveSource("manual");
+    }
+  }, [open]);
+
+  useEffect(() => {
     if (!open || !batch?.id) {
       setRecords([]);
       setSelectedRecordId(0);
@@ -62,10 +82,13 @@ export function BatchDetailModal({ open, batch, sourceType, focusRecordId = 0, o
     }
 
     setLoading(true);
-    void fetchCollectBatchRecords(batch.id, { pageIndex: 1, pageSize: 200 })
+    void fetchCollectBatchRecords(batch.id, { pageIndex: 1, pageSize: 200, source: activeSource })
       .then((result) => {
         const rawItems = Array.isArray(result.data) ? result.data : [];
-        const items = focusRecordId > 0 ? rawItems.filter((item) => item.id === focusRecordId) : rawItems;
+        const normalizedItems = rawItems.map((item) =>
+          Object.assign(new CollectRecordPreview(), item, { source: normalizeCollectRecordSource(item.source) }),
+        );
+        const items = focusRecordId > 0 ? normalizedItems.filter((item) => item.id === focusRecordId) : normalizedItems;
         setRecords(items);
         setSelectedRecordId(items.find((item) => item.id === focusRecordId)?.id || items[0]?.id || 0);
       })
@@ -73,7 +96,7 @@ export function BatchDetailModal({ open, batch, sourceType, focusRecordId = 0, o
         message.error(error instanceof Error ? error.message : "加载采集记录失败");
       })
       .finally(() => setLoading(false));
-  }, [open, batch?.id, focusRecordId]);
+  }, [open, batch?.id, focusRecordId, activeSource]);
 
   const workspaceState: CollectionWorkspaceState = {
     batch: batch ?? new CollectBatchRecord(),
@@ -119,6 +142,15 @@ export function BatchDetailModal({ open, batch, sourceType, focusRecordId = 0, o
           borderRight: "1px solid rgba(226,232,240,0.8)",
         }}
       >
+        <Tabs
+          activeKey={activeSource}
+          onChange={(value) => setActiveSource(value as CollectRecordSource)}
+          items={[
+            { key: "manual", label: "手动采集" },
+            { key: "file", label: "文件来源" },
+          ]}
+          style={{ flex: "0 0 auto", marginBottom: 10 }}
+        />
         <CollectionWorkspaceLeftPanel
           workspaceState={workspaceState}
           loading={loading}

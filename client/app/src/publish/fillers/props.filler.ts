@@ -10,11 +10,14 @@ interface CatPropOptionValue {
 }
 
 /** 单个 catProp 填充结果 */
-type CatPropFilledValue = CatPropOptionValue | string;
+type CatPropFilledValue = CatPropOptionValue | CatPropOptionValue[] | string;
 
-/** 生成随机负数 ID（模拟淘宝自定义选项 value，范围 -1e10 ~ -1） */
-function randomNegativeId(): number {
-  return -Math.floor(Math.random() * 1e10 + 1);
+function formatToday(): string {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
 
 /**
@@ -33,10 +36,10 @@ function randomNegativeId(): number {
  *  2. 对每个属性，用 label 与源商品 attribute.name 做双向包含匹配
  *  3. 匹配到后，按 uiType 格式化：
  *     - input → 直接写文本值
- *     - select / combobox → 从 dataSource 中找最佳选项，返回 { value, text }
+ *     - select / combobox / checkbox → 从 dataSource 中找最佳选项
  *  4. 必填属性匹配不到时，调用 mockAiFillCatProp() 兜底（后续接入 AI）
- *  5. 若必填 select / combobox 仍无法命中，则从 dataSource 随机选择一个合法选项
- *  6. 非必填属性匹配不到时跳过
+ *  5. 必填属性按 uiType 做兜底：选项型随机取值、datepicker 用当天日期、input 用“待填充”
+ *  6. 非必填属性只有存在 dataSource 时才继续走 AI / 随机，否则跳过
  */
 export class PropsFiller implements IFiller {
   readonly fillerName = 'PropsFiller';
@@ -95,23 +98,33 @@ export class PropsFiller implements IFiller {
     product: NormalizedProduct,
     taskId: number,
   ): Promise<CatPropFilledValue | null> {
-    const matched = this.findMatchingAttr(prop, product);
+    const isSelectable = this.isSelectableUiType(prop);
+    const matched = prop.required
+      ? this.findMatchingAttr(prop, product)
+      : this.findExactMatchingAttr(prop, product);
+    const shouldTryAiOrRandom = prop.required || this.hasDataSourceOptions(prop);
 
     if (matched !== null) {
-      return this.formatValue(prop, matched);
+      if (!isSelectable) {
+        return matched;
+      }
+
+      const matchedOption = this.formatSelectableValue(prop, matched);
+      if (matchedOption !== null) {
+        return matchedOption;
+      }
     }
 
-    // 必填但匹配不到，走 AI 兜底
-    if (prop.required) {
+    if (shouldTryAiOrRandom) {
       const aiFilled = await this.mockAiFillCatProp(prop, product);
       if (aiFilled !== null) {
         return aiFilled;
       }
 
-      const randomOption = this.pickRandomOption(prop);
-      if (randomOption) {
+      const randomOption = this.pickRandomValue(prop);
+      if (randomOption !== null) {
         publishWarn(
-          `[task:${taskId}] [PROPS] required select prop "${prop.label ?? prop.name}" fallback to random datasource option`,
+          `[task:${taskId}] [PROPS] ${prop.required ? 'required' : 'optional'} selectable prop "${prop.label ?? prop.name}" fallback to random datasource option`,
           {
             taskId,
             key: prop.name,
@@ -120,6 +133,20 @@ export class PropsFiller implements IFiller {
         );
         return randomOption;
       }
+    }
+
+    const typedFallback = this.buildTypedFallback(prop);
+    if (typedFallback !== null) {
+      publishWarn(
+        `[task:${taskId}] [PROPS] required prop "${prop.label ?? prop.name}" fallback by uiType`,
+        {
+          taskId,
+          key: prop.name,
+          value: typedFallback,
+          uiType: prop.uiType,
+        },
+      );
+      return typedFallback;
     }
 
     return null;
@@ -133,16 +160,38 @@ export class PropsFiller implements IFiller {
     prop: TbWindowJsonCatProp,
     product: NormalizedProduct,
   ): string | null {
+    const exact = this.findExactMatchingAttr(prop, product);
+    if (exact !== null) {
+      return exact;
+    }
+
+    return this.findFuzzyMatchingAttr(prop, product);
+  }
+
+  private findExactMatchingAttr(
+    prop: TbWindowJsonCatProp,
+    product: NormalizedProduct,
+  ): string | null {
     const propLabel = (prop.label ?? prop.name ?? '').trim();
     if (!propLabel) return null;
 
     const attrs = product.attributes ?? [];
 
-    // 精确匹配
     const exact = attrs.find(a => a.name.trim() === propLabel);
     if (exact) return exact.value;
 
-    // 双向包含匹配（label 包含 attrName 或 attrName 包含 label）
+    return null;
+  }
+
+  private findFuzzyMatchingAttr(
+    prop: TbWindowJsonCatProp,
+    product: NormalizedProduct,
+  ): string | null {
+    const propLabel = (prop.label ?? prop.name ?? '').trim();
+    if (!propLabel) return null;
+
+    const attrs = product.attributes ?? [];
+
     const fuzzy = attrs.find(a => {
       const attrName = a.name.trim();
       return attrName.includes(propLabel) || propLabel.includes(attrName);
@@ -152,37 +201,52 @@ export class PropsFiller implements IFiller {
 
   /**
    * 按 uiType 将原始字符串值格式化为提交格式
-   *  - input  → 直接返回字符串
-   *  - select / combobox → 从 dataSource 中匹配选项，返回 { value, text }；
-   *    匹配不到时以随机负数 value + 原始文本 text 写入自定义值
+   *  - input → 直接返回字符串
+   *  - select / combobox → 从 dataSource 中匹配选项，返回 { value, text }
+   *  - checkbox → 从 dataSource 中匹配选项，返回 [{ value, text }, ...]
    */
-  private formatValue(
+  private formatSelectableValue(
     prop: TbWindowJsonCatProp,
     rawValue: string,
-  ): CatPropFilledValue {
+  ): CatPropOptionValue | CatPropOptionValue[] | null {
     const uiType = (prop.uiType ?? '').toLowerCase();
-    const isSelectType = uiType === 'select' || uiType === 'combobox';
 
-    if (!isSelectType) {
-      // input 类型：直接写文本
-      return rawValue;
+    if (uiType === 'checkbox') {
+      return this.findBestCheckboxOptions(rawValue, prop);
     }
 
-    // select / combobox：从 dataSource 中匹配选项
     const option = this.findBestOption(rawValue, prop);
     if (option) {
       return option;
     }
 
-    if (prop.required) {
-      const randomOption = this.pickRandomOption(prop);
-      if (randomOption) {
-        return randomOption;
-      }
+    return null;
+  }
+
+  private isSelectableUiType(prop: TbWindowJsonCatProp): boolean {
+    const uiType = (prop.uiType ?? '').toLowerCase();
+    return uiType === 'select' || uiType === 'combobox' || uiType === 'checkbox';
+  }
+
+  private hasDataSourceOptions(prop: TbWindowJsonCatProp): boolean {
+    return this.getValidOptions(prop).length > 0;
+  }
+
+  private buildTypedFallback(prop: TbWindowJsonCatProp): CatPropFilledValue | null {
+    if (!prop.required) {
+      return null;
     }
 
-    // dataSource 中匹配不到：用随机负数 ID + 原始文本作为自定义值
-    return { value: randomNegativeId(), text: rawValue };
+    const uiType = (prop.uiType ?? '').toLowerCase();
+    if (uiType === 'datepicker') {
+      return formatToday();
+    }
+
+    if (uiType === 'input') {
+      return '待填充';
+    }
+
+    return null;
   }
 
   /**
@@ -212,6 +276,42 @@ export class PropsFiller implements IFiller {
     };
   }
 
+  private findBestCheckboxOptions(
+    value: string,
+    prop: TbWindowJsonCatProp,
+  ): CatPropOptionValue[] | null {
+    const tokens = this.splitCheckboxValues(value);
+    if (!tokens.length) {
+      return null;
+    }
+
+    const resolved: CatPropOptionValue[] = [];
+    const seen = new Set<string>();
+
+    for (const token of tokens) {
+      const option = this.findBestOption(token, prop);
+      if (!option) {
+        continue;
+      }
+
+      const key = `${option.value}::${option.text}`;
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      resolved.push(option);
+    }
+
+    return resolved.length ? resolved : null;
+  }
+
+  private splitCheckboxValues(value: string): string[] {
+    return value
+      .split(/[,\uFF0C\u3001/\uFF0F;|\uFF1B]+/g)
+      .map(item => item.trim())
+      .filter(Boolean);
+  }
+
   private getValidOptions(prop: TbWindowJsonCatProp): Array<{ value: string | number; text: string }> {
     const options = Array.isArray(prop.dataSource)
       ? (prop.dataSource as Array<{ value?: unknown; text?: string }>)
@@ -230,14 +330,19 @@ export class PropsFiller implements IFiller {
       .filter((opt): opt is { value: string | number; text: string } => Boolean(opt?.text));
   }
 
-  private pickRandomOption(prop: TbWindowJsonCatProp): CatPropOptionValue | null {
+  private pickRandomValue(prop: TbWindowJsonCatProp): CatPropFilledValue | null {
     const options = this.getValidOptions(prop);
     if (!options.length) {
       return null;
     }
 
     const randomIndex = Math.floor(Math.random() * options.length);
-    return options[randomIndex] ?? null;
+    const selected = options[randomIndex] ?? null;
+    if (!selected) {
+      return null;
+    }
+
+    return (prop.uiType ?? '').toLowerCase() === 'checkbox' ? [selected] : selected;
   }
 
   /**
@@ -249,14 +354,15 @@ export class PropsFiller implements IFiller {
    *
    * 当前实现：
    *   - 若 prop 有 dataSource，先尝试用占位文本命中现有选项
-   *   - 若 prop 为 input 类型，随机写入 "待补充" 占位文本
+   *   - input 类型返回“待填充”
+   *   - datepicker 返回当天日期
    */
   private async mockAiFillCatProp(
     prop: TbWindowJsonCatProp,
     product: NormalizedProduct,
   ): Promise<CatPropFilledValue | null> {
     const uiType = (prop.uiType ?? '').toLowerCase();
-    const isSelectType = uiType === 'select' || uiType === 'combobox';
+    const isSelectableType = this.isSelectableUiType(prop);
 
     // AI 填充入参（供后续接入时直接使用）
     const _aiInput = {
@@ -264,25 +370,34 @@ export class PropsFiller implements IFiller {
       propRequired: prop.required,
       productTitle: product.title,
       productAttributes: product.attributes?.map(a => ({ name: a.name, value: a.value })) ?? [],
-      availableOptions: isSelectType && Array.isArray(prop.dataSource)
+      availableOptions: isSelectableType && Array.isArray(prop.dataSource)
         ? (prop.dataSource as Array<{ value?: unknown; text?: string }>)
             .map(opt => ({ value: opt.value, text: opt.text }))
             .filter(opt => opt.text)
         : undefined,
     };
 
-    if (isSelectType) {
+    if (isSelectableType) {
       // AI 本应根据 _aiInput 推断文本，此处先用占位文本模拟
       const aiText = '待补充';
-      // 仍先尝试在 dataSource 中匹配占位文本（大概率匹配不到）
-      const option = this.findBestOption(aiText, prop);
+      const option =
+        uiType === 'checkbox'
+          ? this.findBestCheckboxOptions(aiText, prop)
+          : this.formatSelectableValue(prop, aiText);
       if (option) return option;
       return null;
     }
 
-    if (!isSelectType) {
-      // input 类型：返回占位文本
-      return '待补充';
+    if (!isSelectableType) {
+      if (uiType === 'input') {
+        return '待填充';
+      }
+
+      if (uiType === 'datepicker') {
+        return formatToday();
+      }
+
+      return null;
     }
 
     return null;

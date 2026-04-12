@@ -4,11 +4,13 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeftOutlined,
   ArrowRightOutlined,
+  CloseOutlined,
   PlayCircleOutlined,
+  ReloadOutlined,
+  StopOutlined,
 } from "@ant-design/icons";
 import {
   Alert,
-  Button,
   Descriptions,
   Input,
   Modal,
@@ -31,6 +33,7 @@ import {
   type ShopRecord,
 } from "../api/product.api";
 import { normalizeCollectSourceType } from "@/app/(console)/collection/api/collection.api";
+import { IconOnlyButton } from "@/components/manager-shell/IconOnlyButton";
 import { getPublishApi } from "@/utils/publish";
 import { getPublishWindowApi } from "@/utils/publish-window";
 
@@ -208,7 +211,6 @@ const PublishStepCode = {
 type PublishSourceTypeValue = typeof PublishSourceType[keyof typeof PublishSourceType];
 type PublishTaskStatusValue = typeof PublishTaskStatus[keyof typeof PublishTaskStatus];
 type PublishStepStatusValue = typeof PublishStepStatus[keyof typeof PublishStepStatus];
-type PublishDataSource = "batch" | "file";
 
 interface PublishProgressEvent {
   taskId: number;
@@ -275,6 +277,7 @@ export function ProductPublishModal({
 }: ProductPublishModalProps) {
   const isCollectionBatchEntry = initialEntryScene === "collection" && initialBatchId > 0;
   const directToProgress = initialView === "progress";
+  const shouldRestoreBatchState = isCollectionBatchEntry || directToProgress;
   const initialStep = directToProgress ? 4 : isCollectionBatchEntry ? 2 : 1;
   const [currentStep, setCurrentStep] = useState(initialStep);
   const [collectBatches, setCollectBatches] = useState<CollectBatchRecord[]>([]);
@@ -282,7 +285,6 @@ export function ProductPublishModal({
   const [optionsLoading, setOptionsLoading] = useState(false);
   const [republishStatsByBatchId, setRepublishStatsByBatchId] = useState<Record<number, PublishBatchRepublishStats>>({});
   const [republishStatsLoadingBatchIds, setRepublishStatsLoadingBatchIds] = useState<number[]>([]);
-  const [selectedDataSource, setSelectedDataSource] = useState<PublishDataSource>("batch");
   const [selectedBatchId, setSelectedBatchId] = useState(initialBatchId);
   const [selectedTargetShopId, setSelectedTargetShopId] = useState(0);
   const [priceSettings, setPriceSettings] = useState<PublishSettings>(loadPriceSettings);
@@ -337,7 +339,6 @@ export function ProductPublishModal({
     if (!open) return;
     const nextPriceSettings = loadPriceSettings();
     setCurrentStep(directToProgress ? 4 : isCollectionBatchEntry ? 2 : 1);
-    setSelectedDataSource("batch");
     setSelectedBatchId(initialBatchId);
     setSelectedTargetShopId(0);
     setPublishQueue([]);
@@ -370,6 +371,9 @@ export function ProductPublishModal({
 
   useEffect(() => {
     if (!open) return;
+    if (!shouldRestoreBatchState) {
+      return;
+    }
     let cancelled = false;
     const publishApi = getPublishApi();
 
@@ -466,7 +470,7 @@ export function ProductPublishModal({
     return () => {
       cancelled = true;
     };
-  }, [directToProgress, initialBatchId, open]);
+  }, [directToProgress, initialBatchId, open, shouldRestoreBatchState]);
 
   const shopNameMap = useMemo(
     () => new Map(shops.map((s) => [s.id, formatShopLabel(s)])),
@@ -492,10 +496,12 @@ export function ProductPublishModal({
     selectedTargetShop && selectedTargetShop.loginStatus !== "LOGGED_IN",
   );
 
-  const selectedBatchRepublishStats = selectedBatchId > 0
+  const showBatchHistory = isCollectionBatchEntry;
+  const selectedBatchRepublishStats = selectedBatchId > 0 && showBatchHistory
     ? republishStatsByBatchId[selectedBatchId]
     : undefined;
   const selectedBatchRepublishStatsLoading = selectedBatchId > 0
+    && showBatchHistory
     && republishStatsLoadingBatchIds.includes(selectedBatchId);
 
   const isCollectionEntry = initialEntryScene === "collection";
@@ -506,43 +512,17 @@ export function ProductPublishModal({
         { title: "发布进度" },
       ]
     : [
-        { title: "选择数据源" },
-        { title: selectedDataSource === "file" ? "导入文件" : "选择批次" },
+        { title: "选择批次" },
         { title: "选择店铺" },
         { title: "发布配置" },
         { title: "发布进度" },
       ];
   const displayedStep = isCollectionBatchEntry
     ? Math.max(0, Math.min(currentStep - 2, stepItems.length - 1))
-    : currentStep;
-  const dataSourceOptions: Array<{
-    value: PublishDataSource;
-    title: string;
-    description: string;
-    disabled?: boolean;
-    badge?: string;
-  }> = [
-    {
-      value: "batch",
-      title: "通过批次发布",
-      description: "从采集批次中选择已关注商品，沿用现有发布流程。",
-    },
-    {
-      value: "file",
-      title: "通过文件导入发布",
-      description: isCollectionEntry
-        ? "从采集管理进入时暂时只允许按批次发布。"
-        : "导入后的数据会复用批次数据结构，导入动作稍后接入。",
-      disabled: isCollectionEntry,
-      badge: isCollectionEntry ? "当前入口不可用" : "即将接入",
-    },
-  ];
+    : Math.max(0, Math.min(currentStep - 1, stepItems.length - 1));
 
   useEffect(() => {
     if (!open) return;
-    if (selectedDataSource !== "batch") {
-      return;
-    }
     if (!selectedBatch) {
       setSelectedTargetShopId(0);
       return;
@@ -554,7 +534,7 @@ export function ProductPublishModal({
       }
       return batchShopIsTb ? selectedBatch.shopId : 0;
     });
-  }, [open, selectedBatch, selectedDataSource, tbShops]);
+  }, [open, selectedBatch, tbShops]);
 
   const runningPublishStats = useMemo(() => {
     const dedupedQueue = dedupeQueueItems(publishQueue);
@@ -573,7 +553,7 @@ export function ProductPublishModal({
   }, [publishQueue]);
 
   useEffect(() => {
-    if (!open || selectedDataSource !== "batch" || !selectedBatchId) {
+    if (!open || !showBatchHistory || !selectedBatchId) {
       return;
     }
     if (republishStatsByBatchId[selectedBatchId] !== undefined || republishStatsLoadingBatchIds.includes(selectedBatchId)) {
@@ -606,7 +586,7 @@ export function ProductPublishModal({
     return () => {
       cancelled = true;
     };
-  }, [open, republishStatsByBatchId, republishStatsLoadingBatchIds, selectedBatchId, selectedDataSource]);
+  }, [open, republishStatsByBatchId, republishStatsLoadingBatchIds, selectedBatchId, showBatchHistory]);
 
   const markSelectedShopLoggedOut = (shopId: number) => {
     setShops((current) =>
@@ -1261,14 +1241,15 @@ export function ProductPublishModal({
               </span>
             )}
             {resumeTaskId && (record.waitingForCaptcha || record.status === "FAILED") ? (
-              <Button
+              <IconOnlyButton
                 size="small"
                 type="primary"
+                shape="default"
+                icon={<PlayCircleOutlined />}
+                tooltip="继续发布"
                 loading={resumingTaskIds.includes(resumeTaskId)}
                 onClick={() => void handleResumeTask(resumeTaskId)}
-              >
-                继续发布
-              </Button>
+              />
             ) : null}
           </div>
         );
@@ -1320,69 +1301,20 @@ export function ProductPublishModal({
         destroyOnClose={false}
       >
         <div style={{ padding: "16px 0 8px" }}>
-          {/* 步骤条 */}
           <Steps
             current={displayedStep}
             items={stepItems}
             style={{ marginBottom: 36 }}
           />
 
-          {/* ─── Step 0：选择数据源 ─────────────────────────────────── */}
-          {currentStep === 0 && (
-            <div>
-              <div className="manager-panel-title" style={{ marginBottom: 12 }}>选择数据源</div>
-              <div className="manager-muted" style={{ marginBottom: 20, fontSize: 13 }}>
-                {isCollectionEntry
-                  ? "当前从采集管理进入，只能沿用采集批次发起发布。"
-                  : "当前从商品管理进入，可以选择批次发布，或预留文件导入发布入口。"}
-              </div>
-
-              <div style={{ display: "grid", gap: 12 }}>
-                {dataSourceOptions.map((option) => {
-                  const active = selectedDataSource === option.value;
-                  return (
-                    <button
-                      key={option.value}
-                      type="button"
-                      className={`publish-source-card${active ? " is-active" : ""}`}
-                      disabled={option.disabled}
-                      onClick={() => {
-                        setSelectedDataSource(option.value);
-                        setSelectedBatchId(option.value === "batch" ? initialBatchId : 0);
-                      }}
-                    >
-                      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
-                        <span style={{ fontSize: 16, fontWeight: 700, color: "var(--manager-text)" }}>
-                          {option.title}
-                        </span>
-                        {option.badge ? <Tag color={option.disabled ? "default" : "blue"}>{option.badge}</Tag> : null}
-                      </div>
-                      <div className="manager-muted" style={{ marginTop: 8, fontSize: 13, textAlign: "left" }}>
-                        {option.description}
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-
-              <div className="publish-step-footer">
-                <Button
-                  type="primary"
-                  size="large"
-                  icon={<ArrowRightOutlined />}
-                  disabled={!selectedDataSource}
-                  onClick={() => setCurrentStep(1)}
-                >
-                  下一步
-                </Button>
-              </div>
-            </div>
-          )}
-
-          {/* ─── Step 1：选择批次 / 文件导入 ────────────────────────── */}
-          {currentStep === 1 && selectedDataSource === "batch" && (
+          {currentStep === 1 && (
             <div>
               <div className="manager-panel-title" style={{ marginBottom: 12 }}>选择采集批次</div>
+              {!isCollectionEntry ? (
+                <div className="manager-muted" style={{ marginBottom: 20, fontSize: 13 }}>
+                  当前仅支持按采集批次发起发布。
+                </div>
+              ) : null}
               <Select
                 value={selectedBatchId || undefined}
                 placeholder="请选择要发布的采集批次"
@@ -1408,7 +1340,9 @@ export function ProductPublishModal({
                     <Descriptions.Item label="采集数量">
                       {selectedBatchRepublishStatsLoading
                         ? "正在统计喜欢的商品..."
-                        : `${selectedBatchRepublishStats?.totalCount ?? 0} 条（服务端去重）`}
+                        : showBatchHistory
+                          ? `${selectedBatchRepublishStats?.totalCount ?? 0} 条（服务端去重）`
+                          : `${selectedBatch.collectedCount ?? 0} 条`}
                     </Descriptions.Item>
                     <Descriptions.Item label="所属店铺">
                       {shopNameMap.get(selectedBatch.shopId) ?? `#${selectedBatch.shopId}`}
@@ -1419,46 +1353,16 @@ export function ProductPublishModal({
               )}
 
               <div className="publish-step-footer" style={{ justifyContent: "space-between" }}>
-                <Button size="large" icon={<ArrowLeftOutlined />} onClick={() => setCurrentStep(0)}>
-                  上一步
-                </Button>
-                <Button
+                <IconOnlyButton size="large" icon={<CloseOutlined />} shape="default" tooltip="关闭" onClick={onCancel} />
+                <IconOnlyButton
                   type="primary"
                   size="large"
                   icon={<ArrowRightOutlined />}
+                  shape="default"
+                  tooltip="下一步"
                   disabled={!selectedBatchId || optionsLoading}
                   onClick={() => setCurrentStep(2)}
-                >
-                  下一步
-                </Button>
-              </div>
-            </div>
-          )}
-
-          {currentStep === 1 && selectedDataSource === "file" && (
-            <div>
-              <div className="manager-panel-title" style={{ marginBottom: 12 }}>文件导入发布</div>
-              <Alert
-                type="info"
-                showIcon
-                message="文件导入动作稍后接入"
-                description="导入后的数据会复用当前批次发布的数据结构，所以后面的店铺、价格、发布执行流程都会共用现有逻辑。这里先把入口和步骤位置预留出来。"
-              />
-
-              <div className="publish-info-card" style={{ marginTop: 20 }}>
-                <Descriptions size="small" column={1} colon>
-                  <Descriptions.Item label="当前状态">暂未接入导入按钮和文件解析</Descriptions.Item>
-                  <Descriptions.Item label="后续兼容性">导入完成后会直接生成与批次一致的待发布队列</Descriptions.Item>
-                </Descriptions>
-              </div>
-
-              <div className="publish-step-footer" style={{ justifyContent: "space-between" }}>
-                <Button size="large" icon={<ArrowLeftOutlined />} onClick={() => setCurrentStep(0)}>
-                  上一步
-                </Button>
-                <Button type="primary" size="large" disabled>
-                  等待导入能力接入
-                </Button>
+                />
               </div>
             </div>
           )}
@@ -1509,7 +1413,7 @@ export function ProductPublishModal({
                       {selectedTargetShopNeedsLogin ? "未登录" : "已登录"}
                     </Descriptions.Item>
                     <Descriptions.Item label="数据来源">
-                      {selectedDataSource === "batch" ? selectedBatch?.name ?? "—" : "文件导入"}
+                      {selectedBatch?.name ?? "—"}
                     </Descriptions.Item>
                     <Descriptions.Item label="说明">
                       后续淘宝交互会复用该店铺会话
@@ -1520,23 +1424,19 @@ export function ProductPublishModal({
 
               <div className="publish-step-footer" style={{ justifyContent: "space-between" }}>
                 {isCollectionBatchEntry ? (
-                  <Button size="large" onClick={onCancel}>
-                    关闭
-                  </Button>
+                  <IconOnlyButton size="large" icon={<CloseOutlined />} shape="default" tooltip="关闭" onClick={onCancel} />
                 ) : (
-                  <Button size="large" icon={<ArrowLeftOutlined />} onClick={() => setCurrentStep(1)}>
-                    上一步
-                  </Button>
+                  <IconOnlyButton size="large" icon={<ArrowLeftOutlined />} shape="default" tooltip="上一步" onClick={() => setCurrentStep(1)} />
                 )}
-                <Button
+                <IconOnlyButton
                   type="primary"
                   size="large"
                   icon={<ArrowRightOutlined />}
+                  shape="default"
+                  tooltip="下一步"
                   disabled={!selectedTargetShopId || optionsLoading || selectedTargetShopNeedsLogin}
                   onClick={() => setCurrentStep(3)}
-                >
-                  下一步
-                </Button>
+                />
               </div>
             </div>
           )}
@@ -1591,9 +1491,7 @@ export function ProductPublishModal({
               </div>
 
               <div style={{ marginBottom: 16 }}>
-                <Button type="link" style={{ paddingInline: 0 }} onClick={handleResetPriceSettings}>
-                  恢复默认值（×1.3 + 0 元）
-                </Button>
+                <IconOnlyButton type="link" shape="default" icon={<ReloadOutlined />} tooltip="恢复默认值（×1.3 + 0 元）" style={{ paddingInline: 0 }} onClick={handleResetPriceSettings} />
               </div>
 
               <div className="publish-info-card">
@@ -1613,18 +1511,16 @@ export function ProductPublishModal({
               </div>
 
               <div className="publish-step-footer" style={{ justifyContent: "space-between" }}>
-                <Button size="large" icon={<ArrowLeftOutlined />} onClick={() => setCurrentStep(2)}>
-                  上一步
-                </Button>
-                <Button
+                <IconOnlyButton size="large" icon={<ArrowLeftOutlined />} shape="default" tooltip="上一步" onClick={() => setCurrentStep(2)} />
+                <IconOnlyButton
                   type="primary"
                   size="large"
                   icon={<ArrowRightOutlined />}
+                  shape="default"
+                  tooltip="下一步"
                   loading={fetchingFavorites}
                   onClick={() => void handleConfirmPriceAndNext()}
-                >
-                  下一步
-                </Button>
+                />
               </div>
             </div>
           )}
@@ -1653,7 +1549,7 @@ export function ProductPublishModal({
                   <div style={{ flex: 1, borderLeft: "1px solid rgba(170,192,238,0.25)", paddingLeft: 24 }}>
                     <Descriptions size="small" column={2} colon>
                       <Descriptions.Item label="数据来源">
-                        {selectedDataSource === "batch" ? selectedBatch?.name ?? "—" : "文件导入"}
+                        {selectedBatch?.name ?? "—"}
                       </Descriptions.Item>
                       <Descriptions.Item label="店铺">
                         {shopNameMap.get(selectedTargetShopId) ?? "—"}
@@ -1667,7 +1563,7 @@ export function ProductPublishModal({
                       <Descriptions.Item label="采集总数">
                         {selectedBatchRepublishStatsLoading
                           ? "正在统计喜欢的商品..."
-                          : `${selectedBatchRepublishStats?.totalCount ?? runningPublishStats.total} 条`}
+                          : `${showBatchHistory ? (selectedBatchRepublishStats?.totalCount ?? runningPublishStats.total) : runningPublishStats.total} 条`}
                       </Descriptions.Item>
                     </Descriptions>
                   </div>
@@ -1709,18 +1605,16 @@ export function ProductPublishModal({
               />
 
               <div className="publish-step-footer" style={{ justifyContent: "space-between" }}>
-                <Button size="large" icon={<ArrowLeftOutlined />} onClick={() => setCurrentStep(3)}>
-                  上一步
-                </Button>
-                <Button
+                <IconOnlyButton size="large" icon={<ArrowLeftOutlined />} shape="default" tooltip="上一步" onClick={() => setCurrentStep(3)} />
+                <IconOnlyButton
                   type="primary"
                   size="large"
                   icon={<PlayCircleOutlined />}
+                  shape="default"
+                  tooltip="确认发布"
                   onClick={() => void handleConfirmPublish()}
                   disabled={publishQueue.length === 0 || selectedTargetShopNeedsLogin}
-                >
-                  确认发布
-                </Button>
+                />
               </div>
             </div>
           )}
@@ -1745,19 +1639,16 @@ export function ProductPublishModal({
               </div>
 
               <div className="publish-step-footer" style={{ justifyContent: "space-between" }}>
-                <Button danger size="large" onClick={() => void handleStopAllPublish()} loading={stoppingAll}>
-                  全部停止
-                </Button>
-                <Button size="large" onClick={handleRepublishAll} loading={stoppingAll}>
-                  重新发布
-                </Button>
-                <Button
+                <IconOnlyButton danger size="large" icon={<StopOutlined />} shape="default" tooltip="全部停止" onClick={() => void handleStopAllPublish()} loading={stoppingAll} />
+                <IconOnlyButton size="large" icon={<ReloadOutlined />} shape="default" tooltip="重新发布" onClick={handleRepublishAll} loading={stoppingAll} />
+                <IconOnlyButton
                   type="primary"
                   size="large"
+                  icon={<PlayCircleOutlined />}
+                  shape="default"
+                  tooltip="继续上次发布"
                   onClick={() => void handleContinueLastPublish()}
-                >
-                  继续上次发布
-                </Button>
+                />
               </div>
             </div>
           )}
@@ -1803,12 +1694,8 @@ export function ProductPublishModal({
                     </div>
                   </div>
                   <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
-                    <Button danger onClick={() => void handleStopAllPublish()} loading={stoppingAll}>
-                      全部停止
-                    </Button>
-                    <Button onClick={handleRepublishAll} loading={stoppingAll}>
-                      重新发布
-                    </Button>
+                    <IconOnlyButton danger icon={<StopOutlined />} tooltip="全部停止" onClick={() => void handleStopAllPublish()} loading={stoppingAll} />
+                    <IconOnlyButton icon={<ReloadOutlined />} tooltip="重新发布" onClick={handleRepublishAll} loading={stoppingAll} />
                   </div>
                 </div>
                 <Progress
@@ -1839,33 +1726,6 @@ export function ProductPublishModal({
         /* Modal 尺寸控制 */
         .manager-publish-modal .ant-modal {
           top: 12vh;
-        }
-
-        .publish-source-card {
-          width: 100%;
-          padding: 18px 20px;
-          border-radius: 12px;
-          border: 1px solid rgba(170, 192, 238, 0.26);
-          background: rgba(170, 192, 238, 0.06);
-          text-align: left;
-          cursor: pointer;
-          transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
-        }
-
-        .publish-source-card:hover:not(:disabled) {
-          border-color: rgba(22, 119, 255, 0.45);
-          background: rgba(22, 119, 255, 0.06);
-        }
-
-        .publish-source-card.is-active {
-          border-color: rgba(22, 119, 255, 0.7);
-          background: rgba(22, 119, 255, 0.08);
-          box-shadow: 0 0 0 3px rgba(22, 119, 255, 0.08);
-        }
-
-        .publish-source-card:disabled {
-          opacity: 0.72;
-          cursor: not-allowed;
         }
 
         /* 步骤内容卡片 */

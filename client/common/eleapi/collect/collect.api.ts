@@ -41,6 +41,7 @@ export class CollectRecordPreview {
   id = 0;
   appUserId = 0;
   collectBatchId = 0;
+  source = "manual";
   productName = "";
   sourceProductId = "";
   sourceSnapshotUrl = "";
@@ -56,14 +57,33 @@ export class CollectRecordPreview {
 export interface CollectRecordListQuery extends Record<string, string | number | undefined> {
   pageIndex?: number;
   pageSize?: number;
+  source?: "file" | "manual";
   productName?: string;
   status?: string;
 }
 
 export interface CollectRecordUpdatePayload {
+  source?: "file" | "manual";
   productName?: string;
   isFavorite?: boolean;
   status?: string;
+}
+
+export interface ImportCollectBatchResult {
+  importedCount: number;
+  updatedCount: number;
+  skippedCount: number;
+  errors?: string[];
+}
+
+export interface ImportCollectBatchProgress {
+  batchId: number;
+  total: number;
+  processed: number;
+  percent: number;
+  currentFile: string;
+  status: "idle" | "running" | "completed" | "failed";
+  message?: string;
 }
 
 export class PxxCollectStartResult {
@@ -136,5 +156,18 @@ export class CollectApi extends ElectronApi {
   @InvokeType(Protocols.INVOKE)
   async updateCollectRecord(id: number, payload: CollectRecordUpdatePayload): Promise<CollectRecordPreview> {
     return this.invokeApi("updateCollectRecord", id, payload);
+  }
+
+  @InvokeType(Protocols.INVOKE)
+  async importCollectBatchZip(
+    batchId: number,
+    payload: { shopType: "tb" | "pdd"; filePath: string },
+  ): Promise<ImportCollectBatchResult> {
+    return this.invokeApi("importCollectBatchZip", batchId, payload);
+  }
+
+  @InvokeType(Protocols.TRRIGER)
+  async onImportCollectProgress(callback: (progress: ImportCollectBatchProgress) => void): Promise<void> {
+    return this.onMessage("onImportCollectProgress", callback);
   }
 }

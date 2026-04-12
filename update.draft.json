@@ -13,16 +13,16 @@
         "fromAIPublish": false,
         "fromAICategory": false,
         "fromAIImage": false,
-        "traceId": "213e03c917759186716006485e0f8e",
-        "gpfRenderTraceId": "213e03c917759186716006485e0f8e",
-        "trueItemId": 1042797249128,
+        "traceId": "215046a017759192605312961e0d74",
+        "gpfRenderTraceId": "215046a017759192605312961e0d74",
+        "trueItemId": 1041110815006,
         "isEdit": false,
         "pageUniqueId": "pc",
         "newPublish": true
     },
     "auctionType": "b",
     "sevenDayDefaultValue": 1,
-    "id": 1042797249128,
+    "id": 1041110815006,
     "copyItemMode": 0,
     "postCouponPromotionId": null,
     "spuMatch": null,
@@ -81,16 +81,16 @@
             "fromAIPublish": false,
             "fromAICategory": false,
             "fromAIImage": false,
-            "traceId": "213e03c917759186716006485e0f8e",
-            "gpfRenderTraceId": "213e03c917759186716006485e0f8e",
-            "trueItemId": 1042797249128,
+            "traceId": "215046a017759192605312961e0d74",
+            "gpfRenderTraceId": "215046a017759192605312961e0d74",
+            "trueItemId": 1041110815006,
             "isEdit": false,
             "pageUniqueId": "pc",
             "newPublish": true
         },
         "auctionType": "b",
         "sevenDayDefaultValue": 1,
-        "id": 1042797249128,
+        "id": 1041110815006,
         "copyItemMode": 0,
         "postCouponPromotionId": null,
         "spuMatch": null,
@@ -157,8 +157,8 @@
     "title": "【秒杀】麻辣王子地道辣条散装小零食麻辣味网红小吃礼包湖南特产",
     "catProp": {
         "p-6939376": {
-            "value": 92230,
-            "text": "散装"
+            "value": 28407,
+            "text": "包装"
         },
         "p-565597380": {
             "value": 15944657,
@@ -195,11 +195,19 @@
                 "maxUpload": "20MB",
                 "picMaxSize": "20MB"
             },
-            "items": [],
+            "items": [
+                {
+                    "text": "2323324",
+                    "value": -919270455,
+                    "img": "https://img.alicdn.com/imgextra/i1/695637589/O1CN01WDs78e25vosPjQV6G_!!695637589.jpg",
+                    "pix": "800x800"
+                }
+            ],
             "asyncOverlay": {
-                "url": "/sell/v2/asyncOpt.htm?optType=skuQualityRecommendAsyncRender&catId=126492001&itemId=1042797249128",
+                "url": "/sell/v2/asyncOpt.htm?optType=skuQualityRecommendAsyncRender&catId=126492001&itemId=1041110815006",
                 "method": "post"
-            }
+            },
+            "itemMessage": {}
         }
     ],
     "tmDeliveryTime": {
@@ -208,9 +216,68 @@
         "setBySku": false,
         "newVersion": null
     },
-    "sku": [],
+    "sku": [
+        {
+            "skuParam_p-31560": {
+                "value": -1,
+                "text": ""
+            },
+            "cspuId": null,
+            "skuPrice": "4.94",
+            "action": {
+                "selected": true
+            },
+            "skuId": null,
+            "skuStatus": 1,
+            "skuStock": 0,
+            "skuQuality": {
+                "text": "单品",
+                "value": "mainSku"
+            },
+            "skuMaterialParamControl": null,
+            "skuCombineContent": {
+                "products": [
+                    {
+                        "title": "豆有味 巧比杯蘸酱饼干 500g*1包",
+                        "imageUrl": "https://img.alicdn.com/imgextra/i4/695637589/O1CN011uTIVk25vomqYsItl_!!695637589.jpg",
+                        "spuId": 8243324590,
+                        "spuDetailUrl": "https://spu.taobao.com/product/spuDetail.htm?spuId=8243324590&providerId=8&hasWrapper=1&readonly=true",
+                        "id": 1000570517373614,
+                        "barcode": "0000000000000",
+                        "primaryKey": "id:1000570517373614",
+                        "props": [
+                            {
+                                "propKey": "品名",
+                                "propValue": "巧比杯蘸酱饼干"
+                            },
+                            {
+                                "propKey": "净含量",
+                                "propValue": "500.00g"
+                            }
+                        ],
+                        "count": 1
+                    }
+                ]
+            },
+            "disabled": null,
+            "props": [
+                {
+                    "name": "custom_-1",
+                    "text": "2323324",
+                    "value": -919270455,
+                    "img": "https://img.alicdn.com/imgextra/i1/695637589/O1CN01WDs78e25vosPjQV6G_!!695637589.jpg",
+                    "pix": "800x800"
+                }
+            ],
+            "salePropKey": "custom_-1--919270455",
+            "errorInfo": {},
+            "suggestionInfo": {},
+            "readonlyFields": [],
+            "_originalIndex": 0
+        }
+    ],
     "price": "4.94",
-    "quantity": 4000,
+    "quantity": "0",
     "outerId": "865290290317",
     "multiDiscountPromotion": {
         "type": 1,
@@ -268,15 +335,15 @@
             "params": "params",
             "maxHeight": 100000,
             "articleId": 0,
-            "newItem": true,
-            "smart": false,
             "sell": false,
-            "bsellerBack2OldVersion": false,
+            "smart": false,
             "fliggyItem": false,
+            "newItem": true,
+            "bsellerBack2OldVersion": false,
             "changed": true,
             "catId": 126492001,
             "bizSource": "sell",
-            "draftKey": "sell_695637589_12636_223646",
+            "draftKey": "sell_695637589_12636_225346",
             "descDomain": "//g.alicdn.com",
             "descVersion": "1.1.53",
             "bseller": false,
@@ -289,12 +356,12 @@
             "clientType": 1,
             "catId": 126492001,
             "bizSource": "sell",
-            "draftKey": "sell_695637589_12636_223646",
+            "draftKey": "sell_695637589_12636_225346",
             "descDomain": "//g.alicdn.com",
             "descVersion": "1.1.53",
-            "newItem": true,
             "smart": false,
-            "bseller": false
+            "bseller": false,
+            "newItem": true
         },
         "descPageRenderModel": {
             "wholeConfigBO": {
@@ -334,11 +401,11 @@
                     },
                     {
                         "name": "楷体",
-                        "value": "KaiTi,+STKaiti"
+                        "value": "KaiTi, STKaiti"
                     },
                     {
                         "name": "楷体",
-                        "value": "kaiti,+kaiti_gb2312"
+                        "value": "kaiti, kaiti_gb2312"
                     },
                     {
                         "name": "幼圆",
@@ -349,16 +416,16 @@
                         "value": "tahoma"
                     },
                     {
-                        "name": "Times+New+Roman",
-                        "value": "times+new+roman"
+                        "name": "Times New Roman",
+                        "value": "times new roman"
                     },
                     {
                         "name": "Georgia",
                         "value": "georgia"
                     },
                     {
-                        "name": "Courier+New",
-                        "value": "courier+new"
+                        "name": "Courier New",
+                        "value": "courier new"
                     },
                     {
                         "name": "Impact",

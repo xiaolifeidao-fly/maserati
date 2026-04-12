@@ -131,7 +131,13 @@ function parseComponentProp(value: unknown): TbWindowJsonComponentProp {
     label: typeof record.label === 'string' ? record.label : undefined,
     uiType: typeof record.uiType === 'string' ? record.uiType : undefined,
     required: typeof record.required === 'boolean' ? record.required : undefined,
-    multiSelect: typeof record.multiSelect === 'boolean' ? record.multiSelect : undefined,
+    multiSelect:
+      typeof record.multiSelect === 'boolean'
+        ? record.multiSelect
+        : typeof record.multiple === 'boolean'
+          ? record.multiple
+          : undefined,
+    multiple: typeof record.multiple === 'boolean' ? record.multiple : undefined,
     unit: typeof record.unit === 'string' ? record.unit : undefined,
     value: record.value,
     dataSource: record.dataSource,
@@ -262,6 +268,21 @@ function pickMeta(raw: Record<string, unknown>): TbWindowJsonDraftData['meta'] {
   };
 }
 
+function pickSkuCombineContentEnable(raw: Record<string, unknown>): boolean {
+  const components = asRecord(raw.components) ?? {};
+  const ifdWarning = asRecord(components.ifdWarning);
+  const props = asRecord(ifdWarning?.props);
+  const icmp = asRecord(props?.icmp);
+  const global = asRecord(icmp?.global);
+
+  const candidateValues = [
+    global?.isSkuCombineContentEnable,
+    asRecord(global?.value)?.isSkuCombineContentEnable,
+  ];
+
+  return candidateValues.some((value) => value === true || value === 'true');
+}
+
 export function parseTbWindowJsonForDraft(raw: unknown): TbWindowJsonDraftData {
   const root = asRecord(raw) ?? {};
   const models = asRecord(root.models) ?? {};
@@ -328,6 +349,7 @@ export function parseTbWindowJsonForDraft(raw: unknown): TbWindowJsonDraftData {
     logisticsSubItems: tbExtractWaySubItems,
     foodComponents,
     isFoodCategory: Object.keys(foodComponents).length > 0,
+    isSkuCombineContentEnable: pickSkuCombineContentEnable(root),
   };
 }
 

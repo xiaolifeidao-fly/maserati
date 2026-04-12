@@ -206,7 +206,10 @@ export interface PublishBatchSummary {
 
 export interface PublishCenterMessage {
   id: string;
+  /** 单任务消息使用任务 ID；批次消息此字段为 0 */
   taskId: number;
+  /** 批次消息专用：sourceBatchId。设置后此条消息代表整个批次 */
+  batchId?: number;
   level: PublishMessageLevel;
   title: string;
   content?: string;

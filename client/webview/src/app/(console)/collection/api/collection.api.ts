@@ -5,9 +5,11 @@ import {
   type CollectStartResult,
   type CollectBatchListQuery,
   type CollectBatchPayload,
+  type ImportCollectBatchProgress,
   type CollectRecordListQuery,
   type CollectRecordUpdatePayload,
   CollectBatchRecord,
+  type ImportCollectBatchResult,
   CollectRecordPreview,
 } from "@eleapi/collect/collect.api";
 import { normalizeCollectSourceType, type CollectSourceType } from "@eleapi/collect/collect.platform";
@@ -19,7 +21,26 @@ import { getCommerceApi } from "@/utils/commerce";
 
 export { CollectBatchRecord, CollectRecordPreview, CollectionWorkspaceState };
 export { normalizeCollectSourceType };
-export type { CollectBatchListQuery, CollectBatchPayload, CollectRecordListQuery, CollectRecordUpdatePayload, ShopRecord, CollectedProductData, CollectSourceType, CollectStartResult, StandardProductData };
+
+export type CollectRecordSource = "file" | "manual";
+
+export function normalizeCollectRecordSource(value?: string): CollectRecordSource {
+  return String(value || "").trim().toLowerCase() === "file" ? "file" : "manual";
+}
+
+export type {
+  CollectBatchListQuery,
+  CollectBatchPayload,
+  CollectRecordListQuery,
+  CollectRecordUpdatePayload,
+  ShopRecord,
+  CollectedProductData,
+  CollectSourceType,
+  CollectStartResult,
+  ImportCollectBatchResult,
+  ImportCollectBatchProgress,
+  StandardProductData,
+};
 
 export async function fetchCollectBatches(query: CollectBatchListQuery) {
   return getCollectApi().listCollectBatches(query);
@@ -31,6 +52,22 @@ export async function fetchCollectBatch(id: number) {
 
 export async function fetchCollectRecord(id: number) {
   return getCollectApi().getCollectRecord(id);
+}
+
+export async function importCollectBatchZip(
+  batchId: number,
+  payload: {
+    shopType: "tb" | "pdd";
+    filePath: string;
+  },
+): Promise<ImportCollectBatchResult> {
+  return getCollectApi().importCollectBatchZip(batchId, payload);
+}
+
+export async function subscribeImportCollectProgress(
+  callback: (progress: ImportCollectBatchProgress) => void,
+) {
+  return getCollectApi().onImportCollectProgress(callback);
 }
 
 export async function createCollectBatch(payload: CollectBatchPayload) {

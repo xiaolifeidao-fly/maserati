@@ -12,6 +12,7 @@ import type { StandardProductData } from "@product/standard-product";
 import { CollectBatchRecord, CollectRecordPreview } from "@eleapi/collect/collect.api";
 import { type CollectSourceType } from "@eleapi/collect/collect.platform";
 import { getCollectionPlatformDriver } from "./platforms/registry";
+import type { CollectedGoodsSummary } from "./platforms/types";
 import { buildPlaceholderRecord, prependPlaceholder, applyRecordUpdate } from "./collect.notifier";
 import { saveCollectedToServer } from "./collect.saver";
 import { requestBackend } from "@src/impl/shared/backend";
@@ -79,6 +80,27 @@ function saveRawDataToStore(sourceProductId: string, rawData: unknown, sourceTyp
   } catch (error) {
     log.warn("[collection workspace] failed to save rawData to store", { sourceProductId, sourceType, error });
   }
+}
+
+export function importCollectedRecordToStore(
+  summary: CollectedGoodsSummary,
+  rawData: unknown,
+  sourceType: CollectSourceType,
+): void {
+  if (!summary.sourceProductId) {
+    return;
+  }
+  saveCollectedProductToStore(
+    summary.sourceProductId,
+    {
+      sourceProductId: summary.sourceProductId,
+      productName: summary.productName,
+      status: summary.status,
+      capturedAt: new Date().toISOString(),
+    },
+    sourceType,
+  );
+  saveRawDataToStore(summary.sourceProductId, rawData, sourceType);
 }
 
 export function getCollectedProductStoreData(sourceProductId: string, sourceType: CollectSourceType = workspaceState.sourceType || "unknown"): CollectedProductData | null {
@@ -714,6 +736,7 @@ async function collectCurrentGoods(url: string) {
     const notifyCtx = {
       batchId: workspaceState.batch.id,
       appUserId: workspaceState.batch.appUserId,
+      source: "manual" as const,
       sourceUrl: url,
       rawSourceData: getCollectedProductRawData(summary.sourceProductId, workspaceState.sourceType),
     };

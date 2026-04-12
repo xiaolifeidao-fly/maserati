@@ -21,6 +21,16 @@ export function findLowestPositivePrice(values: unknown[]): number | null {
   return Math.min(...prices);
 }
 
+export function findLowestPositivePriceInStock<T extends { price: unknown; stock?: unknown }>(
+  items: T[],
+): number | null {
+  return findLowestPositivePrice(
+    items
+      .filter(item => Number(item.stock ?? 0) > 0)
+      .map(item => item.price),
+  );
+}
+
 export function applyPriceAdjustment(price: number, settings?: PublishPriceSettings): number {
   if (!Number.isFinite(price) || price <= 0) {
     return 0;

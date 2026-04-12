@@ -18,6 +18,7 @@ type CollectRecord struct {
 	db.BaseEntity
 	AppUserID         uint64 `gorm:"column:app_user_id;type:bigint unsigned;index:idx_app_user_id" description:"客户端用户ID"`
 	CollectBatchID    uint64 `gorm:"column:collect_batch_id;type:bigint unsigned;index:idx_collect_batch_id" description:"采集批次ID"`
+	Source            string `gorm:"column:source;type:varchar(32);index:idx_source" description:"来源:file/manual"`
 	ProductName       string `gorm:"column:product_name;type:varchar(255);index:idx_product_name" description:"商品名称"`
 	SourceProductID   string `gorm:"column:source_product_id;type:varchar(128);index:idx_source_product_id" description:"来源商品ID"`
 	SourceSnapshotURL string `gorm:"column:source_snapshot_url;type:varchar(500)" description:"来源快照地址"`

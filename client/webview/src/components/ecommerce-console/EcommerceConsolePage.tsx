@@ -248,9 +248,9 @@ const sectionConfigs: Record<SectionKey, SectionConfig> = {
 };
 
 const toneColorMap: Record<HealthItem["tone"], string> = {
-  hot: "#ff6b3d",
-  steady: "#ffb347",
-  risk: "#c84b31",
+  hot: "#d96b2b",
+  steady: "#d99a1d",
+  risk: "#b94d34",
 };
 
 const statusColorMap: Record<string, string> = {
@@ -512,8 +512,8 @@ export function EcommerceConsolePage({ section }: { section: SectionKey }) {
 
         <div className="manager-commerce-hero-spotlight">
           <div className="manager-commerce-hero-icon">{iconMap[section]}</div>
-          <Text style={{ color: "rgba(110, 58, 23, 0.72)" }}>经营提示</Text>
-          <div style={{ marginTop: 8, fontWeight: 700, color: "#7a3516", lineHeight: 1.6 }}>
+          <Text style={{ color: "rgba(122, 74, 39, 0.72)" }}>经营提示</Text>
+          <div style={{ marginTop: 8, fontWeight: 700, color: "#7a3d1a", lineHeight: 1.6 }}>
             {config.spotlight}
           </div>
           <Button type="primary" size="large" className="manager-commerce-primary-button">
@@ -585,7 +585,7 @@ export function EcommerceConsolePage({ section }: { section: SectionKey }) {
                   {config.actionTitle}
                 </Title>
               </div>
-              <ThunderboltOutlined style={{ color: "#ff8a3d", fontSize: 18 }} />
+              <ThunderboltOutlined style={{ color: "#d96b2b", fontSize: 18 }} />
             </div>
 
             <div className="manager-commerce-action-list">
@@ -637,10 +637,10 @@ export function EcommerceConsolePage({ section }: { section: SectionKey }) {
 
         <div className="manager-data-card manager-commerce-highlight-card">
           <div className="manager-section-label">桌面经营节奏</div>
-          <Title level={3} style={{ marginTop: 10, marginBottom: 12, color: "#7a3516" }}>
+          <Title level={3} style={{ marginTop: 10, marginBottom: 12, color: "#7a3d1a" }}>
             电商桌面端需要的是高频、清晰、可立即行动的后台界面
           </Title>
-          <Paragraph style={{ color: "rgba(110, 58, 23, 0.82)", lineHeight: 1.8 }}>
+          <Paragraph style={{ color: "rgba(122, 74, 39, 0.82)", lineHeight: 1.8 }}>
             所以这里把界面重心放在经营数字、待办动作、门店状态、商品节奏和采集结果上，而不是只保留通用后台模板。
           </Paragraph>
 

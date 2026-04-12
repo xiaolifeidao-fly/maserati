@@ -93,7 +93,7 @@ export function LoginFormCard() {
           borderRadius: 30,
           padding: 32,
           background:
-            "linear-gradient(180deg, rgba(255,255,255,0.98) 0%, rgba(244,248,253,0.98) 100%)",
+            "linear-gradient(180deg, rgba(255,252,248,0.98) 0%, rgba(255,245,234,0.98) 100%)",
         }}
       >
         <div style={{ marginBottom: 28 }}>
@@ -199,7 +199,7 @@ export function LoginFormCard() {
             style={{
               height: 54,
               color: "#ffffff",
-              background: "linear-gradient(135deg, #2f6fec 0%, #5e98f1 100%)",
+              background: "linear-gradient(135deg, #d96b2b 0%, #f0ae4d 100%)",
               border: "none",
               fontWeight: 800,
             }}

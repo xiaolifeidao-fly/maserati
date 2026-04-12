@@ -5,7 +5,21 @@ import (
 	"fmt"
 	collectDTO "service/collect/dto"
 	"strings"
+
+	"gorm.io/gorm"
 )
+
+func applyCollectRecordSourceFilter(dbQuery *gorm.DB, source string) *gorm.DB {
+	value := strings.ToLower(strings.TrimSpace(source))
+	switch value {
+	case "file":
+		return dbQuery.Where("source = ?", "file")
+	case "manual":
+		return dbQuery.Where("(source = ? OR source = '' OR source IS NULL)", "manual")
+	default:
+		return dbQuery
+	}
+}
 
 type CollectBatchRepository struct{ db.Repository[*CollectBatch] }
 
@@ -84,6 +98,7 @@ func (r *CollectRecordRepository) CountByQuery(query collectDTO.CollectRecordQue
 	if query.CollectBatchID > 0 {
 		dbQuery = dbQuery.Where("collect_batch_id = ?", query.CollectBatchID)
 	}
+	dbQuery = applyCollectRecordSourceFilter(dbQuery, query.Source)
 	if value := strings.TrimSpace(query.ProductName); value != "" {
 		dbQuery = dbQuery.Where("product_name LIKE ?", "%"+value+"%")
 	}
@@ -108,6 +123,7 @@ func (r *CollectRecordRepository) ListByQuery(query collectDTO.CollectRecordQuer
 	if query.CollectBatchID > 0 {
 		dbQuery = dbQuery.Where("collect_batch_id = ?", query.CollectBatchID)
 	}
+	dbQuery = applyCollectRecordSourceFilter(dbQuery, query.Source)
 	if value := strings.TrimSpace(query.ProductName); value != "" {
 		dbQuery = dbQuery.Where("product_name LIKE ?", "%"+value+"%")
 	}

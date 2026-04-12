@@ -6,6 +6,7 @@ import { requestBackend } from "@src/impl/shared/backend";
 export interface CollectSaveContext {
   batchId: number;
   appUserId: number;
+  source: "file" | "manual";
   sourceUrl: string;
   rawSourceData?: unknown;
   /** 当前 workspaceState.batch，用于计算 collectedCount */
@@ -32,7 +33,7 @@ export async function saveCollectedToServer(
   summary: CollectedGoodsSummary,
   ctx: CollectSaveContext,
 ): Promise<CollectSaveResult> {
-  const { batchId, appUserId, sourceUrl, currentBatch, currentRecordsCount } = ctx;
+  const { batchId, appUserId, source, sourceUrl, currentBatch, currentRecordsCount } = ctx;
 
   log.info("[collect.saver] saveCollectedToServer start", {
     batchId,
@@ -49,7 +50,7 @@ export async function saveCollectedToServer(
   const existingPage = await requestBackend<{ total: number; data: CollectRecordPreview[] }>(
     "GET",
     `/collect-batches/${batchId}/records`,
-    { params: { pageIndex: 1, pageSize: 500 } },
+    { params: { pageIndex: 1, pageSize: 500, source } },
   );
 
   log.info("[collect.saver] existing records fetched", {
@@ -76,6 +77,7 @@ export async function saveCollectedToServer(
       `/collect-records/${matched.id}`,
       {
         data: {
+          source,
           productName: summary.productName,
           sourceProductId: summary.sourceProductId,
           sourceSnapshotUrl: sourceUrl,
@@ -94,6 +96,7 @@ export async function saveCollectedToServer(
       data: {
         appUserId,
         collectBatchId: batchId,
+        source,
         productName: summary.productName,
         sourceProductId: summary.sourceProductId,
         sourceSnapshotUrl: sourceUrl,

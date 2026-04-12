@@ -94,7 +94,7 @@ class PublishCenterStore {
         });
       }
       this.messages = (raw?.messages ?? [])
-        .filter((message) => message?.id && message?.taskId)
+        .filter((message) => message?.id && (message?.taskId || message?.batchId))
         .slice(0, MAX_MESSAGE_COUNT);
       this.batchSummaries = Array.isArray(raw?.batchSummaries) ? raw.batchSummaries : [];
     } catch {
@@ -121,6 +121,8 @@ class PublishCenterStore {
     ));
   }
 
+  // ─── 单任务消息 ─────────────────────────────────────────────────────────────
+
   private pushMessage(task: PublishRuntimeTaskSnapshot, title: string, content?: string): void {
     const normalizedContent = String(content ?? '').trim();
     const previous = this.messages[0];
@@ -140,6 +142,61 @@ class PublishCenterStore {
         level: buildMessageLevel(task),
         title,
         content: normalizedContent || undefined,
+        createdAt: new Date().toISOString(),
+      },
+      ...this.messages,
+    ].slice(0, MAX_MESSAGE_COUNT);
+  }
+
+  // ─── 批次消息（一个批次只有一条，upsert） ────────────────────────────────────
+
+  private pushBatchMessage(sourceBatchId: number, batchName?: string): void {
+    const summary = this.batchSummaries.find((s) => s.batchId === sourceBatchId);
+    if (!summary) return;
+
+    const { runningCount, pendingCount, successCount, failedCount, totalCount } = summary;
+    const doneCount = successCount + failedCount;
+    const isFinished = runningCount === 0 && pendingCount === 0;
+
+    let level: PublishCenterMessage['level'];
+    let content: string;
+
+    if (!isFinished) {
+      level = 'info';
+      content = `进行中 ${doneCount} / ${totalCount}`;
+    } else if (failedCount === 0) {
+      level = 'success';
+      content = `已完成 ${successCount} / ${totalCount}`;
+    } else if (successCount === 0) {
+      level = 'error';
+      content = `全部失败，共 ${failedCount} 条`;
+    } else {
+      level = 'warning';
+      content = `已完成 ${successCount} / ${totalCount}，失败 ${failedCount} 条`;
+    }
+
+    const title = batchName ? `批量发布：${batchName}` : `批量发布 #${sourceBatchId}`;
+    const messageId = `batch-${sourceBatchId}`;
+
+    const existingIdx = this.messages.findIndex((m) => m.batchId === sourceBatchId);
+
+    // 内容未变则跳过，避免无意义更新
+    if (existingIdx >= 0) {
+      const existing = this.messages[existingIdx];
+      if (existing.level === level && existing.content === content) return;
+      this.messages[existingIdx] = { ...existing, level, content };
+      return;
+    }
+
+    // 新批次消息，插入到最前面
+    this.messages = [
+      {
+        id: messageId,
+        taskId: 0,
+        batchId: sourceBatchId,
+        level,
+        title,
+        content,
         createdAt: new Date().toISOString(),
       },
       ...this.messages,
@@ -245,11 +302,18 @@ class PublishCenterStore {
       : '';
 
     if (signature !== previousSignature) {
-      this.pushMessage(
-        next,
-        next.title || `发布任务 #${next.taskId}`,
-        next.errorMessage || next.statusText || next.currentStepCode || next.status,
-      );
+      if (next.sourceBatchId) {
+        // 批次任务：先刷新聚合摘要，再 upsert 批次消息（一批次一条）
+        this.batchSummaries = this.buildBatchSummaries(this.getSortedTasks());
+        this.pushBatchMessage(next.sourceBatchId, next.sourceBatchName);
+      } else {
+        // 单任务：保持原有行为，每个任务独立一条消息
+        this.pushMessage(
+          next,
+          next.title || `发布任务 #${next.taskId}`,
+          next.errorMessage || next.statusText || next.currentStepCode || next.status,
+        );
+      }
     }
 
     this.persist();
@@ -292,11 +356,18 @@ class PublishCenterStore {
     const signature = `${previous?.currentStepCode ?? ''}|${previous?.stepStatus ?? ''}|${previous?.statusText ?? ''}`;
     const nextSignature = `${next.currentStepCode ?? ''}|${next.stepStatus ?? ''}|${next.statusText ?? ''}`;
     if (signature !== nextSignature) {
-      this.pushMessage(
-        next,
-        next.title || `发布任务 #${taskId}`,
-        next.statusText || next.currentStepCode || next.status,
-      );
+      if (next.sourceBatchId) {
+        // 批次任务：先刷新聚合摘要，再 upsert 批次消息（一批次一条）
+        this.batchSummaries = this.buildBatchSummaries(this.getSortedTasks());
+        this.pushBatchMessage(next.sourceBatchId, next.sourceBatchName);
+      } else {
+        // 单任务：保持原有行为
+        this.pushMessage(
+          next,
+          next.title || `发布任务 #${taskId}`,
+          next.statusText || next.currentStepCode || next.status,
+        );
+      }
     }
 
     this.persist();

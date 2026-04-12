@@ -373,11 +373,16 @@ export function ManagerShell({ children }: ManagerShellProps) {
                   </div>
 
                   <Paragraph className="manager-commerce-description">
-                    聚合工作台、店铺管理、商品管理与采集管理，帮助桌面端商家快速完成日常经营动作。
+                    面向商家经营、商品节奏、店铺运维与采集分析的桌面运营中台，让高频动作更聚焦，界面也更贴近电商体系。
                   </Paragraph>
                 </div>
 
                 <div className="manager-commerce-actions">
+                  <Space size={10} wrap>
+                    <div className="manager-commerce-chip">今日经营节奏</div>
+                    <div className="manager-commerce-chip">活动与履约联动</div>
+                    <div className="manager-commerce-chip">桌面高频效率</div>
+                  </Space>
                   <Space size={12} wrap>
                     <Popover
                       trigger="click"
@@ -394,7 +399,7 @@ export function ManagerShell({ children }: ManagerShellProps) {
                         style={{
                           width: 42,
                           height: 42,
-                          background: "linear-gradient(135deg, #2f6fec, #5e98f1)",
+                          background: "linear-gradient(135deg, #d96b2b, #f0ae4d)",
                           color: "#fdfefe",
                           fontWeight: 700,
                         }}

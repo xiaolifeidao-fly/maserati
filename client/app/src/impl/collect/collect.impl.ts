@@ -1,11 +1,15 @@
 import type { CookiesSetDetails } from "electron";
+import AdmZip from "adm-zip";
+import log from "electron-log";
 import {
   type CollectionWorkspaceNavigationAction,
   CollectStartResult,
   CollectApi,
   type CollectBatchListQuery,
   type CollectBatchPayload,
-  type CollectBatchRecord,
+  CollectBatchRecord,
+  type ImportCollectBatchProgress,
+  type ImportCollectBatchResult,
   type CollectRecordPreview,
   type CollectRecordListQuery,
   type CollectRecordUpdatePayload,
@@ -16,7 +20,9 @@ import type { ShopRecord } from "@eleapi/commerce/commerce.api";
 import { PxxEngine } from "@src/browser/pxx.engine";
 import { TbEngine } from "@src/browser/tb.engine";
 import { getCollectionPlatformDriver } from "@src/collect/platforms/registry";
-import { navigateCollectionWorkspace, openCollectionWorkspace } from "@src/collect/workspace.manager";
+import type { CollectedGoodsSummary } from "@src/collect/platforms/types";
+import { importCollectedRecordToStore, navigateCollectionWorkspace, openCollectionWorkspace } from "@src/collect/workspace.manager";
+import { saveCollectedToServer } from "@src/collect/collect.saver";
 import { requestBackend } from "../shared/backend";
 
 function mapCookieSameSite(value?: "Strict" | "Lax" | "None") {
@@ -68,6 +74,42 @@ function toElectronCookies(
 }
 
 export class CollectImpl extends CollectApi {
+  private pushImportProgress(progress: ImportCollectBatchProgress): void {
+    try {
+      this.send("onImportCollectProgress", progress);
+    } catch (error) {
+      log.warn("[collect.import] failed to push progress", { progress, error });
+    }
+  }
+
+  private resolveImportSummary(
+    rawData: unknown,
+    sourceProductId: string,
+    driver: ReturnType<typeof getCollectionPlatformDriver>,
+  ): CollectedGoodsSummary {
+    const parsed = driver.parseGoodsSummary(rawData);
+    if (parsed?.sourceProductId && parsed.productName) {
+      return {
+        productName: parsed.productName,
+        sourceProductId: parsed.sourceProductId,
+        status: parsed.status || "COLLECTED",
+      };
+    }
+
+    const payload = rawData && typeof rawData === "object" ? (rawData as Record<string, unknown>) : {};
+    const candidates = ["title", "itemTitle", "auctionTitle", "goods_name", "goodsName", "name"];
+    const productName =
+      candidates
+        .map((key) => String(payload[key] || "").trim())
+        .find(Boolean) || `导入商品 ${sourceProductId}`;
+
+    return {
+      productName,
+      sourceProductId,
+      status: "COLLECTED",
+    };
+  }
+
   async getCollectBatch(id: number): Promise<CollectBatchRecord> {
     return requestBackend("GET", `/collect-batches/${id}`);
   }
@@ -101,6 +143,7 @@ export class CollectImpl extends CollectApi {
       params: {
         pageIndex: 1,
         pageSize: 100,
+        source: "manual",
       },
     });
     const normalizedRecords = Array.isArray(records.data) ? records.data : [];
@@ -206,5 +249,165 @@ export class CollectImpl extends CollectApi {
 
   async updateCollectRecord(id: number, payload: CollectRecordUpdatePayload): Promise<CollectRecordPreview> {
     return requestBackend("PUT", `/collect-records/${id}`, { data: payload });
+  }
+
+  async importCollectBatchZip(
+    batchId: number,
+    payload: { shopType: "tb" | "pdd"; filePath: string },
+  ): Promise<ImportCollectBatchResult> {
+    try {
+      if (!Number.isFinite(batchId) || batchId <= 0) {
+        throw new Error("collect batch id is invalid");
+      }
+      const filePath = String(payload.filePath || "").trim();
+      if (!filePath) {
+        throw new Error("zip file path is required");
+      }
+
+      const batch = await requestBackend<CollectBatchRecord>("GET", `/collect-batches/${batchId}`);
+      const driver = getCollectionPlatformDriver(payload.shopType === "tb" ? "tb" : "pxx");
+      const existingPage = await requestBackend<PageResult<CollectRecordPreview>>("GET", `/collect-batches/${batchId}/records`, {
+        params: {
+          pageIndex: 1,
+          pageSize: 1000,
+          source: "file",
+        },
+      });
+      const existingSourceProductIds = new Set(
+        (Array.isArray(existingPage.data) ? existingPage.data : []).map((item) => String(item.sourceProductId || "").trim()),
+      );
+      const zip = new AdmZip(filePath);
+      const entries = zip.getEntries();
+      const jsonEntries = entries.filter((entry) => !entry.isDirectory && entry.entryName.toLowerCase().endsWith(".json"));
+      const total = jsonEntries.length;
+
+      let importedCount = 0;
+      let updatedCount = 0;
+      let skippedCount = 0;
+      const errors: string[] = [];
+      let currentBatch = Object.assign(new CollectBatchRecord(), batch);
+      let currentRecordsCount = Number(batch.collectedCount || 0);
+
+      this.pushImportProgress({
+        batchId,
+        total,
+        processed: 0,
+        percent: total > 0 ? 0 : 100,
+        currentFile: "",
+        status: "running",
+        message: total > 0 ? "开始解析 zip 文件" : "zip 中没有可导入的 json 文件",
+      });
+
+      for (const [index, entry] of jsonEntries.entries()) {
+        const processedBefore = index;
+
+        const sourceProductId = String(entry.name || "").replace(/\.json$/i, "").trim();
+        if (!sourceProductId) {
+          skippedCount += 1;
+          errors.push(`文件 ${entry.entryName} 缺少商品ID`);
+          this.pushImportProgress({
+            batchId,
+            total,
+            processed: processedBefore + 1,
+            percent: total > 0 ? Math.round(((processedBefore + 1) / total) * 100) : 100,
+            currentFile: entry.entryName,
+            status: "running",
+            message: "文件名缺少商品ID，已跳过",
+          });
+          continue;
+        }
+
+        try {
+          this.pushImportProgress({
+            batchId,
+            total,
+            processed: processedBefore,
+            percent: total > 0 ? Math.round((processedBefore / total) * 100) : 100,
+            currentFile: entry.entryName,
+            status: "running",
+            message: `正在导入 ${entry.entryName}`,
+          });
+          const rawText = zip.readAsText(entry, "utf8");
+          const rawData = JSON.parse(rawText);
+          const summary = this.resolveImportSummary(rawData, sourceProductId, driver);
+          importCollectedRecordToStore(summary, rawData, driver.sourceType);
+          const existedBeforeImport = existingSourceProductIds.has(String(summary.sourceProductId || "").trim());
+
+          const result = await saveCollectedToServer(summary, {
+            batchId,
+            appUserId: Number(batch.appUserId || 0),
+            source: "file",
+            sourceUrl: "",
+            rawSourceData: rawData,
+            currentBatch,
+            currentRecordsCount,
+          });
+
+          if (result.updatedBatch) {
+            currentBatch = result.updatedBatch;
+          }
+          if (!existedBeforeImport) {
+            existingSourceProductIds.add(String(summary.sourceProductId || "").trim());
+            importedCount += 1;
+            const existingCount = Number(currentBatch.collectedCount || currentRecordsCount);
+            currentRecordsCount = Math.max(existingCount, currentRecordsCount + 1);
+          } else {
+            updatedCount += 1;
+          }
+          this.pushImportProgress({
+            batchId,
+            total,
+            processed: processedBefore + 1,
+            percent: total > 0 ? Math.round(((processedBefore + 1) / total) * 100) : 100,
+            currentFile: entry.entryName,
+            status: "running",
+            message: existedBeforeImport ? "已更新商品数据" : "已新增商品数据",
+          });
+        } catch (error) {
+          skippedCount += 1;
+          const message = error instanceof Error ? error.message : String(error || "unknown error");
+          errors.push(`文件 ${entry.entryName} 导入失败: ${message}`);
+          log.warn("[collect.import] failed to import zip entry", { batchId, entryName: entry.entryName, error });
+          this.pushImportProgress({
+            batchId,
+            total,
+            processed: processedBefore + 1,
+            percent: total > 0 ? Math.round(((processedBefore + 1) / total) * 100) : 100,
+            currentFile: entry.entryName,
+            status: "running",
+            message: `导入失败: ${message}`,
+          });
+        }
+      }
+
+      this.pushImportProgress({
+        batchId,
+        total,
+        processed: total,
+        percent: 100,
+        currentFile: "",
+        status: "completed",
+        message: `导入完成，新增 ${importedCount} 条，更新 ${updatedCount} 条`,
+      });
+
+      return {
+        importedCount,
+        updatedCount,
+        skippedCount,
+        errors,
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error || "unknown error");
+      this.pushImportProgress({
+        batchId,
+        total: 0,
+        processed: 0,
+        percent: 0,
+        currentFile: "",
+        status: "failed",
+        message,
+      });
+      throw error;
+    }
   }
 }

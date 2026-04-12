@@ -78,6 +78,17 @@ func normalizeCollectRecordStatus(value string) string {
 	}
 }
 
+func normalizeCollectRecordSource(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "file":
+		return "file"
+	case "manual":
+		return "manual"
+	default:
+		return "manual"
+	}
+}
+
 func buildCollectRawDataURL(batchID uint64, sourceProductID string) string {
 	sourceID := strings.TrimSpace(sourceProductID)
 	if sourceID == "" {
@@ -341,6 +352,7 @@ func (s *CollectService) CreateCollectRecord(req *collectDTO.CreateCollectRecord
 	entity, err := s.collectRecordRepository.Create(&collectRepository.CollectRecord{
 		AppUserID:         req.AppUserID,
 		CollectBatchID:    req.CollectBatchID,
+		Source:            normalizeCollectRecordSource(req.Source),
 		ProductName:       strings.TrimSpace(req.ProductName),
 		SourceProductID:   strings.TrimSpace(req.SourceProductID),
 		SourceSnapshotURL: strings.TrimSpace(req.SourceSnapshotURL),
@@ -387,6 +399,9 @@ func (s *CollectService) UpdateCollectRecord(id uint, req *collectDTO.UpdateColl
 	}
 	if req.ProductName != nil {
 		entity.ProductName = strings.TrimSpace(*req.ProductName)
+	}
+	if req.Source != nil {
+		entity.Source = normalizeCollectRecordSource(*req.Source)
 	}
 	if req.SourceProductID != nil {
 		entity.SourceProductID = strings.TrimSpace(*req.SourceProductID)

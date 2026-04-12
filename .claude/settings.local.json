@@ -18,7 +18,9 @@
       "Bash(/Users/fly/.nvm/versions/node/v22.6.0/bin/node node_modules/.bin/tsc --noEmit)",
       "Bash(xargs cat:*)",
       "Bash(find /Users/fly/Documents/develop/project/private/taobao/maserati -type f -name \"*.ts\" -exec grep -l \"class DoorSkuDTO\\\\|interface DoorSkuDTO\" {} \\\\;)",
-      "Bash(find /Users/fly/Documents/develop/project/private/taobao/maserati -type f -name \"*.ts\" -exec grep -l \"class SkuFileDetail\\\\|interface SkuFileDetail\" {} \\\\;)"
+      "Bash(find /Users/fly/Documents/develop/project/private/taobao/maserati -type f -name \"*.ts\" -exec grep -l \"class SkuFileDetail\\\\|interface SkuFileDetail\" {} \\\\;)",
+      "Bash(ls -1 /Users/fly/Documents/develop/project/private/taobao/maserati/client/app/src/publish/fillers/*.ts)",
+      "Read(//tmp/**)"
     ]
   }
 }

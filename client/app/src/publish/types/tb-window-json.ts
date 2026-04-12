@@ -58,6 +58,7 @@ export interface TbWindowJsonComponentProp {
   uiType?: string;
   required?: boolean;
   multiSelect?: boolean;
+  multiple?: boolean;
   unit?: string;
   value?: unknown;
   dataSource?: unknown;
@@ -126,4 +127,5 @@ export interface TbWindowJsonDraftData {
   logisticsSubItems: TbWindowJsonLogisticsSubItem[];
   foodComponents: Partial<Record<TbFoodComponentKey, TbWindowJsonFoodComponent>>;
   isFoodCategory: boolean;
+  isSkuCombineContentEnable: boolean;
 }

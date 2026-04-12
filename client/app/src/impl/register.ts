@@ -5,6 +5,7 @@ import { CollectImpl } from "@src/impl/collect/collect.impl";
 import { CommerceImpl } from "@src/impl/commerce/commerce.impl";
 import { PublishImpl } from "@src/impl/publish/publish.impl";
 import { PublishWindowImpl } from "@src/impl/publish/publish-window.impl";
+import { PublishBatchJobImpl } from "@src/impl/publish/publish-batch-job.impl";
 
 const register : { new(...args: any[]): ElectronApi }[] = [
     AuthImpl,
@@ -13,6 +14,7 @@ const register : { new(...args: any[]): ElectronApi }[] = [
     CommerceImpl,
     PublishImpl,
     PublishWindowImpl,
+    PublishBatchJobImpl,
 ]
 
 export function registerApiImpl() {

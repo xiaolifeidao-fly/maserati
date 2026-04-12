@@ -1,8 +1,8 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { DeleteOutlined, EditOutlined, PlayCircleOutlined, ReloadOutlined, SearchOutlined } from "@ant-design/icons";
-import { Button, Form, Input, Modal, Popconfirm, Select, Space, Table, Tag, message } from "antd";
+import { CopyOutlined, DeleteOutlined, EditOutlined, EyeOutlined, PlayCircleOutlined, ReloadOutlined, SearchOutlined } from "@ant-design/icons";
+import { Form, Input, Modal, Popconfirm, Select, Space, Table, Tag, Typography, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { type ProductPayload, type ProductRecord } from "../api/product.api";
 import { useProductManagement } from "../hooks/useProductManagement";
@@ -11,11 +11,10 @@ import {
   fetchCollectRecord,
   getCollectedProductRawData,
   normalizeCollectSourceType,
-  saveStandardProductData,
-  type CollectSourceType,
 } from "@/app/(console)/collection/api/collection.api";
 import { ProductDetailEditor } from "@/app/(console)/collection/components/ProductDetailEditor";
 import { convertRawDataToStandard, type StandardProductData } from "@/app/(console)/collection/components/standard-product.types";
+import { IconOnlyButton } from "@/components/manager-shell/IconOnlyButton";
 import { formatDateTime } from "@/utils/format";
 import { getPublishWindowApi } from "@/utils/publish-window";
 
@@ -44,8 +43,6 @@ export function ProductManagementSimplePanel() {
   const [previewingRecordId, setPreviewingRecordId] = useState(0);
   const [detailModalOpen, setDetailModalOpen] = useState(false);
   const [detailTitle, setDetailTitle] = useState("");
-  const [detailSourceProductId, setDetailSourceProductId] = useState("");
-  const [detailSourceType, setDetailSourceType] = useState<CollectSourceType>("unknown");
   const [detailData, setDetailData] = useState<StandardProductData | null>(null);
   const [editingRecord, setEditingRecord] = useState<ProductRecord | null>(null);
 
@@ -98,8 +95,6 @@ export function ProductManagementSimplePanel() {
       }
 
       setDetailTitle(record.title || collectRecord.productName || `商品 #${record.id}`);
-      setDetailSourceProductId(collectRecord.sourceProductId);
-      setDetailSourceType(sourceType);
       setDetailData(
         convertRawDataToStandard(sourceType, rawData as Record<string, unknown>, {
           productName: collectRecord.productName || record.title,
@@ -113,6 +108,43 @@ export function ProductManagementSimplePanel() {
     } finally {
       setPreviewLoading(false);
       setPreviewingRecordId(0);
+    }
+  };
+
+  const handleCopySourceUrl = async (record: ProductRecord) => {
+    if (!record.collectRecordId) {
+      message.warning("该商品没有关联采集记录，无法复制原采集链接");
+      return;
+    }
+
+    try {
+      const collectRecord = await fetchCollectRecord(record.collectRecordId);
+      const sourceUrl = String(collectRecord.sourceSnapshotUrl || "").trim();
+
+      if (!sourceUrl) {
+        message.warning("该商品暂未记录原采集链接");
+        return;
+      }
+
+      await navigator.clipboard.writeText(sourceUrl);
+      message.success("原采集链接已复制");
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "复制原采集链接失败");
+    }
+  };
+
+  const handleCopyProductUrl = async (outerProductId?: string) => {
+    const productId = String(outerProductId || "").trim();
+    if (!productId) {
+      message.warning("该商品缺少商品ID，无法复制链接");
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(`https://item.taobao.com/item.htm?id=${productId}`);
+      message.success("商品链接已复制");
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "复制商品链接失败");
     }
   };
 
@@ -142,7 +174,13 @@ export function ProductManagementSimplePanel() {
       render: (_, record) => (
         <div>
           <div style={{ color: "var(--manager-text)", fontWeight: 700 }}>{record.title || "-"}</div>
-          <div style={{ color: "var(--manager-text-faint)", marginTop: 4 }}>{record.outerProductId || "-"}</div>
+          <div style={{ marginTop: 4 }}>
+            {record.outerProductId ? (
+              <Typography.Link onClick={() => void handleCopyProductUrl(record.outerProductId)}>{record.outerProductId}</Typography.Link>
+            ) : (
+              <span style={{ color: "var(--manager-text-faint)" }}>-</span>
+            )}
+          </div>
         </div>
       ),
     },
@@ -182,10 +220,20 @@ export function ProductManagementSimplePanel() {
       width: 200,
       render: (_, record) => (
         <Space size={2}>
-          <Button type="text" loading={previewLoading && previewingRecordId === record.id} onClick={() => void openPreviewModal(record)}>
-            预览
-          </Button>
-          <Button type="text" icon={<EditOutlined />} onClick={() => openEditModal(record)} />
+          <IconOnlyButton
+            type="text"
+            icon={<CopyOutlined />}
+            tooltip="复制原采集链接"
+            onClick={() => void handleCopySourceUrl(record)}
+          />
+          <IconOnlyButton
+            type="text"
+            icon={<EyeOutlined />}
+            tooltip="预览商品详情"
+            loading={previewLoading && previewingRecordId === record.id}
+            onClick={() => void openPreviewModal(record)}
+          />
+          <IconOnlyButton type="text" icon={<EditOutlined />} tooltip="编辑商品" onClick={() => openEditModal(record)} />
           <Popconfirm
             title="确认删除这条商品数据吗？"
             okText="删除"
@@ -199,7 +247,7 @@ export function ProductManagementSimplePanel() {
               }
             }}
           >
-            <Button danger type="text" icon={<DeleteOutlined />} />
+            <IconOnlyButton danger type="text" icon={<DeleteOutlined />} tooltip="删除商品" />
           </Popconfirm>
         </Space>
       ),
@@ -239,9 +287,10 @@ export function ProductManagementSimplePanel() {
               ]}
               style={{ width: 160 }}
             />
-            <Button
+            <IconOnlyButton
               type="primary"
               icon={<SearchOutlined />}
+              tooltip="查询商品"
               onClick={() =>
                 void refresh({
                   pageIndex: 1,
@@ -250,18 +299,13 @@ export function ProductManagementSimplePanel() {
                   status: filters.status,
                 })
               }
-            >
-              查询
-            </Button>
-            <Button icon={<ReloadOutlined />} onClick={() => void refresh()}>
-              刷新
-            </Button>
-            <Button
+            />
+            <IconOnlyButton icon={<ReloadOutlined />} tooltip="刷新商品列表" onClick={() => void refresh()} />
+            <IconOnlyButton
               icon={<PlayCircleOutlined />}
+              tooltip="打开发布界面"
               onClick={() => void getPublishWindowApi().openPublishWindow({ entryScene: "product" })}
-            >
-              发布
-            </Button>
+            />
           </Space>
 
           <Tag style={{ color: "var(--manager-text-soft)", background: "rgba(170,192,238,0.16)", border: "none" }}>
@@ -293,8 +337,6 @@ export function ProductManagementSimplePanel() {
         onCancel={() => {
           setDetailModalOpen(false);
           setDetailTitle("");
-          setDetailSourceProductId("");
-          setDetailSourceType("unknown");
           setDetailData(null);
         }}
         footer={null}

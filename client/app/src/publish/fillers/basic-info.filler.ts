@@ -1,5 +1,5 @@
 import type { IFiller, FillerContext } from './filler.interface';
-import { findLowestPositivePrice, formatPrice } from './price.utils';
+import { findLowestPositivePriceInStock, formatPrice } from './price.utils';
 
 /**
  * BasicInfoFiller — 基本信息填充器
@@ -46,9 +46,9 @@ export class BasicInfoFiller implements IFiller {
       draftPayload['outerId'] = product.sourceId;
     }
 
-    // 一口价取 SKU 最低价，SKU 模式下平台会再结合 sku 明细计算价格区间
+    // 一口价优先取有库存 SKU 的最低价，避免缺货 SKU 把价格压低。
     if (product.skuList.length > 0) {
-      const lowestSkuPrice = findLowestPositivePrice(product.skuList.map(s => s.price));
+      const lowestSkuPrice = findLowestPositivePriceInStock(product.skuList);
       if (lowestSkuPrice !== null) {
         draftPayload['price'] = formatPrice(lowestSkuPrice, ctx.publishConfig?.priceSettings);
       }
