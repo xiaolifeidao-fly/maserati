@@ -48,6 +48,7 @@ interface PublishRuntimeTaskSnapshot {
 interface PublishCenterMessage {
   id: string;
   taskId: number;
+  batchId?: number;
   createdAt: string;
 }
 
@@ -172,7 +173,7 @@ export function ManagerShell({ children }: ManagerShellProps) {
 
     const unreadMap = new Map<number, number>();
     for (const message of publishCenterState.messages) {
-      const batchId = taskBatchMap.get(message.taskId);
+      const batchId = Number(message.batchId || taskBatchMap.get(message.taskId) || 0);
       if (!batchId) {
         continue;
       }

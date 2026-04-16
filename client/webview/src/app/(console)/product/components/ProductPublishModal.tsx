@@ -964,32 +964,48 @@ export function ProductPublishModal({
             break;
           }
 
-          setPublishQueue((cur) =>
-            cur.map((q) =>
-              q.key === item.key
-                ? {
-                    ...q,
-                    status: finalTask.status === PublishTaskStatus.SUCCESS ? "SUCCESS" : "FAILED",
-                    publishedItemId: finalTask.outerItemId || undefined,
-                    publishedTime: finalTask.updatedTime || finalTask.createdTime || q.publishedTime,
-                    currentStepCode: finalTask.currentStepCode,
-                    statusText: finalTask.status === PublishTaskStatus.CANCELLED
-                      ? "任务已取消"
-                      : finalTask.outerItemId
-                        ? `淘宝商品 #${finalTask.outerItemId}`
-                        : q.statusText,
-                    waitingForCaptcha: false,
-                    error: finalTask.status === PublishTaskStatus.SUCCESS
-                      ? undefined
-                      : finalTask.status === PublishTaskStatus.CANCELLED
+          if (finalTask.status === PublishTaskStatus.PENDING) {
+            // 验证码等待：保留 waitingForCaptcha 状态，继续处理下一个商品
+            setPublishQueue((cur) =>
+              cur.map((q) =>
+                q.key === item.key
+                  ? {
+                      ...q,
+                      status: "PUBLISHING",
+                      waitingForCaptcha: true,
+                      statusText: "等待验证码，完成右侧校验后点击继续发布",
+                    }
+                  : q,
+              ),
+            );
+          } else {
+            setPublishQueue((cur) =>
+              cur.map((q) =>
+                q.key === item.key
+                  ? {
+                      ...q,
+                      status: finalTask.status === PublishTaskStatus.SUCCESS ? "SUCCESS" : "FAILED",
+                      publishedItemId: finalTask.outerItemId || undefined,
+                      publishedTime: finalTask.updatedTime || finalTask.createdTime || q.publishedTime,
+                      currentStepCode: finalTask.currentStepCode,
+                      statusText: finalTask.status === PublishTaskStatus.CANCELLED
                         ? "任务已取消"
-                        : finalTask.errorMessage || q.error || "发布失败",
-                  }
-                : q,
-            ),
-          );
-          if (finalTask.status !== PublishTaskStatus.SUCCESS && isUnauthenticatedPublishMessage(finalTask.errorMessage)) {
-            markSelectedShopLoggedOut(item.shopId);
+                        : finalTask.outerItemId
+                          ? `淘宝商品 #${finalTask.outerItemId}`
+                          : q.statusText,
+                      waitingForCaptcha: false,
+                      error: finalTask.status === PublishTaskStatus.SUCCESS
+                        ? undefined
+                        : finalTask.status === PublishTaskStatus.CANCELLED
+                          ? "任务已取消"
+                          : finalTask.errorMessage || q.error || "发布失败",
+                    }
+                  : q,
+              ),
+            );
+            if (finalTask.status !== PublishTaskStatus.SUCCESS && isUnauthenticatedPublishMessage(finalTask.errorMessage)) {
+              markSelectedShopLoggedOut(item.shopId);
+            }
           }
         } catch (error) {
           if (isUnauthenticatedPublishMessage(error instanceof Error ? error.message : error)) {
@@ -2036,6 +2052,8 @@ async function waitForPublishTaskFinish(
   onProgress?: (event: PublishProgressEvent) => void,
 ) {
   const startedAt = Date.now();
+  // 用于区分"任务刚创建的 PENDING"和"运行中遇到验证码的 PENDING"
+  let seenRunning = false;
 
   while (Date.now() - startedAt < 10 * 60 * 1000) {
     const task = await publishApi.getPublishTask(taskId);
@@ -2047,10 +2065,16 @@ async function waitForPublishTaskFinish(
     };
     onProgress?.(event);
 
+    if (task.status === PublishTaskStatus.RUNNING) {
+      seenRunning = true;
+    }
+
     if (
       task.status === PublishTaskStatus.SUCCESS ||
       task.status === PublishTaskStatus.FAILED ||
-      task.status === PublishTaskStatus.CANCELLED
+      task.status === PublishTaskStatus.CANCELLED ||
+      // 只有曾经进入 RUNNING 之后再变为 PENDING，才是验证码等待，此时应退出轮询
+      (task.status === PublishTaskStatus.PENDING && seenRunning)
     ) {
       return task;
     }

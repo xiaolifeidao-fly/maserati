@@ -26,6 +26,7 @@ import {
   unregisterPublishTaskLogFile,
 } from '@src/publish/utils/publish-logger';
 import {
+  announcePublishBatchFromTask,
   getPublishCenterState as getRuntimePublishCenterState,
   syncPublishProgressEvent,
   syncPublishTaskRecord,
@@ -68,6 +69,11 @@ export class PublishImpl extends PublishApi {
     PublishImpl.broadcastPublishCenterState();
   }
 
+  private static announceBatch(task: PublishTaskRecord): void {
+    announcePublishBatchFromTask(task);
+    PublishImpl.broadcastPublishCenterState();
+  }
+
   private static syncProgress(taskId: number, event: PublishProgressEvent): void {
     syncPublishProgressEvent(taskId, event);
     PublishImpl.broadcastPublishProgress(event);
@@ -97,6 +103,7 @@ export class PublishImpl extends PublishApi {
         ? (task.outerItemId ? `商品已发布，商品 #${task.outerItemId}` : '商品已发布，无需重复发布')
         : '任务已创建，等待开始发布',
     });
+    PublishImpl.announceBatch(task);
     return task;
   }
 

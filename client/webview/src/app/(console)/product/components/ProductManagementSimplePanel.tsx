@@ -1,10 +1,10 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { CopyOutlined, DeleteOutlined, EditOutlined, EyeOutlined, PlayCircleOutlined, ReloadOutlined, SearchOutlined } from "@ant-design/icons";
-import { Form, Input, Modal, Popconfirm, Select, Space, Table, Tag, Typography, message } from "antd";
+import { CopyOutlined, DeleteOutlined, EyeOutlined, PlayCircleOutlined, ReloadOutlined, SearchOutlined } from "@ant-design/icons";
+import { Input, Modal, Popconfirm, Select, Space, Table, Tag, Typography, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import { type ProductPayload, type ProductRecord } from "../api/product.api";
+import { type ProductRecord } from "../api/product.api";
 import { useProductManagement } from "../hooks/useProductManagement";
 import {
   fetchCollectBatch,
@@ -18,8 +18,6 @@ import { IconOnlyButton } from "@/components/manager-shell/IconOnlyButton";
 import { formatDateTime } from "@/utils/format";
 import { getPublishWindowApi } from "@/utils/publish-window";
 
-interface ProductFormValues extends ProductPayload {}
-
 const PRODUCT_STATUS_LABELS: Record<string, { label: string; color: string }> = {
   DRAFT: { label: "草稿", color: "gold" },
   PUBLISHED: { label: "已发布", color: "green" },
@@ -28,9 +26,7 @@ const PRODUCT_STATUS_LABELS: Record<string, { label: string; color: string }> = 
 };
 
 export function ProductManagementSimplePanel() {
-  const [form] = Form.useForm<ProductFormValues>();
-  const { products, shops, categories, total, query, loading, submitting, refresh, saveProduct, removeProduct } =
-    useProductManagement();
+  const { products, shops, categories, total, query, loading, submitting, refresh, removeProduct } = useProductManagement();
   const safeShops = Array.isArray(shops) ? shops : [];
   const safeCategories = Array.isArray(categories) ? categories : [];
   const [filters, setFilters] = useState({
@@ -38,13 +34,11 @@ export function ProductManagementSimplePanel() {
     shopId: 0,
     status: "",
   });
-  const [modalOpen, setModalOpen] = useState(false);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewingRecordId, setPreviewingRecordId] = useState(0);
   const [detailModalOpen, setDetailModalOpen] = useState(false);
   const [detailTitle, setDetailTitle] = useState("");
   const [detailData, setDetailData] = useState<StandardProductData | null>(null);
-  const [editingRecord, setEditingRecord] = useState<ProductRecord | null>(null);
 
   const shopNameMap = useMemo(
     () => new Map(safeShops.map((item) => [item.id, item.remark || item.nickname || item.name || item.code || item.platform])),
@@ -54,18 +48,6 @@ export function ProductManagementSimplePanel() {
     () => new Map(safeCategories.map((item) => [item.id, item.name || item.code])),
     [safeCategories],
   );
-
-  const openEditModal = (record: ProductRecord) => {
-    setEditingRecord(record);
-    form.setFieldsValue({
-      shopId: record.shopId,
-      categoryId: record.categoryId,
-      title: record.title,
-      outerProductId: record.outerProductId,
-      status: record.status || "DRAFT",
-    });
-    setModalOpen(true);
-  };
 
   const openPreviewModal = async (record: ProductRecord) => {
     if (!record.collectRecordId) {
@@ -148,24 +130,6 @@ export function ProductManagementSimplePanel() {
     }
   };
 
-  const handleSubmit = async () => {
-    const values = await form.validateFields();
-    try {
-      await saveProduct(editingRecord?.id ?? null, {
-        shopId: Number(values.shopId),
-        categoryId: Number(values.categoryId),
-        title: values.title.trim(),
-        outerProductId: values.outerProductId.trim(),
-        status: values.status,
-      });
-      message.success(editingRecord ? "商品已更新" : "商品已创建");
-      setModalOpen(false);
-      setEditingRecord(null);
-    } catch (error) {
-      message.error(error instanceof Error ? error.message : "保存商品失败");
-    }
-  };
-
   const productColumns: ColumnsType<ProductRecord> = [
     {
       title: "商品",
@@ -233,7 +197,6 @@ export function ProductManagementSimplePanel() {
             loading={previewLoading && previewingRecordId === record.id}
             onClick={() => void openPreviewModal(record)}
           />
-          <IconOnlyButton type="text" icon={<EditOutlined />} tooltip="编辑商品" onClick={() => openEditModal(record)} />
           <Popconfirm
             title="确认删除这条商品数据吗？"
             okText="删除"
@@ -346,43 +309,6 @@ export function ProductManagementSimplePanel() {
         destroyOnClose
       >
         <ProductDetailEditor data={detailData} loading={previewLoading} readonly />
-      </Modal>
-
-      <Modal
-        title="编辑商品"
-        open={modalOpen}
-        onCancel={() => {
-          setModalOpen(false);
-          setEditingRecord(null);
-        }}
-        onOk={() => void handleSubmit()}
-        confirmLoading={submitting}
-        destroyOnClose
-      >
-        <Form<ProductFormValues> form={form} layout="vertical" preserve={false}>
-          <Form.Item name="title" label="商品标题" rules={[{ required: true, message: "请输入商品标题" }]}>
-            <Input placeholder="例如：春季轻羽防晒衣" />
-          </Form.Item>
-          <Form.Item name="outerProductId" label="外部商品ID">
-            <Input placeholder="例如：SPF-2026-001" />
-          </Form.Item>
-          <Form.Item name="shopId" label="所属店铺" rules={[{ required: true, message: "请选择所属店铺" }]}>
-            <Select options={safeShops.map((item) => ({ label: item.remark || item.nickname || item.name || item.code || item.platform, value: item.id }))} />
-          </Form.Item>
-          <Form.Item name="categoryId" label="所属分类" rules={[{ required: true, message: "请选择所属分类" }]}>
-            <Select options={safeCategories.map((item) => ({ label: item.name || item.code, value: item.id }))} />
-          </Form.Item>
-          <Form.Item name="status" label="商品状态" rules={[{ required: true, message: "请选择商品状态" }]}>
-            <Select
-              options={[
-                { label: "草稿", value: "DRAFT" },
-                { label: "已发布", value: "PUBLISHED" },
-                { label: "已下线", value: "OFFLINE" },
-                { label: "已归档", value: "ARCHIVED" },
-              ]}
-            />
-          </Form.Item>
-        </Form>
       </Modal>
 
     </div>

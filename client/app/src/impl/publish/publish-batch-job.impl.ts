@@ -11,6 +11,7 @@ import { HttpPublishPersister } from '@src/publish/core/http-publish-persister';
 import { PublishRunner } from '@src/publish/core/publish-runner';
 import { showCaptchaPanel } from '@src/publish/publish-window';
 import {
+  getPublishCenterState,
   syncPublishProgressEvent,
   syncPublishTaskRecord,
 } from '@src/publish/runtime/publish-center';
@@ -101,6 +102,7 @@ export class PublishBatchJobImpl extends PublishBatchJobApi {
     publishBatchJobCenter.onTaskProgress((taskId, event) => {
       syncPublishProgressEvent(taskId, event);
       this.broadcastPublishProgress(event);
+      this.broadcastPublishCenterState();
     });
 
     // 订阅批次状态变更，广播 BatchJobState 到渲染进程
@@ -122,6 +124,12 @@ export class PublishBatchJobImpl extends PublishBatchJobApi {
   private broadcastBatchJobState(state: PublishBatchJobState): void {
     for (const wc of getPublishRelatedWebContents()) {
       wc.send('publishBatchJob.onBatchJobStateChanged', state);
+    }
+  }
+
+  private broadcastPublishCenterState(): void {
+    for (const wc of getPublishRelatedWebContents()) {
+      wc.send('publish.onPublishCenterStateChanged', getPublishCenterState());
     }
   }
 

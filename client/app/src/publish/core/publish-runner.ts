@@ -162,20 +162,22 @@ export class PublishRunner {
 
     // 恢复上下文（将已完成步骤的 outputData 反序列化注入 ctx）
     await this.restoreContext(ctx, task);
-    await this.ensureRawSourceLoaded(ctx, task);
-    await this.ensureProductIdLoaded(ctx, task);
-
-    // 标记任务为运行中
-    await this.persister.updateTask(taskId, {
-      status: TaskStatus.RUNNING,
-      errorMessage: '',
-    });
 
     // 确定断点续跑位置
     const fromStep = task.currentStepCode ?? undefined;
 
     const chain = this.buildChain();
     try {
+      // 预检：加载原始数据和商品 ID（放在 try 内，确保失败时 catch 能将 DB 状态设为 FAILED）
+      await this.ensureRawSourceLoaded(ctx, task);
+      await this.ensureProductIdLoaded(ctx, task);
+
+      // 标记任务为运行中（预检通过后再标记，失败时由 catch 设为 FAILED）
+      await this.persister.updateTask(taskId, {
+        status: TaskStatus.RUNNING,
+        errorMessage: '',
+      });
+
       await chain.run(ctx, fromStep as StepCode | undefined);
       await this.savePxxMapperAfterPublish(task, ctx);
 

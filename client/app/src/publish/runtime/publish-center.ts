@@ -150,29 +150,40 @@ class PublishCenterStore {
 
   // ─── 批次消息（一个批次只有一条，upsert） ────────────────────────────────────
 
-  private pushBatchMessage(sourceBatchId: number, batchName?: string): void {
+  private pushBatchMessage(
+    sourceBatchId: number,
+    batchName?: string,
+    options?: {
+      touch?: boolean;
+      fallbackContent?: string;
+    },
+  ): void {
     const summary = this.batchSummaries.find((s) => s.batchId === sourceBatchId);
-    if (!summary) return;
+    const now = new Date().toISOString();
 
-    const { runningCount, pendingCount, successCount, failedCount, totalCount } = summary;
-    const doneCount = successCount + failedCount;
-    const isFinished = runningCount === 0 && pendingCount === 0;
+    let level: PublishCenterMessage['level'] = 'info';
+    let content = String(options?.fallbackContent ?? '').trim();
 
-    let level: PublishCenterMessage['level'];
-    let content: string;
+    if (summary) {
+      const { runningCount, pendingCount, successCount, failedCount, totalCount } = summary;
+      const doneCount = successCount + failedCount;
+      const isFinished = runningCount === 0 && pendingCount === 0;
 
-    if (!isFinished) {
-      level = 'info';
-      content = `进行中 ${doneCount} / ${totalCount}`;
-    } else if (failedCount === 0) {
-      level = 'success';
-      content = `已完成 ${successCount} / ${totalCount}`;
-    } else if (successCount === 0) {
-      level = 'error';
-      content = `全部失败，共 ${failedCount} 条`;
+      if (!isFinished) {
+        level = 'info';
+        content = `进行中 ${doneCount} / ${totalCount}`;
+      } else if (failedCount === 0) {
+        level = 'success';
+        content = `已完成 ${successCount} / ${totalCount}`;
+      } else if (successCount === 0) {
+        level = 'error';
+        content = `全部失败，共 ${failedCount} 条`;
+      } else {
+        level = 'warning';
+        content = `已完成 ${successCount} / ${totalCount}，失败 ${failedCount} 条`;
+      }
     } else {
-      level = 'warning';
-      content = `已完成 ${successCount} / ${totalCount}，失败 ${failedCount} 条`;
+      content = content || '任务已创建，等待开始发布';
     }
 
     const title = batchName ? `批量发布：${batchName}` : `批量发布 #${sourceBatchId}`;
@@ -180,15 +191,33 @@ class PublishCenterStore {
 
     const existingIdx = this.messages.findIndex((m) => m.batchId === sourceBatchId);
 
-    // 内容未变则跳过，避免无意义更新
     if (existingIdx >= 0) {
       const existing = this.messages[existingIdx];
-      if (existing.level === level && existing.content === content) return;
-      this.messages[existingIdx] = { ...existing, level, content };
+      const nextMessage: PublishCenterMessage = {
+        ...existing,
+        id: messageId,
+        taskId: 0,
+        batchId: sourceBatchId,
+        level,
+        title,
+        content,
+        createdAt: options?.touch ? now : existing.createdAt,
+      };
+      if (
+        !options?.touch &&
+        existing.level === nextMessage.level &&
+        existing.title === nextMessage.title &&
+        existing.content === nextMessage.content
+      ) {
+        return;
+      }
+      this.messages = [
+        nextMessage,
+        ...this.messages.filter((_, idx) => idx !== existingIdx),
+      ].slice(0, MAX_MESSAGE_COUNT);
       return;
     }
 
-    // 新批次消息，插入到最前面
     this.messages = [
       {
         id: messageId,
@@ -197,10 +226,26 @@ class PublishCenterStore {
         level,
         title,
         content,
-        createdAt: new Date().toISOString(),
+        createdAt: now,
       },
       ...this.messages,
     ].slice(0, MAX_MESSAGE_COUNT);
+  }
+
+  announceBatchByTask(task: PublishTaskRecord): void {
+    this.ensureHydrated();
+    const remarkMeta = parseRemarkMeta(task.remark);
+    const batchId = Number(remarkMeta.sourceBatchId || task.collectBatchId || 0);
+    if (batchId <= 0) {
+      return;
+    }
+
+    this.batchSummaries = this.buildBatchSummaries(this.getSortedTasks());
+    this.pushBatchMessage(batchId, remarkMeta.sourceBatchName, {
+      touch: true,
+      fallbackContent: '任务已创建，等待开始发布',
+    });
+    this.persist();
   }
 
   private buildBatchSummaries(tasks: PublishRuntimeTaskSnapshot[]): PublishBatchSummary[] {
@@ -415,6 +460,10 @@ export function syncPublishTaskRecord(
 
 export function syncPublishProgressEvent(taskId: number, event: PublishProgressEvent): void {
   publishCenterStore.applyProgressEvent(taskId, event);
+}
+
+export function announcePublishBatchFromTask(task: PublishTaskRecord): void {
+  publishCenterStore.announceBatchByTask(task);
 }
 
 export function getLatestCaptchaTask() {
