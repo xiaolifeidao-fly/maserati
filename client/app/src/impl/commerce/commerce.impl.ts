@@ -20,6 +20,8 @@ import {
 import { normalizeCollectSourceType } from "@eleapi/collect/collect.platform";
 import { getShopLoginPlatformDriver } from "@src/commerce-login/platforms/registry";
 import { requestBackend } from "../shared/backend";
+import { generateShopSignature, saveShopSignature } from "../shared/shop-signature";
+import { readAuthSession } from "../shared/auth-session";
 
 export class CommerceImpl extends CommerceApi {
   async listPlatforms(query: PlatformListQuery): Promise<PageResult<PlatformRecord>> {
@@ -71,7 +73,13 @@ export class CommerceImpl extends CommerceApi {
   }
 
   async authorizeShop(id: number, payload: ShopAuthorizePayload): Promise<ShopRecord> {
-    return requestBackend("POST", `/shops/${id}/authorize`, { data: payload });
+    const result = await requestBackend<ShopRecord>("POST", `/shops/${id}/authorize`, { data: payload });
+    // 激活成功后，结合激活码 + 登录账号 username + 内部固定 key 生成签名秘钥并持久化
+    const session = readAuthSession();
+    const username = session.username ?? "";
+    const signature = generateShopSignature(payload.activationCode, username);
+    saveShopSignature(signature);
+    return result;
   }
 
   async loginShop(payload: ShopLoginPayload): Promise<ShopRecord> {

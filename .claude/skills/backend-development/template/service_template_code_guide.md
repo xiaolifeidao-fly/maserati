@@ -8,7 +8,7 @@
 
 - 新增一个标准表驱动业务域
 - 需要提供列表、详情、创建、更新、删除接口
-- 需要在 `web-api/pkg` 暴露 HTTP API
+- 需要在 `manager-api/pkg` 暴露 HTTP API
 
 如果你的需求更接近 `chatroom` 这种聚合查询域，可以只复用 DTO 和 Service 的写法，不必强行创建完整 CRUD 模板。
 
@@ -27,7 +27,7 @@ server/service/foo/
 对应的 API Handler 放在：
 
 ```text
-server/web-api/pkg/foo/foo.go
+server/manager-api/pkg/foo/foo.go
 ```
 
 ## 3. DTO 模板
@@ -320,7 +320,7 @@ func (s *FooService) Delete(id uint) error {
 
 ## 7. 对应 Handler 模板
 
-文件：`server/web-api/pkg/foo/foo.go`
+文件：`server/manager-api/pkg/foo/foo.go`
 
 ```go
 package foo
@@ -444,7 +444,7 @@ func parseID(context *gin.Context) (uint, bool) {
 }
 ```
 
-别忘了在 `server/web-api/routers/register.go` 注册：
+别忘了在 `server/manager-api/routers/register.go` 注册：
 
 ```go
 func registerHandler() []routers.Handler {
@@ -468,8 +468,8 @@ func registerHandler() []routers.Handler {
 ## 9. 开发完成后的自检清单
 
 - 是否已创建 `dto.go`、`model.go`、`repository.go`、`foo_service.go`
-- 是否已创建 `web-api/pkg/foo/foo.go`
-- 是否已在 `web-api/routers/register.go` 注册
+- 是否已创建 `manager-api/pkg/foo/foo.go`
+- 是否已在 `manager-api/routers/register.go` 注册
 - 是否默认过滤了 `active = 1`
 - 是否对 `Db == nil` 做了防御
 - 是否给分页补了默认值和上限

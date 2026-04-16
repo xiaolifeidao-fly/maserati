@@ -1,12 +1,12 @@
 # Backend API Design
 
-基于当前仓库 `server/web-api + server/service + server/common` 的真实实现，总结后端 API 设计约定。目标不是输出通用 REST 教条，而是帮助开发者快速写出和本项目一致的 Handler、DTO、Service 调用链。
+基于当前仓库 `server/manager-api + server/service + server/common` 的真实实现，总结后端 API 设计约定。目标不是输出通用 REST 教条，而是帮助开发者快速写出和本项目一致的 Handler、DTO、Service 调用链。
 
 ## 1. 当前 API 调用链
 
 ```text
 HTTP Request
-  -> web-api/pkg/{domain} Handler
+  -> manager-api/pkg/{domain} Handler
   -> service/{domain} Service
   -> service/{domain}/repository Repository
   -> common/middleware/db 中的 GORM 基础设施
@@ -19,7 +19,7 @@ HTTP Request
 
 ## 2. Handler 层设计
 
-Handler 位于 `server/web-api/pkg/{domain}`，每个域一个文件，通常具备以下结构：
+Handler 位于 `server/manager-api/pkg/{domain}`，每个域一个文件，通常具备以下结构：
 
 ```go
 type CaseHandler struct {
@@ -275,9 +275,9 @@ if pageSize > 200 {
 
 ## 10. 新增 API 时的最小检查清单
 
-- 是否已在 `web-api/pkg/{domain}` 创建 Handler
+- 是否已在 `manager-api/pkg/{domain}` 创建 Handler
 - 是否实现了 `RegisterHandler`
-- 是否已在 `web-api/routers/register.go` 注册
+- 是否已在 `manager-api/routers/register.go` 注册
 - 是否统一使用 `ToJson` / `ToError`
 - 查询 DTO 是否补了 `form` 标签
 - 创建 / 更新 DTO 是否补了 `json` 标签

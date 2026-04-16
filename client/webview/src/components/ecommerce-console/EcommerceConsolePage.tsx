@@ -389,7 +389,7 @@ export function EcommerceConsolePage({ section }: { section: SectionKey }) {
 
     return {
       ...sectionConfigs.workspace,
-      spotlight: `当前已接入 ${workspaceOverview.shopTotal} 家店铺、沉淀 ${workspaceOverview.productTotal} 个商品、运行 ${workspaceOverview.collectTotal} 个采集任务，工作台数据已通过 Electron 实时联通服务端。`,
+      spotlight: `当前已接入 ${workspaceOverview.shopTotal} 家店铺、沉淀 ${workspaceOverview.productTotal} 个商品、运行 ${workspaceOverview.collectTotal} 个采集任务。`,
       metrics: [
         {
           label: "已接入店铺",

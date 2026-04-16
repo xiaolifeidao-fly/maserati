@@ -182,13 +182,7 @@ export function LoginFormCard() {
                 placeholder="请再次输入密码"
               />
             </Form.Item>
-          ) : (
-            <div style={{ marginBottom: 24 }}>
-              <Text style={{ color: "var(--manager-text-soft)" }}>
-                登录状态会保存在 Electron store 中，客户端重启后会自动恢复登录态。
-              </Text>
-            </div>
-          )}
+          ) : null}
 
           <Button
             type="primary"

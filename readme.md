@@ -10,7 +10,7 @@
 ## server （新的服务端）
 ```
 1.app-api 主要是为桌面端提供的api
-2.web-api 主要是为管理端的web页面的api
+2.manager-api 主要是为管理端的web页面的api
 3.service 所有的service实现都放在这个里面
 ```
 

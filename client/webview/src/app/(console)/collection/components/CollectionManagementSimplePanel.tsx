@@ -279,18 +279,28 @@ export function CollectionManagementSimplePanel() {
       key: "actions",
       fixed: "right",
       width: 300,
-      render: (_, record) => (
+      render: (_, record) => {
+        const batchShop = shopMap.get(record.shopId);
+        const batchShopAuthorized = batchShop?.authorizationStatus === "AUTHORIZED";
+        return (
         <Space size={4} wrap>
           <IconOnlyButton
             type="text"
             icon={<PlayCircleOutlined />}
-            tooltip="开始采集"
+            tooltip={batchShopAuthorized ? "开始采集" : "店铺未授权，无法采集"}
             loading={startingBatchId === record.id}
+            disabled={!batchShopAuthorized}
             onClick={() => void startCollection(record)}
           />
           <IconOnlyButton type="text" icon={<EyeOutlined />} tooltip="查看详情" onClick={() => openDetailModal(record)} />
           <IconOnlyButton type="text" icon={<ImportOutlined />} tooltip="导入 zip" onClick={() => openImportModal(record)} />
-          <IconOnlyButton type="text" icon={<ArrowRightOutlined />} tooltip="去发布" onClick={() => openPublishModal(record)} />
+          <IconOnlyButton
+            type="text"
+            icon={<ArrowRightOutlined />}
+            tooltip={batchShopAuthorized ? "去发布" : "店铺未授权，无法发布"}
+            disabled={!batchShopAuthorized}
+            onClick={() => openPublishModal(record)}
+          />
           <IconOnlyButton type="text" icon={<EditOutlined />} tooltip="编辑采集批次" onClick={() => openEditModal(record)} />
           <Popconfirm
             title="确认删除这条采集批次吗？"
@@ -308,7 +318,8 @@ export function CollectionManagementSimplePanel() {
             <IconOnlyButton danger type="text" icon={<DeleteOutlined />} tooltip="删除采集批次" />
           </Popconfirm>
         </Space>
-      ),
+      );
+      },
     },
   ];
 
@@ -394,7 +405,16 @@ export function CollectionManagementSimplePanel() {
             <Input placeholder="例如：春季竞品采集批次" />
           </Form.Item>
           <Form.Item name="shopId" label="所属店铺" rules={[{ required: true, message: "请选择所属店铺" }]}>
-            <Select options={shops.map((item) => ({ label: formatShopLabel(item), value: item.id }))} />
+            <Select
+              options={shops.map((item) => {
+                const authorized = item.authorizationStatus === "AUTHORIZED";
+                return {
+                  label: authorized ? formatShopLabel(item) : `${formatShopLabel(item)}（未授权）`,
+                  value: item.id,
+                  disabled: !authorized,
+                };
+              })}
+            />
           </Form.Item>
           {!editingRecord ? (
             <div className="manager-muted" style={{ marginTop: 4 }}>

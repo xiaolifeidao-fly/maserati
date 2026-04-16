@@ -32,6 +32,7 @@ import {
   type CollectRecordPreview,
   type ShopRecord,
 } from "../api/product.api";
+import { fetchShop, startShopLogin } from "@/app/(console)/shop/api/shop.api";
 import { normalizeCollectSourceType } from "@/app/(console)/collection/api/collection.api";
 import { IconOnlyButton } from "@/components/manager-shell/IconOnlyButton";
 import { getPublishApi } from "@/utils/publish";
@@ -496,6 +497,10 @@ export function ProductPublishModal({
     selectedTargetShop && selectedTargetShop.loginStatus !== "LOGGED_IN",
   );
 
+  const selectedTargetShopNotAuthorized = Boolean(
+    selectedTargetShop && selectedTargetShop.authorizationStatus !== "AUTHORIZED",
+  );
+
   const showBatchHistory = isCollectionBatchEntry;
   const selectedBatchRepublishStats = selectedBatchId > 0 && showBatchHistory
     ? republishStatsByBatchId[selectedBatchId]
@@ -598,6 +603,34 @@ export function ProductPublishModal({
     );
   };
 
+  const handleShopLoginFromPublish = async (shopId: number) => {
+    const shop = shops.find((s) => s.id === shopId);
+    try {
+      await startShopLogin(shopId);
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "打开登录窗口失败");
+      return;
+    }
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < 180000) {
+      await new Promise((resolve) => { window.setTimeout(resolve, 3000); });
+      try {
+        const latestShop = await fetchShop(shopId);
+        if (latestShop.loginStatus === "LOGGED_IN") {
+          setShops((current) =>
+            current.map((s) => s.id === shopId ? { ...s, loginStatus: "LOGGED_IN" } : s),
+          );
+          const shopType = shop?.platform ?? "店铺";
+          const accountName = latestShop.nickname || latestShop.name || latestShop.code || `#${shopId}`;
+          void message.success(`${shopType}-${accountName}-登录成功，可重新尝试`, 6);
+          return;
+        }
+      } catch {
+        break;
+      }
+    }
+  };
+
   const handlePriceRatioChange = (value: string) => {
     if (!/^\d*(\.\d{0,2})?$/.test(value)) {
       return;
@@ -664,6 +697,10 @@ export function ProductPublishModal({
       message.warning("请先选择淘宝店铺");
       return;
     }
+    if (selectedTargetShopNotAuthorized) {
+      message.error("当前选中的店铺尚未授权，请先完成激活码绑定");
+      return;
+    }
     if (selectedTargetShopNeedsLogin) {
       message.warning(SHOP_LOGIN_REQUIRED_MESSAGE);
       return;
@@ -698,6 +735,10 @@ export function ProductPublishModal({
 
   const handleContinueLastPublish = async () => {
     if (recoverableTasks.length === 0) {
+      return;
+    }
+    if (selectedTargetShopNotAuthorized) {
+      message.error("当前选中的店铺尚未授权，请先完成激活码绑定");
       return;
     }
 
@@ -830,6 +871,10 @@ export function ProductPublishModal({
       message.warning("暂无可重新发布的任务");
       return;
     }
+    if (selectedTargetShopNotAuthorized) {
+      message.error("当前选中的店铺尚未授权，请先完成激活码绑定");
+      return;
+    }
 
     Modal.confirm({
       title: "重新发布当前批次？",
@@ -874,6 +919,10 @@ export function ProductPublishModal({
   // 执行发布任务
   const handleStartPublish = async () => {
     if (publishQueue.length === 0 || !selectedBatch) return;
+    if (selectedTargetShopNotAuthorized) {
+      message.error("当前选中的店铺尚未授权，请先完成激活码绑定");
+      return;
+    }
     if (selectedTargetShopNeedsLogin) {
       message.warning(SHOP_LOGIN_REQUIRED_MESSAGE);
       return;
@@ -1035,6 +1084,10 @@ export function ProductPublishModal({
   };
 
   const handleResumeTask = async (taskId: number) => {
+    if (selectedTargetShopNotAuthorized) {
+      message.error("当前选中的店铺尚未授权，请先完成激活码绑定");
+      return;
+    }
     const publishApi = getPublishApi();
     setResumingTaskIds((current) => current.includes(taskId) ? current : [...current, taskId]);
     setRecoveryMode("continue");
@@ -1167,6 +1220,17 @@ export function ProductPublishModal({
               <div className="manager-muted" style={{ fontSize: 12, marginBottom: 4 }}>具体原因</div>
               <div style={{ fontSize: 12, color: "var(--manager-text)", lineHeight: 1.7, whiteSpace: "pre-wrap" }}>
                 {stepError || fallbackError}
+                {isUnauthenticatedPublishMessage(stepError || fallbackError) ? (
+                  <span>
+                    {" — "}
+                    <a
+                      onClick={(e) => { e.preventDefault(); void handleShopLoginFromPublish(record.shopId); }}
+                      style={{ cursor: "pointer", textDecoration: "underline" }}
+                    >
+                      点击登录
+                    </a>
+                  </span>
+                ) : null}
               </div>
             </div>
             {failedSteps.length > 1 ? (
@@ -1262,7 +1326,8 @@ export function ProductPublishModal({
                 type="primary"
                 shape="default"
                 icon={<PlayCircleOutlined />}
-                tooltip="继续发布"
+                tooltip={selectedTargetShopNotAuthorized ? "店铺未授权，无法继续发布" : "继续发布"}
+                disabled={selectedTargetShopNotAuthorized}
                 loading={resumingTaskIds.includes(resumeTaskId)}
                 onClick={() => void handleResumeTask(resumeTaskId)}
               />
@@ -1395,10 +1460,16 @@ export function ProductPublishModal({
                 value={selectedTargetShopId || undefined}
                 placeholder="请选择要发布到的淘宝店铺"
                 onChange={(value) => setSelectedTargetShopId(Number(value ?? 0))}
-                options={tbShops.map((shop) => ({
-                  label: `${formatShopLabel(shop)} · ID ${shop.id}${shop.loginStatus === "LOGGED_IN" ? "" : " · 未登录"}`,
-                  value: shop.id,
-                }))}
+                options={tbShops.map((shop) => {
+                  const authorized = shop.authorizationStatus === "AUTHORIZED";
+                  const loggedIn = shop.loginStatus === "LOGGED_IN";
+                  const suffix = !authorized ? " · 未授权" : !loggedIn ? " · 未登录" : "";
+                  return {
+                    label: `${formatShopLabel(shop)} · ID ${shop.id}${suffix}`,
+                    value: shop.id,
+                    disabled: !authorized,
+                  };
+                })}
                 style={{ width: "100%" }}
                 loading={optionsLoading}
                 disabled={optionsLoading}
@@ -1411,13 +1482,21 @@ export function ProductPublishModal({
 
               {selectedTargetShopId > 0 && (
                 <div className="publish-info-card" style={{ marginTop: 20 }}>
-                  {selectedTargetShopNeedsLogin ? (
+                  {selectedTargetShopNotAuthorized ? (
+                    <Alert
+                      type="error"
+                      showIcon
+                      style={{ marginBottom: 16 }}
+                      message="店铺未授权"
+                      description="当前选中的店铺尚未激活授权，请先前往店铺管理中完成激活码绑定后再发布。"
+                    />
+                  ) : selectedTargetShopNeedsLogin ? (
                     <Alert
                       type="warning"
                       showIcon
                       style={{ marginBottom: 16 }}
                       message="店铺未登录"
-                      description={SHOP_LOGIN_REQUIRED_MESSAGE}
+                      description={<span>当前选中的店铺未登录，需要去店铺管理中重新<a onClick={() => { void handleShopLoginFromPublish(selectedTargetShopId); }} style={{ cursor: "pointer", textDecoration: "underline" }}>授权登录</a></span>}
                     />
                   ) : null}
                   <Descriptions size="small" column={2} colon>
@@ -1425,6 +1504,9 @@ export function ProductPublishModal({
                       {shopNameMap.get(selectedTargetShopId) ?? `#${selectedTargetShopId}`}
                     </Descriptions.Item>
                     <Descriptions.Item label="店铺 ID">{selectedTargetShopId}</Descriptions.Item>
+                    <Descriptions.Item label="授权状态">
+                      {selectedTargetShopNotAuthorized ? "未授权" : "已授权"}
+                    </Descriptions.Item>
                     <Descriptions.Item label="登录状态">
                       {selectedTargetShopNeedsLogin ? "未登录" : "已登录"}
                     </Descriptions.Item>
@@ -1450,7 +1532,7 @@ export function ProductPublishModal({
                   icon={<ArrowRightOutlined />}
                   shape="default"
                   tooltip="下一步"
-                  disabled={!selectedTargetShopId || optionsLoading || selectedTargetShopNeedsLogin}
+                  disabled={!selectedTargetShopId || optionsLoading || selectedTargetShopNotAuthorized || selectedTargetShopNeedsLogin}
                   onClick={() => setCurrentStep(3)}
                 />
               </div>
@@ -1550,7 +1632,7 @@ export function ProductPublishModal({
                   showIcon
                   style={{ marginBottom: 16 }}
                   message="店铺未登录"
-                  description={SHOP_LOGIN_REQUIRED_MESSAGE}
+                  description={<span>当前选中的店铺未登录，需要去店铺管理中重新<a onClick={() => { void handleShopLoginFromPublish(selectedTargetShopId); }} style={{ cursor: "pointer", textDecoration: "underline" }}>授权登录</a></span>}
                 />
               ) : null}
               {/* 汇总信息 */}
@@ -1629,7 +1711,7 @@ export function ProductPublishModal({
                   shape="default"
                   tooltip="确认发布"
                   onClick={() => void handleConfirmPublish()}
-                  disabled={publishQueue.length === 0 || selectedTargetShopNeedsLogin}
+                  disabled={publishQueue.length === 0 || selectedTargetShopNotAuthorized || selectedTargetShopNeedsLogin}
                 />
               </div>
             </div>
@@ -1656,13 +1738,14 @@ export function ProductPublishModal({
 
               <div className="publish-step-footer" style={{ justifyContent: "space-between" }}>
                 <IconOnlyButton danger size="large" icon={<StopOutlined />} shape="default" tooltip="全部停止" onClick={() => void handleStopAllPublish()} loading={stoppingAll} />
-                <IconOnlyButton size="large" icon={<ReloadOutlined />} shape="default" tooltip="重新发布" onClick={handleRepublishAll} loading={stoppingAll} />
+                <IconOnlyButton size="large" icon={<ReloadOutlined />} shape="default" tooltip={selectedTargetShopNotAuthorized ? "店铺未授权，无法重新发布" : "重新发布"} disabled={selectedTargetShopNotAuthorized} onClick={handleRepublishAll} loading={stoppingAll} />
                 <IconOnlyButton
                   type="primary"
                   size="large"
                   icon={<PlayCircleOutlined />}
                   shape="default"
-                  tooltip="继续上次发布"
+                  tooltip={selectedTargetShopNotAuthorized ? "店铺未授权，无法继续发布" : "继续上次发布"}
+                  disabled={selectedTargetShopNotAuthorized}
                   onClick={() => void handleContinueLastPublish()}
                 />
               </div>
@@ -1677,7 +1760,7 @@ export function ProductPublishModal({
                   showIcon
                   style={{ marginBottom: 16 }}
                   message="店铺未登录"
-                  description={SHOP_LOGIN_REQUIRED_MESSAGE}
+                  description={<span>当前选中的店铺未登录，需要去店铺管理中重新<a onClick={() => { void handleShopLoginFromPublish(selectedTargetShopId); }} style={{ cursor: "pointer", textDecoration: "underline" }}>授权登录</a></span>}
                 />
               ) : null}
               {activeCaptchaItem ? (
@@ -1686,10 +1769,9 @@ export function ProductPublishModal({
                   showIcon
                   style={{ marginBottom: 16 }}
                   message={`任务 #${activeCaptchaItem.taskId} 正在等待验证码`}
-                  description={`${activeCaptchaItem.title} 需要先在右侧完成淘宝验证码，再点击该行右侧的“继续发布”。`}
+                  description={`${activeCaptchaItem.title} 需要先在右侧完成淘宝验证码，再点击该行右侧的"继续发布"。`}
                 />
               ) : null}
-
               {/* 发布任务进度 */}
               <div style={{ marginBottom: 20 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, marginBottom: 10 }}>
@@ -1711,7 +1793,7 @@ export function ProductPublishModal({
                   </div>
                   <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
                     <IconOnlyButton danger icon={<StopOutlined />} tooltip="全部停止" onClick={() => void handleStopAllPublish()} loading={stoppingAll} />
-                    <IconOnlyButton icon={<ReloadOutlined />} tooltip="重新发布" onClick={handleRepublishAll} loading={stoppingAll} />
+                    <IconOnlyButton icon={<ReloadOutlined />} tooltip={selectedTargetShopNotAuthorized ? "店铺未授权，无法重新发布" : "重新发布"} disabled={selectedTargetShopNotAuthorized} onClick={handleRepublishAll} loading={stoppingAll} />
                   </div>
                 </div>
                 <Progress

@@ -20,7 +20,9 @@
       "Bash(find /Users/fly/Documents/develop/project/private/taobao/maserati -type f -name \"*.ts\" -exec grep -l \"class DoorSkuDTO\\\\|interface DoorSkuDTO\" {} \\\\;)",
       "Bash(find /Users/fly/Documents/develop/project/private/taobao/maserati -type f -name \"*.ts\" -exec grep -l \"class SkuFileDetail\\\\|interface SkuFileDetail\" {} \\\\;)",
       "Bash(ls -1 /Users/fly/Documents/develop/project/private/taobao/maserati/client/app/src/publish/fillers/*.ts)",
-      "Read(//tmp/**)"
+      "Read(//tmp/**)",
+      "Bash(grep -E \"\\\\.\\(ts|tsx|js\\)$\")",
+      "Bash(grep -E \"\\\\.\\(ts|tsx\\)$\")"
     ]
   }
 }

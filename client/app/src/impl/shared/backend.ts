@@ -1,5 +1,6 @@
 import axios from "axios";
 import { readAuthSession } from "./auth-session";
+import { readShopSignature } from "./shop-signature";
 import { publishError, summarizeForLog } from "@src/publish/utils/publish-logger";
 
 interface BackendResponse<T> {
@@ -38,6 +39,20 @@ function buildBackendErrorMeta(error: unknown): Record<string, unknown> {
   };
 }
 
+/**
+ * 判断路径是否排除在签名之外：注册、登录、店铺管理、工作台
+ */
+function isSignatureExcludedPath(path: string): boolean {
+  const normalized = path.toLowerCase().replace(/^\/+/, "");
+  return (
+    normalized.startsWith("app-user") ||
+    normalized.startsWith("shops") ||
+    normalized.startsWith("workbench") ||
+    normalized.startsWith("workspace") ||
+    normalized === ""
+  );
+}
+
 export function resolveBackendBaseUrl(): string {
   const serverTarget = normalizeValue(process.env.SERVER_TARGET) || "http://127.0.0.1:8091";
   const requestPath = normalizeValue(process.env.APP_URL_PREFIX) || "/api";
@@ -63,13 +78,20 @@ export async function requestBackend<T>(
   const taskId = options?.publishLog?.taskId;
   const label = options?.publishLog?.label ?? "backend";
 
+  // 非排除路径携带店铺签名秘钥
+  const shopSignature = isSignatureExcludedPath(path) ? undefined : readShopSignature();
+
+  const requestHeaders: Record<string, string> = {};
+  if (token) requestHeaders["token"] = token;
+  if (shopSignature) requestHeaders["x-shop-signature"] = shopSignature;
+
   try {
     const response = await axios.request<BackendResponse<T>>({
       method,
       url,
       data: options?.data,
       params: options?.params,
-      headers: token ? { token } : undefined,
+      headers: Object.keys(requestHeaders).length > 0 ? requestHeaders : undefined,
       timeout: 10000,
     });
 

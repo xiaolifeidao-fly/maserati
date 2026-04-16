@@ -33,7 +33,7 @@ server/service/publish_task/
 ├── repository/repository.go
 └── publish_task_service.go
 
-server/web-api/pkg/publish_task/publish_task.go
+server/manager-api/pkg/publish_task/publish_task.go
 ```
 
 ## 服务端 REST API

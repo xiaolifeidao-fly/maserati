@@ -1,10 +1,10 @@
 # Backend Architecture
 
-本文档基于当前仓库 `server/common`、`server/service`、`server/web-api` 的真实代码结构，描述后端多模块架构、分层职责和新增业务域时应遵循的设计方式。
+本文档基于当前仓库 `server/common`、`server/service`、`server/manager-api` 的真实代码结构，描述后端多模块架构、分层职责和新增业务域时应遵循的设计方式。
 
 ## 1. 当前项目总体结构
 
-仓库采用 Go multi-module 组织方式，`common`、`service`、`web-api` 各自独立维护 `go.mod`，通过模块依赖协同工作。
+仓库采用 Go multi-module 组织方式，`common`、`service`、`manager-api` 各自独立维护 `go.mod`，通过模块依赖协同工作。
 
 ```text
 server/
@@ -24,7 +24,12 @@ server/
 │   └── utils/
 ├── service/
 │   ├── [domain]/
-└── web-api/
+└── manager-api/ 面向后台管理的api
+    ├── initialization/
+    ├── pkg/
+    │   ├── [domain]/
+    └── routers/
+└── app-api/ 面向electron的api
     ├── initialization/
     ├── pkg/
     │   ├── [domain]/
@@ -35,13 +40,13 @@ server/
 
 - `server/common`：公共基础设施与基础类型
 - `server/service`：业务域、DTO、Repository、Service
-- `server/web-api`：Gin Handler、路由注册、启动初始化编排
+- `server/manager-api`：Gin Handler、路由注册、启动初始化编排
 
 ## 2. 核心调用链
 
 ```text
 Gin HTTP Request
-  -> web-api/pkg/{domain} Handler
+  -> manager-api/pkg/{domain} Handler
   -> service/{domain} Service
   -> service/{domain}/repository Repository
   -> common/middleware/db.Db (GORM)
@@ -58,7 +63,7 @@ Gin HTTP Request
 - 一个域一个 `dto/`
 - 一个域一个 `repository/`
 - 一个域一个 `{domain}_service.go`
-- 一个域一个 `web-api/pkg/{domain}/{domain}.go`
+- 一个域一个 `manager-api/pkg/{domain}/{domain}.go`
 
 #### 2.2 聚合查询业务域
 
@@ -237,9 +242,9 @@ func NewCaseService() *CaseService {
 - `GetByID` / `Update` / `Delete` 都会额外判断 `entity.Active == 0`
 - 逻辑删除通过 `entity.Active = 0` 完成
 
-## 5. web-api 模块职责
+## 5. manager-api 模块职责
 
-`server/web-api` 负责把业务域暴露成 HTTP 服务。
+`server/manager-api` 负责把业务域暴露成 HTTP 服务。
 
 ### 5.1 `pkg/`
 
@@ -349,10 +354,10 @@ service/foo/
 ├── repository/repository.go
 └── foo_service.go
 
-web-api/pkg/foo/foo.go
+manager-api/pkg/foo/foo.go
 ```
 
-然后在 `web-api/routers/register.go` 注册 `foo.NewFooHandler()`。
+然后在 `manager-api/routers/register.go` 注册 `foo.NewFooHandler()`。
 
 ### 聚合查询域
 
@@ -376,7 +381,7 @@ web-api/pkg/foo/foo.go
 
 新代码是否：
 
-- 保持 `web-api / service / common` 的职责边界
+- 保持 `manager-api / service / common` 的职责边界
 - 复用现有 `db.Repository[T]` 和 `GetRepository[T]()` 机制
 - 与现有响应结构、分页逻辑、逻辑删除习惯一致
 - 对全局状态和初始化时序保留足够防御

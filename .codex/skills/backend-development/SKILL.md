@@ -1,6 +1,6 @@
 ---
 name: backend-development
-description: 面向本仓库 server/common + server/service + server/web-api 三模块 Go 后端的开发技能。适用于新增业务域、扩展 Gin 接口、编写 Service/Repository、接入 GORM/MySQL/Redis/OSS、排查初始化与数据流问题，并在需要时参考通用高可用、性能优化与测试实践。
+description: 面向本仓库 server/common + server/service + server/manager-api 三模块 Go 后端的开发技能。适用于新增业务域、扩展 Gin 接口、编写 Service/Repository、接入 GORM/MySQL/Redis/OSS、排查初始化与数据流问题，并在需要时参考通用高可用、性能优化与测试实践。
 license: MIT
 version: 1.1.0
 ---
@@ -11,7 +11,7 @@ version: 1.1.0
 
 ## 何时使用
 
-- 在 `server/web-api/pkg/*` 新增或修改 HTTP Handler
+- 在 `server/manager-api/pkg/*` 新增或修改 HTTP Handler
 - 在 `server/service/*` 新增业务域、DTO、Repository、Service
 - 在 `server/common/*` 调整公共基础设施，如 DB、Redis、Router、Viper、OSS
 - 排查接口响应、分页查询、数据库初始化、Repository 注入、配置读取问题
@@ -28,22 +28,22 @@ version: 1.1.0
 
 ```text
 HTTP Request
-  -> web-api/pkg/{domain} Handler
+  -> manager-api/pkg/{domain} Handler
   -> service/{domain} Service
   -> service/{domain}/repository Repository
   -> common/middleware/db 中的 GORM 基础设施
 ```
 
 这是当前项目最重要的分层约定：
-
-- `web-api/pkg/*` 负责入参绑定、HTTP 状态收口、统一输出
+- `manager-api/pkg/*` 负责入参绑定、HTTP 状态收口、统一输出，面相管理端界面的api
+- `app-api/pkg/*` 负责入参绑定、HTTP 状态收口、统一输出，面相electron的api
 - `service/*` 负责业务逻辑、参数兜底、分页、状态机、幂等处理
 - `service/*/repository` 负责实体定义和数据访问
 - `common/middleware/db` 提供泛型 CRUD 基础能力与 Repository 工厂
 
 ## 必须遵守的项目约定
 
-### 1. Handler 放在 `server/web-api/pkg/{domain}`
+### 1. Handler 放在 `server/manager-api/pkg/{domain}`
 
 - 每个业务域一个 handler 文件，例如 `pkg/account/account.go`
 - Handler 实现 `common/middleware/routers.Handler`
@@ -126,7 +126,7 @@ Service / Handler 主要使用 DTO
 
 分页统一使用 `common/base/dto.PageDTO[T]`，构造可复用 `baseDTO.BuildPage(total, data)`。
 
-### 6. 初始化顺序遵循 `web-api/initialization`
+### 6. 初始化顺序遵循 `manager-api/initialization`
 
 真实初始化顺序如下：
 
@@ -150,8 +150,8 @@ Service / Handler 主要使用 DTO
 2. 新建 `server/service/foo/repository/model.go`
 3. 新建 `server/service/foo/repository/repository.go`
 4. 新建 `server/service/foo/foo_service.go`
-5. 新建 `server/web-api/pkg/foo/foo.go`
-6. 在 `server/web-api/routers/register.go` 注册 `foo.NewFooHandler()`
+5. 新建 `server/manager-api/pkg/foo/foo.go`
+6. 在 `server/manager-api/routers/register.go` 注册 `foo.NewFooHandler()`
 
 落地原则：
 
@@ -210,4 +210,4 @@ Service / Handler 主要使用 DTO
 
 ## 一句话工作流
 
-在这个仓库里做后端开发时，先从 `server/web-api/pkg`、`server/service`、`server/common/middleware` 的真实实现建立上下文，再按现有三模块分层补齐 Handler、Service、Repository 和 DTO，而不是先套一个外部脚手架式架构。
+在这个仓库里做后端开发时，先从 `server/manager-api/pkg`、`server/service`、`server/common/middleware` 的真实实现建立上下文，再按现有三模块分层补齐 Handler、Service、Repository 和 DTO，而不是先套一个外部脚手架式架构。
