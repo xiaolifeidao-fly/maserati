@@ -3,10 +3,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { Modal, Select, Space, Tag, Typography, message } from "antd";
 import {
-  fetchShopCategoryOptions,
-  fetchTenantCategoryBindings,
-  saveTenantCategoryBindings,
-  type ShopCategoryOption,
+  fetchActivationCodeTypeOptions,
+  fetchTenantActivationCodeTypeBindings,
+  saveTenantActivationCodeTypeBindings,
+  type ActivationCodeTypeOption,
   type TenantRecord,
 } from "../api/tenant.api";
 
@@ -25,7 +25,7 @@ export function TenantBindingModal({
   onCancel,
   onSaved,
 }: TenantBindingModalProps) {
-  const [options, setOptions] = useState<ShopCategoryOption[]>([]);
+  const [options, setOptions] = useState<ActivationCodeTypeOption[]>([]);
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -38,12 +38,12 @@ export function TenantBindingModal({
     const loadData = async () => {
       setLoading(true);
       try {
-        const [categoryResult, bindingResult] = await Promise.all([
-          fetchShopCategoryOptions(),
-          fetchTenantCategoryBindings(tenant.id),
+        const [typeResult, bindingResult] = await Promise.all([
+          fetchActivationCodeTypeOptions(),
+          fetchTenantActivationCodeTypeBindings(tenant.id),
         ]);
-        setOptions(categoryResult.data);
-        setSelectedIds(bindingResult.map((item) => item.shopCategoryId));
+        setOptions(typeResult.data);
+        setSelectedIds(bindingResult.map((item) => item.activationCodeTypeId));
       } catch (error) {
         setOptions([]);
         setSelectedIds([]);
@@ -58,7 +58,7 @@ export function TenantBindingModal({
   const selectOptions = useMemo(
     () =>
       options.map((item) => ({
-        label: `${item.name || `类目#${item.id}`} · ID ${item.id}`,
+        label: `${item.name || `类别#${item.id}`} · ${item.durationDays} 天 · ￥${item.price}`,
         value: item.id,
       })),
     [options],
@@ -68,7 +68,7 @@ export function TenantBindingModal({
     const optionMap = new Map(options.map((item) => [item.id, item]));
     return selectedIds
       .map((id) => optionMap.get(id))
-      .filter((item): item is ShopCategoryOption => Boolean(item));
+      .filter((item): item is ActivationCodeTypeOption => Boolean(item));
   }, [options, selectedIds]);
 
   return (
@@ -76,7 +76,7 @@ export function TenantBindingModal({
       wrapClassName="manager-form-skin"
       destroyOnClose
       open={open}
-      title={tenant ? `${tenant.name} · 租户绑定` : "租户绑定"}
+      title={tenant ? `${tenant.name} · 分配激活码类别` : "分配激活码类别"}
       okText="确定"
       cancelText="取消"
       confirmLoading={submitting}
@@ -87,12 +87,14 @@ export function TenantBindingModal({
         }
         setSubmitting(true);
         try {
-          await saveTenantCategoryBindings(tenant.id, { shopCategoryIds: selectedIds });
+          await saveTenantActivationCodeTypeBindings(tenant.id, {
+            activationCodeTypeIds: selectedIds,
+          });
           await onSaved();
-          message.success("租户类目绑定已更新");
+          message.success("租户激活码类别已更新");
           onCancel();
         } catch (error) {
-          message.error(error instanceof Error ? error.message : "保存租户绑定失败");
+          message.error(error instanceof Error ? error.message : "保存激活码类别分配失败");
         } finally {
           setSubmitting(false);
         }
@@ -100,13 +102,13 @@ export function TenantBindingModal({
     >
       <Space direction="vertical" size={16} style={{ width: "100%" }}>
         <Text style={{ color: "var(--manager-text-soft)" }}>
-          选择当前租户可用的商品类目，可多选；保存时会以本次选择结果为准覆盖旧绑定。
+          选择当前租户可用的激活码类别，可多选；保存时会以本次选择结果为准覆盖旧绑定。
         </Text>
         <Select<number[]>
           mode="multiple"
           allowClear
           loading={loading}
-          placeholder="请选择类目"
+          placeholder="请选择激活码类别"
           value={selectedIds}
           onChange={(value) => setSelectedIds(value)}
           options={selectOptions}
@@ -117,11 +119,11 @@ export function TenantBindingModal({
           {selectedTags.length > 0 ? (
             selectedTags.map((item) => (
               <Tag key={item.id} color="blue">
-                {item.name || `类目#${item.id}`}
+                {item.name || `类别#${item.id}`}
               </Tag>
             ))
           ) : (
-            <Text style={{ color: "var(--manager-text-faint)" }}>当前未绑定任何类目</Text>
+            <Text style={{ color: "var(--manager-text-faint)" }}>当前未分配任何激活码类别</Text>
           )}
         </Space>
       </Space>

@@ -32,6 +32,8 @@ func (h *TenantHandler) RegisterHandler(engine *gin.RouterGroup) {
 	engine.POST("/tenants", h.createTenant)
 	engine.PUT("/tenants/:id", h.updateTenant)
 	engine.DELETE("/tenants/:id", h.deleteTenant)
+	engine.GET("/tenants/:id/activation-code-types", h.listTenantActivationCodeTypes)
+	engine.PUT("/tenants/:id/activation-code-types", h.saveTenantActivationCodeTypes)
 }
 
 func (h *TenantHandler) listTenants(context *gin.Context) {
@@ -96,6 +98,37 @@ func (h *TenantHandler) deleteTenant(context *gin.Context) {
 		return
 	}
 	commonRouter.ToJson(context, gin.H{"deleted": true}, err)
+}
+
+func (h *TenantHandler) listTenantActivationCodeTypes(context *gin.Context) {
+	id, ok := parseTenantID(context)
+	if !ok {
+		return
+	}
+	result, err := h.tenantService.ListTenantActivationCodeTypeBindings(id)
+	if err == gorm.ErrRecordNotFound {
+		commonRouter.ToError(context, "tenant not found")
+		return
+	}
+	commonRouter.ToJson(context, result, err)
+}
+
+func (h *TenantHandler) saveTenantActivationCodeTypes(context *gin.Context) {
+	id, ok := parseTenantID(context)
+	if !ok {
+		return
+	}
+	var req tenantDTO.SaveTenantActivationCodeTypeBindingsDTO
+	if err := context.ShouldBindJSON(&req); err != nil {
+		commonRouter.ToError(context, "参数错误")
+		return
+	}
+	result, err := h.tenantService.SaveTenantActivationCodeTypeBindings(id, &req)
+	if err == gorm.ErrRecordNotFound {
+		commonRouter.ToError(context, "tenant not found")
+		return
+	}
+	commonRouter.ToJson(context, result, err)
 }
 
 func parseTenantID(context *gin.Context) (uint, bool) {

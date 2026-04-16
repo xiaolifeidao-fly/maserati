@@ -4,9 +4,10 @@ import baseDTO "common/base/dto"
 
 type TenantDTO struct {
 	baseDTO.BaseDTO
-	Code              string                     `json:"code"`
-	Name              string                     `json:"name"`
-	CurrentCategories []TenantCategoryBindingDTO `json:"currentCategories,omitempty"`
+	Code                       string                               `json:"code"`
+	Name                       string                               `json:"name"`
+	CurrentCategories          []TenantCategoryBindingDTO           `json:"currentCategories,omitempty"`
+	CurrentActivationCodeTypes []TenantActivationCodeTypeBindingDTO `json:"currentActivationCodeTypes,omitempty"`
 }
 
 type CreateTenantDTO struct {
@@ -39,4 +40,18 @@ type TenantCategoryBindingDTO struct {
 
 type SaveTenantCategoryBindingsDTO struct {
 	ShopCategoryIDs []uint64 `json:"shopCategoryIds"`
+}
+
+type TenantActivationCodeTypeBindingDTO struct {
+	ID                   uint64 `json:"id"`
+	TenantID             uint64 `json:"tenantId"`
+	ActivationCodeTypeID uint64 `json:"activationCodeTypeId"`
+	ActivationCodeName   string `json:"activationCodeName"`
+	DurationDays         int    `json:"durationDays"`
+	Price                string `json:"price"`
+	Status               string `json:"status"`
+}
+
+type SaveTenantActivationCodeTypeBindingsDTO struct {
+	ActivationCodeTypeIDs []uint64 `json:"activationCodeTypeIds"`
 }

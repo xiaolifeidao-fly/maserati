@@ -13,6 +13,7 @@ version: 1.1.0
 
 - 在 `server/manager-api/pkg/*` 新增或修改 HTTP Handler
 - 在 `server/service/*` 新增业务域、DTO、Repository、Service
+- 在 `server/service/{domain}/consumer` 新增或修改异步消费者、队列消息结构、消费循环
 - 在 `server/common/*` 调整公共基础设施，如 DB、Redis、Router、Viper、OSS
 - 排查接口响应、分页查询、数据库初始化、Repository 注入、配置读取问题
 - 需要在当前项目约定下做性能优化、测试补充或高可用增强
@@ -32,12 +33,19 @@ HTTP Request
   -> service/{domain} Service
   -> service/{domain}/repository Repository
   -> common/middleware/db 中的 GORM 基础设施
+
+Async Message
+  -> service/{domain}/consumer Consumer
+  -> service/{domain} Service
+  -> service/{domain}/repository Repository
 ```
 
 这是当前项目最重要的分层约定：
+
 - `manager-api/pkg/*` 负责入参绑定、HTTP 状态收口、统一输出，面相管理端界面的api
 - `app-api/pkg/*` 负责入参绑定、HTTP 状态收口、统一输出，面相electron的api
 - `service/*` 负责业务逻辑、参数兜底、分页、状态机、幂等处理
+- `service/*/consumer` 负责异步消息入队、出队、消费循环和消息反序列化，不承载领域业务细节
 - `service/*/repository` 负责实体定义和数据访问
 - `common/middleware/db` 提供泛型 CRUD 基础能力与 Repository 工厂
 
@@ -97,7 +105,26 @@ func (r *AccountRepository) FindByRemoteJid(remoteJid string) (*Account, error) 
 }
 ```
 
-### 4. Entity / DTO 是当前项目主流数据对象
+### 4. Consumer 放在 `server/service/{domain}/consumer`
+
+- 只要提到后端 consumer、消费者、异步队列消费，都优先放到 `server/service/{domain}/consumer`
+- Consumer 包负责队列 key、消息结构、入队函数、消费循环、日志和上下文退出
+- 具体业务处理继续放在 `service/{domain}`，通过接口注入给 consumer，避免 consumer 和 service 互相 import
+- 初始化入口在 `manager-api/initialization` 或 `app-api/initialization` 中显式启动 consumer
+- 具体写法参考 `references/backend-consumer.md`
+
+典型模式：
+
+```text
+service/{domain}/consumer
+  -> 定义 XxxMessage / EnqueueXxx / StartXxxConsumer
+service/{domain}
+  -> 实现 ProcessXxx(...) 等业务处理方法
+initialization
+  -> consumer.StartXxxConsumer(ctx, domainService.NewXxxService())
+```
+
+### 5. Entity / DTO 是当前项目主流数据对象
 
 当前项目实际数据流以 `Entity <-> DTO` 为主，VO 是可选能力，不是默认层。
 
@@ -115,7 +142,7 @@ Service / Handler 主要使用 DTO
 - `db.ToPOs[V](dtos)`
 - `converter.ToVO[V](dto)` 仅在确实需要 VO 分层时使用
 
-### 5. DTO 设计贴近当前仓库
+### 6. DTO 设计贴近当前仓库
 
 在 `service/{domain}/dto/dto.go` 中通常定义：
 
@@ -126,7 +153,7 @@ Service / Handler 主要使用 DTO
 
 分页统一使用 `common/base/dto.PageDTO[T]`，构造可复用 `baseDTO.BuildPage(total, data)`。
 
-### 6. 初始化顺序遵循 `manager-api/initialization`
+### 7. 初始化顺序遵循 `manager-api/initialization`
 
 真实初始化顺序如下：
 
@@ -150,8 +177,10 @@ Service / Handler 主要使用 DTO
 2. 新建 `server/service/foo/repository/model.go`
 3. 新建 `server/service/foo/repository/repository.go`
 4. 新建 `server/service/foo/foo_service.go`
-5. 新建 `server/manager-api/pkg/foo/foo.go`
-6. 在 `server/manager-api/routers/register.go` 注册 `foo.NewFooHandler()`
+5. 如需异步消费，新建 `server/service/foo/consumer/{xxx}_consumer.go`
+6. 新建 `server/manager-api/pkg/foo/foo.go`
+7. 在 `server/manager-api/routers/register.go` 注册 `foo.NewFooHandler()`
+8. 如有 consumer，在 `server/manager-api/initialization` 中按依赖顺序启动
 
 落地原则：
 
@@ -167,6 +196,8 @@ Service / Handler 主要使用 DTO
 - 更新 DTO 是否使用指针字段，避免误覆盖
 - 查询是否默认带 `active = 1`，与当前逻辑删除习惯保持一致
 - Service 中是否检查 `repository.Db == nil`
+- Consumer 是否放在 `service/{domain}/consumer`，业务处理是否通过 Service 接口注入
+- Consumer 启动顺序是否晚于 Redis/DB 初始化，并支持 `context.Context` 退出
 - 分页是否统一兜底：`pageIndex <= 0 => 1`、`pageSize <= 0 => 20`
 - 新表是否需要 `EnsureTable()` 或迁移逻辑
 - 错误是否通过 `ToJson` / `ToError` 统一输出
@@ -195,19 +226,21 @@ Service / Handler 主要使用 DTO
 
 1. 先看 `server/` 真实代码
 2. 再看 `references/backend-architecture.md` 理解整体分层
-3. 需要性能优化时看 `references/backend-performance.md`
-4. 需要高可用治理时看 `references/backend-go-ha.md`
-5. 需要补测试时看 `references/backend-testing.md`
+3. 涉及 consumer / 异步队列消费时看 `references/backend-consumer.md`
+4. 需要性能优化时看 `references/backend-performance.md`
+5. 需要高可用治理时看 `references/backend-go-ha.md`
+6. 需要补测试时看 `references/backend-testing.md`
 
 如果参考文档和仓库现状不一致，以仓库现状为准，再在改动中逐步收敛。
 
 ## Reference Navigation
 
 - `references/backend-architecture.md`：多模块架构、分层职责、Repository/DTO/VO 设计
+- `references/backend-consumer.md`：Consumer 包位置、接口注入、Redis 队列消费写法
 - `references/backend-performance.md`：索引、连接池、缓存、异步处理、性能监控
 - `references/backend-go-ha.md`：优雅关闭、超时控制、重试、熔断、限流、分布式锁
 - `references/backend-testing.md`：单元测试、集成测试、负载测试、安全扫描
 
 ## 一句话工作流
 
-在这个仓库里做后端开发时，先从 `server/manager-api/pkg`、`server/service`、`server/common/middleware` 的真实实现建立上下文，再按现有三模块分层补齐 Handler、Service、Repository 和 DTO，而不是先套一个外部脚手架式架构。
+在这个仓库里做后端开发时，先从 `server/manager-api/pkg`、`server/service`、`server/common/middleware` 的真实实现建立上下文，再按现有三模块分层补齐 Handler、Service、Repository、DTO 和 `service/{domain}/consumer`，而不是先套一个外部脚手架式架构。

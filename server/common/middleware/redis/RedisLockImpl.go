@@ -14,16 +14,16 @@ const (
 var _ Locker = (*RedisLock)(nil)
 
 type RedisLock struct {
-	c *redis.ClusterClient
+	c redis.Cmdable
 }
 
-func NewRedisLock(c *redis.ClusterClient) *RedisLock {
+func NewRedisLock(c redis.Cmdable) *RedisLock {
 	return &RedisLock{
 		c: c,
 	}
 }
 
-func NewInit(c *redis.ClusterClient) (*RedisLock, error) {
+func NewInit(c redis.Cmdable) (*RedisLock, error) {
 	if c == nil {
 		return nil, ErrClientNil
 	}

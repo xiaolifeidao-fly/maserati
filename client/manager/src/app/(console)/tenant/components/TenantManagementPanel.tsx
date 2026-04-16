@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import {
   DeleteOutlined,
   EditOutlined,
-  PartitionOutlined,
+  KeyOutlined,
   PlusOutlined,
   ReloadOutlined,
   SearchOutlined,
@@ -41,12 +41,12 @@ export function TenantManagementPanel() {
     () => [
       { label: "租户总数", value: total },
       {
-        label: "已绑定类目租户",
-        value: tenants.filter((item) => (item.currentCategories?.length ?? 0) > 0).length,
+        label: "已分配类别租户",
+        value: tenants.filter((item) => (item.currentActivationCodeTypes?.length ?? 0) > 0).length,
       },
       {
-        label: "当前绑定类目数",
-        value: tenants.reduce((sum, item) => sum + (item.currentCategories?.length ?? 0), 0),
+        label: "当前分配类别数",
+        value: tenants.reduce((sum, item) => sum + (item.currentActivationCodeTypes?.length ?? 0), 0),
       },
     ],
     [tenants, total],
@@ -68,17 +68,17 @@ export function TenantManagementPanel() {
       render: (value: string) => <span className="manager-value">{value || "-"}</span>,
     },
     {
-      title: "当前类目",
-      key: "currentCategories",
+      title: "已分配激活码类别",
+      key: "currentActivationCodeTypes",
       render: (_, record) => {
-        if (!record.currentCategories?.length) {
-          return <Text style={{ color: "var(--manager-text-faint)" }}>未绑定</Text>;
+        if (!record.currentActivationCodeTypes?.length) {
+          return <Text style={{ color: "var(--manager-text-faint)" }}>未分配</Text>;
         }
         return (
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-            {record.currentCategories.map((item) => (
-              <Tag key={item.id || item.shopCategoryId} color="blue">
-                {item.shopCategoryName || `类目#${item.shopCategoryId}`}
+            {record.currentActivationCodeTypes.map((item) => (
+              <Tag key={item.id || item.activationCodeTypeId} color="blue">
+                {item.activationCodeName || `类别#${item.activationCodeTypeId}`}
               </Tag>
             ))}
           </div>
@@ -86,64 +86,60 @@ export function TenantManagementPanel() {
       },
     },
     {
-      title: "类目编辑",
-      key: "bindingAction",
-      width: 120,
+      title: "操作",
+      key: "actions",
+      width: 180,
+      fixed: "right",
       render: (_, record) => (
-        <Button
-          type="primary"
-          icon={<PartitionOutlined />}
-          onClick={() => {
-            setBindingTenant(record);
-            setBindingOpen(true);
-          }}
-          style={{
-            color: "#ffffff",
-            border: "none",
-            background: "linear-gradient(135deg, #5d7df6 0%, #6d8cff 100%)",
-          }}
-        >
-          编辑
-        </Button>
-      ),
-    },
-    {
-      title: "修改",
-      key: "editAction",
-      width: 96,
-      render: (_, record) => (
-        <Tooltip title="修改租户">
-          <Button
-            type="text"
-            icon={<EditOutlined />}
-            onClick={() => {
-              setEditingTenant(record);
-              setFormOpen(true);
+        <Space size={4}>
+          <Tooltip title="新增租户">
+            <Button
+              type="text"
+              icon={<PlusOutlined />}
+              onClick={() => {
+                setEditingTenant(null);
+                setFormOpen(true);
+              }}
+            />
+          </Tooltip>
+          <Tooltip title="修改租户">
+            <Button
+              type="text"
+              icon={<EditOutlined />}
+              onClick={() => {
+                setEditingTenant(record);
+                setFormOpen(true);
+              }}
+            />
+          </Tooltip>
+          <Tooltip title="分配激活码类别">
+            <Button
+              type="text"
+              icon={<KeyOutlined />}
+              onClick={() => {
+                setBindingTenant(record);
+                setBindingOpen(true);
+              }}
+            />
+          </Tooltip>
+          <Popconfirm
+            title="确认删除这个租户吗？"
+            okText="删除"
+            cancelText="取消"
+            onConfirm={async () => {
+              try {
+                await removeTenant(record.id);
+                message.success("租户已删除");
+              } catch (error) {
+                message.error(error instanceof Error ? error.message : "删除租户失败");
+              }
             }}
-          />
-        </Tooltip>
-      ),
-    },
-    {
-      title: "删除",
-      key: "deleteAction",
-      width: 96,
-      render: (_, record) => (
-        <Popconfirm
-          title="确认删除这个租户吗？"
-          okText="删除"
-          cancelText="取消"
-          onConfirm={async () => {
-            try {
-              await removeTenant(record.id);
-              message.success("租户已删除");
-            } catch (error) {
-              message.error(error instanceof Error ? error.message : "删除租户失败");
-            }
-          }}
-        >
-          <Button danger type="text" icon={<DeleteOutlined />} />
-        </Popconfirm>
+          >
+            <Tooltip title="删除租户">
+              <Button danger type="text" icon={<DeleteOutlined />} />
+            </Tooltip>
+          </Popconfirm>
+        </Space>
       ),
     },
   ];

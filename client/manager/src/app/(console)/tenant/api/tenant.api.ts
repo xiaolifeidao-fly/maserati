@@ -18,6 +18,22 @@ export class TenantCategoryBindingRecord {
   status = "";
 }
 
+export class TenantActivationCodeTypeBindingRecord {
+  id = 0;
+
+  tenantId = 0;
+
+  activationCodeTypeId = 0;
+
+  activationCodeName = "";
+
+  durationDays = 0;
+
+  price = "0.00";
+
+  status = "";
+}
+
 export class TenantRecord {
   id!: number;
 
@@ -26,6 +42,8 @@ export class TenantRecord {
   name = "";
 
   currentCategories: TenantCategoryBindingRecord[] = [];
+
+  currentActivationCodeTypes: TenantActivationCodeTypeBindingRecord[] = [];
 
   createdTime?: string;
 
@@ -42,6 +60,16 @@ export class ShopCategoryOption {
   status = "";
 }
 
+export class ActivationCodeTypeOption {
+  id!: number;
+
+  name = "";
+
+  durationDays = 0;
+
+  price = "0.00";
+}
+
 export interface TenantListQuery {
   pageIndex?: number;
   pageSize?: number;
@@ -56,6 +84,10 @@ export interface TenantPayload {
 
 export interface TenantCategoryBindingPayload {
   shopCategoryIds: number[];
+}
+
+export interface TenantActivationCodeTypeBindingPayload {
+  activationCodeTypeIds: number[];
 }
 
 export async function fetchTenants(query: TenantListQuery) {
@@ -81,6 +113,13 @@ export async function fetchTenantCategoryBindings(tenantId: number) {
   return getDataList(TenantCategoryBindingRecord, `/tenants/${tenantId}/shop-categories`);
 }
 
+export async function fetchTenantActivationCodeTypeBindings(tenantId: number) {
+  return getDataList(
+    TenantActivationCodeTypeBindingRecord,
+    `/tenants/${tenantId}/activation-code-types`,
+  );
+}
+
 export async function saveTenantCategoryBindings(
   tenantId: number,
   payload: TenantCategoryBindingPayload,
@@ -92,8 +131,26 @@ export async function saveTenantCategoryBindings(
   return unwrapApiResponse(response.data);
 }
 
+export async function saveTenantActivationCodeTypeBindings(
+  tenantId: number,
+  payload: TenantActivationCodeTypeBindingPayload,
+) {
+  const response = await instance.put<ApiResponse<TenantActivationCodeTypeBindingRecord[]>>(
+    `/tenants/${tenantId}/activation-code-types`,
+    payload,
+  );
+  return unwrapApiResponse(response.data);
+}
+
 export async function fetchShopCategoryOptions() {
   return getPage(ShopCategoryOption, "/shop-categories", {
+    pageIndex: 1,
+    pageSize: 200,
+  });
+}
+
+export async function fetchActivationCodeTypeOptions() {
+  return getPage(ActivationCodeTypeOption, "/activation-code-types", {
     pageIndex: 1,
     pageSize: 200,
   });

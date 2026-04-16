@@ -4,9 +4,12 @@ import (
 	"common/middleware/db"
 	"common/middleware/redis"
 	"common/middleware/vipper"
+	"context"
 	"fmt"
 	"log"
 	"manager-api/routers"
+	productActivationCodeService "service/product_activation_code"
+	productActivationCodeConsumer "service/product_activation_code/consumer"
 	"time"
 )
 
@@ -23,6 +26,7 @@ const (
 	IpManagerShortInit // 新增Short版本初始化
 	DeviceManagerInit
 	RouterInit
+	ActivationCodeConsumerInit
 )
 
 type Initializer struct {
@@ -98,6 +102,17 @@ var initializers = []Initializer{
 		Name:  "Router",
 		InitFn: func() error {
 			routers.Init()
+			return nil
+		},
+	},
+	{
+		Order: ActivationCodeConsumerInit,
+		Name:  "ActivationCodeConsumer",
+		InitFn: func() error {
+			productActivationCodeConsumer.StartActivationCodeBatchConsumer(
+				context.Background(),
+				productActivationCodeService.NewProductActivationCodeService(),
+			)
 			return nil
 		},
 	},

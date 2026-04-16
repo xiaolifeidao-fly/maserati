@@ -29,9 +29,20 @@ type ProductActivationCodeTypeQueryDTO struct {
 	DurationDays int    `form:"durationDays"`
 }
 
+type TenantActivationCodeTypeBindingDTO struct {
+	baseDTO.BaseDTO
+	TenantID             uint64 `json:"tenantId"`
+	ActivationCodeTypeID uint64 `json:"activationCodeTypeId"`
+	ActivationCodeName   string `json:"activationCodeName"`
+	DurationDays         int    `json:"durationDays"`
+	Price                string `json:"price"`
+	Status               string `json:"status"`
+}
+
 type ProductActivationCodeDetailDTO struct {
 	baseDTO.BaseDTO
 	TypeID         uint64 `json:"typeId"`
+	BatchID        uint64 `json:"batchId"`
 	DurationDays   int    `json:"durationDays"`
 	StartTime      string `json:"startTime"`
 	EndTime        string `json:"endTime"`
@@ -42,6 +53,7 @@ type ProductActivationCodeDetailDTO struct {
 
 type CreateProductActivationCodeDetailDTO struct {
 	TypeID         uint64 `json:"typeId"`
+	BatchID        uint64 `json:"batchId"`
 	DurationDays   int    `json:"durationDays"`
 	StartTime      string `json:"startTime"`
 	EndTime        string `json:"endTime"`
@@ -52,6 +64,7 @@ type CreateProductActivationCodeDetailDTO struct {
 
 type UpdateProductActivationCodeDetailDTO struct {
 	TypeID         *uint64 `json:"typeId,omitempty"`
+	BatchID        *uint64 `json:"batchId,omitempty"`
 	DurationDays   *int    `json:"durationDays,omitempty"`
 	StartTime      *string `json:"startTime,omitempty"`
 	EndTime        *string `json:"endTime,omitempty"`
@@ -65,6 +78,36 @@ type ProductActivationCodeDetailQueryDTO struct {
 	PageIndex      int    `form:"pageIndex"`
 	PageSize       int    `form:"pageSize"`
 	TypeID         uint64 `form:"typeId"`
+	BatchID        uint64 `form:"batchId"`
 	ActivationCode string `form:"activationCode"`
 	Status         string `form:"status"`
+}
+
+type ProductActivationCodeBatchDTO struct {
+	baseDTO.BaseDTO
+	TypeID         uint64 `json:"typeId"`
+	UserID         uint64 `json:"userId"`
+	TotalCount     int    `json:"totalCount"`
+	GeneratedCount int    `json:"generatedCount"`
+	FailedCount    int    `json:"failedCount"`
+	TotalPrice     string `json:"totalPrice"`
+	ActualConsume  string `json:"actualConsume"`
+	Status         string `json:"status"`
+	Message        string `json:"message"`
+	StartedTime    string `json:"startedTime"`
+	CompletedTime  string `json:"completedTime"`
+}
+
+type GenerateProductActivationCodeBatchDTO struct {
+	TypeID uint64 `json:"typeId"`
+	UserID uint64 `json:"userId"`
+	Count  int    `json:"count"`
+}
+
+type ProductActivationCodeBatchQueryDTO struct {
+	Page      int    `form:"page"`
+	PageIndex int    `form:"pageIndex"`
+	PageSize  int    `form:"pageSize"`
+	TypeID    uint64 `form:"typeId"`
+	Status    string `form:"status"`
 }

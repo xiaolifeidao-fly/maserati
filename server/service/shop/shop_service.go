@@ -3,8 +3,12 @@ package shop
 import (
 	baseDTO "common/base/dto"
 	"common/middleware/db"
+	redisMiddleware "common/middleware/redis"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	appUserRepository "service/app_user/repository"
+	productActivationCodeRepository "service/product_activation_code/repository"
 	shopDTO "service/shop/dto"
 	shopRepository "service/shop/repository"
 	"strings"
@@ -17,6 +21,7 @@ type ShopService struct {
 	appUserRepository           *appUserRepository.AppUserRepository
 	shopRepository              *shopRepository.ShopRepository
 	shopAuthorizationRepository *shopRepository.ShopAuthorizationRepository
+	activationCodeRepository    *productActivationCodeRepository.ProductActivationCodeDetailRepository
 }
 
 func NewShopService() *ShopService {
@@ -24,6 +29,7 @@ func NewShopService() *ShopService {
 		appUserRepository:           db.GetRepository[appUserRepository.AppUserRepository](),
 		shopRepository:              db.GetRepository[shopRepository.ShopRepository](),
 		shopAuthorizationRepository: db.GetRepository[shopRepository.ShopAuthorizationRepository](),
+		activationCodeRepository:    db.GetRepository[productActivationCodeRepository.ProductActivationCodeDetailRepository](),
 	}
 }
 
@@ -45,6 +51,7 @@ func (s *ShopService) EnsureTable() error {
 	for _, ensure := range []func() error{
 		s.shopRepository.EnsureTable,
 		s.shopAuthorizationRepository.EnsureTable,
+		s.activationCodeRepository.EnsureTable,
 	} {
 		if err := ensure(); err != nil {
 			return err
@@ -112,14 +119,6 @@ func formatShopTime(value *time.Time) string {
 		return ""
 	}
 	return value.Format(time.RFC3339)
-}
-
-func resolveActivationCodeExpiration(now time.Time, activationCode string) (time.Time, error) {
-	if strings.TrimSpace(activationCode) == "" {
-		return time.Time{}, fmt.Errorf("activation code is required")
-	}
-	// TODO: replace this fallback with real activation-code verification.
-	return now.AddDate(1, 0, 0), nil
 }
 
 func defaultShopCode(platform, platformShopID, businessID string) string {
@@ -506,6 +505,14 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
+func newActivationCodeLockValue() (string, error) {
+	buf := make([]byte, 16)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(buf), nil
+}
+
 func (s *ShopService) AuthorizeShop(id uint, req *shopDTO.ShopAuthorizeDTO) (*shopDTO.ShopDTO, error) {
 	if req == nil {
 		return nil, fmt.Errorf("request is nil")
@@ -525,13 +532,43 @@ func (s *ShopService) AuthorizeShop(id uint, req *shopDTO.ShopAuthorizeDTO) (*sh
 	if businessID == "" {
 		return nil, fmt.Errorf("business id is required before authorization")
 	}
+	if redisMiddleware.Rdb == nil {
+		return nil, fmt.Errorf("redis is not initialized")
+	}
 
-	now := time.Now()
-	expiresAt, err := resolveActivationCodeExpiration(now, activationCode)
+	lockValue, err := newActivationCodeLockValue()
 	if err != nil {
 		return nil, err
 	}
+	lockKey := "activation_code:lock:" + activationCode
+	locker := redisMiddleware.NewRedisLock(redisMiddleware.Rdb)
+	if err := locker.Lock(lockKey, lockValue, 30*time.Second); err != nil {
+		return nil, fmt.Errorf("activation code is being activated, please try again later")
+	}
+	defer func() {
+		_ = locker.Unlock(lockKey, lockValue)
+	}()
+
+	now := time.Now()
 	err = s.shopAuthorizationRepository.Transaction(func(tx *gorm.DB) error {
+		activationDetail, detailErr := s.activationCodeRepository.FindByActivationCodeWithTx(tx, activationCode)
+		if detailErr != nil {
+			if detailErr == gorm.ErrRecordNotFound {
+				return fmt.Errorf("activation code not found")
+			}
+			return detailErr
+		}
+		if activationDetail.Active == 0 {
+			return fmt.Errorf("activation code not found")
+		}
+		if strings.ToUpper(strings.TrimSpace(activationDetail.Status)) != "UNUSED" {
+			return fmt.Errorf("activation code is not unused")
+		}
+		if activationDetail.DurationDays <= 0 {
+			return fmt.Errorf("activation code durationDays must be positive")
+		}
+		expiresAt := now.AddDate(0, 0, activationDetail.DurationDays)
+
 		conflict, conflictErr := s.shopAuthorizationRepository.FindConflictActiveAuthorizationWithTx(tx, activationCode, businessID)
 		if conflictErr == nil {
 			if conflict.ExpiresAt == nil || conflict.ExpiresAt.After(now) {
@@ -539,6 +576,13 @@ func (s *ShopService) AuthorizeShop(id uint, req *shopDTO.ShopAuthorizeDTO) (*sh
 			}
 		} else if conflictErr != nil && conflictErr != gorm.ErrRecordNotFound {
 			return conflictErr
+		}
+
+		activationDetail.Status = "ACTIVATED"
+		activationDetail.StartTime = &now
+		activationDetail.EndTime = &expiresAt
+		if _, err := s.activationCodeRepository.SaveWithTx(tx, activationDetail); err != nil {
+			return err
 		}
 
 		authEntity, authErr := s.shopAuthorizationRepository.FindLatestActiveByBusinessIDWithTx(tx, shopEntity.AppUserID, businessID)

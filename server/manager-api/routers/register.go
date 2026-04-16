@@ -6,6 +6,7 @@ import (
 	"manager-api/pkg/account"
 	"manager-api/pkg/login"
 	"manager-api/pkg/permission"
+	productActivationCode "manager-api/pkg/product_activation_code"
 	"manager-api/pkg/tenant"
 	"manager-api/pkg/user"
 
@@ -26,5 +27,8 @@ func registerHandler() []routers.Handler {
 		build("permission", func() routers.Handler { return permission.NewPermissionHandler() }),
 		build("user", func() routers.Handler { return user.NewUserHandler() }),
 		build("tenant", func() routers.Handler { return tenant.NewTenantHandler() }),
+		build("product_activation_code", func() routers.Handler {
+			return productActivationCode.NewProductActivationCodeHandler()
+		}),
 	}
 }

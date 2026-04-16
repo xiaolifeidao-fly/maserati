@@ -1,8 +1,10 @@
 "use client";
 
 import {
+  ApartmentOutlined,
   AppstoreOutlined,
   BellOutlined,
+  KeyOutlined,
   LogoutOutlined,
   TeamOutlined,
 } from "@ant-design/icons";
@@ -20,6 +22,9 @@ interface ManagerShellProps extends PropsWithChildren {}
 type MenuItem = Required<MenuProps>["items"][number];
 
 function getOpenKeys(pathname: string) {
+  if (pathname.startsWith("/activation-code")) {
+    return ["/activation-code"];
+  }
   return [];
 }
 
@@ -38,6 +43,16 @@ export function ManagerShell({ children }: ManagerShellProps) {
         label: "用户管理",
         icon: <TeamOutlined />,
       },
+      {
+        key: "/tenant/list",
+        label: "租户管理",
+        icon: <ApartmentOutlined />,
+      },
+      {
+        key: "/activation-code/admin",
+        label: "激活码",
+        icon: <KeyOutlined />,
+      },
     ],
     [],
   );
@@ -53,10 +68,31 @@ export function ManagerShell({ children }: ManagerShellProps) {
         icon: <TeamOutlined />,
         label: "用户管理",
       },
+      {
+        key: "/tenant/list",
+        icon: <ApartmentOutlined />,
+        label: "租户管理",
+      },
+      {
+        key: "/activation-code",
+        icon: <KeyOutlined />,
+        label: "激活码",
+        children: [
+          {
+            key: "/activation-code/admin",
+            label: "激活码（管理员）",
+          },
+          {
+            key: "/activation-code/types",
+            label: "激活码类别管理",
+          },
+        ],
+      },
     ],
     [],
   );
   const activePath = pathname ?? "/manager-dashboard";
+  const selectedKey = activePath === "/activation-code" ? "/activation-code/admin" : activePath;
 
   const handleLogout = () => {
     clearAuthToken();
@@ -106,8 +142,8 @@ export function ManagerShell({ children }: ManagerShellProps) {
               <Menu
                 className="manager-shell-menu"
                 mode="inline"
-                selectedKeys={[activePath]}
-                defaultOpenKeys={getOpenKeys(activePath)}
+                selectedKeys={[selectedKey]}
+                defaultOpenKeys={getOpenKeys("/activation-code")}
                 items={items}
                 onClick={({ key }) => {
                   if (typeof key === "string" && key.startsWith("/")) {

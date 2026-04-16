@@ -4,6 +4,7 @@ import (
 	baseDTO "common/base/dto"
 	"common/middleware/db"
 	"fmt"
+	accountRepository "service/account/repository"
 	productActivationCodeDTO "service/product_activation_code/dto"
 	productActivationCodeRepository "service/product_activation_code/repository"
 	"strings"
@@ -13,14 +14,22 @@ import (
 )
 
 type ProductActivationCodeService struct {
-	typeRepository   *productActivationCodeRepository.ProductActivationCodeTypeRepository
-	detailRepository *productActivationCodeRepository.ProductActivationCodeDetailRepository
+	typeRepository          *productActivationCodeRepository.ProductActivationCodeTypeRepository
+	detailRepository        *productActivationCodeRepository.ProductActivationCodeDetailRepository
+	batchRepository         *productActivationCodeRepository.ProductActivationCodeBatchRepository
+	bindingRepository       *productActivationCodeRepository.TenantActivationCodeTypeBindingRepository
+	accountRepository       *accountRepository.AccountRepository
+	accountDetailRepository *accountRepository.AccountDetailRepository
 }
 
 func NewProductActivationCodeService() *ProductActivationCodeService {
 	return &ProductActivationCodeService{
-		typeRepository:   db.GetRepository[productActivationCodeRepository.ProductActivationCodeTypeRepository](),
-		detailRepository: db.GetRepository[productActivationCodeRepository.ProductActivationCodeDetailRepository](),
+		typeRepository:          db.GetRepository[productActivationCodeRepository.ProductActivationCodeTypeRepository](),
+		detailRepository:        db.GetRepository[productActivationCodeRepository.ProductActivationCodeDetailRepository](),
+		batchRepository:         db.GetRepository[productActivationCodeRepository.ProductActivationCodeBatchRepository](),
+		bindingRepository:       db.GetRepository[productActivationCodeRepository.TenantActivationCodeTypeBindingRepository](),
+		accountRepository:       db.GetRepository[accountRepository.AccountRepository](),
+		accountDetailRepository: db.GetRepository[accountRepository.AccountDetailRepository](),
 	}
 }
 
@@ -28,7 +37,13 @@ func (s *ProductActivationCodeService) EnsureTable() error {
 	if err := s.typeRepository.EnsureTable(); err != nil {
 		return err
 	}
-	return s.detailRepository.EnsureTable()
+	if err := s.detailRepository.EnsureTable(); err != nil {
+		return err
+	}
+	if err := s.batchRepository.EnsureTable(); err != nil {
+		return err
+	}
+	return s.bindingRepository.EnsureTable()
 }
 
 func normalizeProductActivationCodePage(page, pageIndex, pageSize int) (int, int) {
@@ -45,6 +60,25 @@ func normalizeProductActivationCodePage(page, pageIndex, pageSize int) (int, int
 		pageSize = 200
 	}
 	return pageIndex, pageSize
+}
+
+func uniqueUint64s(values []uint64) []uint64 {
+	if len(values) == 0 {
+		return []uint64{}
+	}
+	result := make([]uint64, 0, len(values))
+	seen := make(map[uint64]struct{}, len(values))
+	for _, value := range values {
+		if value == 0 {
+			continue
+		}
+		if _, exists := seen[value]; exists {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	return result
 }
 
 func normalizeActivationCodePrice(value string) string {
@@ -136,6 +170,7 @@ func toProductActivationCodeDetailDTO(entity *productActivationCodeRepository.Pr
 			UpdatedBy:   entity.UpdatedBy,
 		},
 		TypeID:         entity.TypeID,
+		BatchID:        entity.BatchID,
 		DurationDays:   entity.DurationDays,
 		StartTime:      formatActivationCodeTime(entity.StartTime),
 		EndTime:        formatActivationCodeTime(entity.EndTime),
@@ -153,6 +188,41 @@ func toProductActivationCodeDetailDTOs(entities []*productActivationCodeReposito
 	return dtos
 }
 
+func toProductActivationCodeBatchDTO(entity *productActivationCodeRepository.ProductActivationCodeBatch) *productActivationCodeDTO.ProductActivationCodeBatchDTO {
+	if entity == nil {
+		return nil
+	}
+	return &productActivationCodeDTO.ProductActivationCodeBatchDTO{
+		BaseDTO: baseDTO.BaseDTO{
+			Id:          entity.Id,
+			Active:      entity.Active,
+			CreatedTime: entity.CreatedTime,
+			CreatedBy:   entity.CreatedBy,
+			UpdatedTime: entity.UpdatedTime,
+			UpdatedBy:   entity.UpdatedBy,
+		},
+		TypeID:         entity.TypeID,
+		UserID:         entity.UserID,
+		TotalCount:     entity.TotalCount,
+		GeneratedCount: entity.GeneratedCount,
+		FailedCount:    entity.FailedCount,
+		TotalPrice:     entity.TotalPrice,
+		ActualConsume:  entity.ActualConsume,
+		Status:         entity.Status,
+		Message:        entity.Message,
+		StartedTime:    formatActivationCodeTime(entity.StartedTime),
+		CompletedTime:  formatActivationCodeTime(entity.CompletedTime),
+	}
+}
+
+func toProductActivationCodeBatchDTOs(entities []*productActivationCodeRepository.ProductActivationCodeBatch) []*productActivationCodeDTO.ProductActivationCodeBatchDTO {
+	var dtos []*productActivationCodeDTO.ProductActivationCodeBatchDTO
+	for _, entity := range entities {
+		dtos = append(dtos, toProductActivationCodeBatchDTO(entity))
+	}
+	return dtos
+}
+
 func (s *ProductActivationCodeService) ListTypes(query productActivationCodeDTO.ProductActivationCodeTypeQueryDTO) (*baseDTO.PageDTO[productActivationCodeDTO.ProductActivationCodeTypeDTO], error) {
 	pageIndex, pageSize := normalizeProductActivationCodePage(query.Page, query.PageIndex, query.PageSize)
 	total, err := s.typeRepository.CountByQuery(query)
@@ -160,6 +230,23 @@ func (s *ProductActivationCodeService) ListTypes(query productActivationCodeDTO.
 		return nil, err
 	}
 	entities, err := s.typeRepository.ListByQuery(query, pageIndex, pageSize)
+	if err != nil {
+		return nil, err
+	}
+	return baseDTO.BuildPage(int(total), db.ToDTOs[productActivationCodeDTO.ProductActivationCodeTypeDTO](entities)), nil
+}
+
+func (s *ProductActivationCodeService) ListTypesByTenantIDs(query productActivationCodeDTO.ProductActivationCodeTypeQueryDTO, tenantIDs []uint64) (*baseDTO.PageDTO[productActivationCodeDTO.ProductActivationCodeTypeDTO], error) {
+	pageIndex, pageSize := normalizeProductActivationCodePage(query.Page, query.PageIndex, query.PageSize)
+	tenantIDs = uniqueUint64s(tenantIDs)
+	if len(tenantIDs) == 0 {
+		return baseDTO.BuildPage[productActivationCodeDTO.ProductActivationCodeTypeDTO](0, []*productActivationCodeDTO.ProductActivationCodeTypeDTO{}), nil
+	}
+	total, err := s.typeRepository.CountByTenantIDs(query, tenantIDs)
+	if err != nil {
+		return nil, err
+	}
+	entities, err := s.typeRepository.ListByTenantIDs(query, tenantIDs, pageIndex, pageSize)
 	if err != nil {
 		return nil, err
 	}
@@ -328,6 +415,7 @@ func (s *ProductActivationCodeService) CreateDetail(req *productActivationCodeDT
 	}
 	entity, err := s.detailRepository.Create(&productActivationCodeRepository.ProductActivationCodeDetail{
 		TypeID:         req.TypeID,
+		BatchID:        req.BatchID,
 		DurationDays:   durationDays,
 		StartTime:      startTime,
 		EndTime:        endTime,
@@ -357,6 +445,9 @@ func (s *ProductActivationCodeService) UpdateDetail(id uint, req *productActivat
 			return nil, err
 		}
 		entity.TypeID = *req.TypeID
+	}
+	if req.BatchID != nil {
+		entity.BatchID = *req.BatchID
 	}
 	typeEntity, err := validateActivationCodeType(s.typeRepository, entity.TypeID)
 	if err != nil {
