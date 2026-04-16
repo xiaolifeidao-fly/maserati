@@ -120,7 +120,6 @@ export function ActivationCodeManagementPanel({
             <Button
               type="text"
               icon={<ThunderboltOutlined />}
-              disabled={isTenantScope}
               onClick={() => {
                 setBatchRecord(record);
                 setBatchOpen(true);
