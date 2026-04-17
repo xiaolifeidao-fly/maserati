@@ -1,5 +1,5 @@
 ---
-name: 新增权限资源
+name: add-permission-resources
 description: 当用户要求根据本次上下文新增接口或新增页面生成管理端权限 SQL 时使用。用户只需要提供 role_id，本技能输出插入 resource_new 与 role_resource_new 的幂等 SQL，适用于本仓库 manager-api 权限资源补齐。
 ---
 
