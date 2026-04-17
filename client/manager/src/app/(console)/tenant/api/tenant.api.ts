@@ -91,7 +91,12 @@ export interface TenantActivationCodeTypeBindingPayload {
 }
 
 export async function fetchTenants(query: TenantListQuery) {
-  return getPage(TenantRecord, "/tenants", query);
+  return getPage(TenantRecord, "/tenants", {
+    pageIndex: query.pageIndex,
+    pageSize: query.pageSize,
+    name: query.name,
+    code: query.code,
+  });
 }
 
 export async function createTenant(payload: TenantPayload) {

@@ -183,7 +183,6 @@ func toShopAuthorizationDTO(entity *shopRepository.ShopAuthorization) *shopDTO.S
 		},
 		AppUserID:      entity.AppUserID,
 		ShopID:         entity.ShopID,
-		BusinessID:     entity.BusinessID,
 		ActivationCode: entity.ActivationCode,
 		Status:         normalizeShopAuthorizationStatus(entity.Status),
 		AuthorizedAt:   formatShopTime(entity.AuthorizedAt),
@@ -203,14 +202,14 @@ func (s *ShopService) refreshShopAuthorizationState(shopEntity *shopRepository.S
 	if shopEntity == nil {
 		return nil
 	}
-	businessID := strings.TrimSpace(shopEntity.BusinessID)
-	if businessID == "" {
+	shopID := uint64(shopEntity.Id)
+	if shopID == 0 {
 		shopEntity.AuthorizationStatus = "UNAUTHORIZED"
 		shopEntity.AuthorizationCode = ""
 		shopEntity.AuthorizationExpiresAt = nil
 		return nil
 	}
-	authEntity, err := s.shopAuthorizationRepository.FindLatestActiveByBusinessID(shopEntity.AppUserID, businessID)
+	authEntity, err := s.shopAuthorizationRepository.FindLatestActiveByShopID(shopEntity.AppUserID, shopID)
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
 			shopEntity.AuthorizationStatus = "UNAUTHORIZED"
@@ -528,10 +527,6 @@ func (s *ShopService) AuthorizeShop(id uint, req *shopDTO.ShopAuthorizeDTO) (*sh
 	if activationCode == "" {
 		return nil, fmt.Errorf("activation code is required")
 	}
-	businessID := strings.TrimSpace(shopEntity.BusinessID)
-	if businessID == "" {
-		return nil, fmt.Errorf("business id is required before authorization")
-	}
 	if redisMiddleware.Rdb == nil {
 		return nil, fmt.Errorf("redis is not initialized")
 	}
@@ -569,10 +564,10 @@ func (s *ShopService) AuthorizeShop(id uint, req *shopDTO.ShopAuthorizeDTO) (*sh
 		}
 		expiresAt := now.AddDate(0, 0, activationDetail.DurationDays)
 
-		conflict, conflictErr := s.shopAuthorizationRepository.FindConflictActiveAuthorizationWithTx(tx, activationCode, businessID)
+		conflict, conflictErr := s.shopAuthorizationRepository.FindConflictActiveAuthorizationWithTx(tx, activationCode, uint64(shopEntity.Id))
 		if conflictErr == nil {
 			if conflict.ExpiresAt == nil || conflict.ExpiresAt.After(now) {
-				return fmt.Errorf("activation code is already bound to another business id")
+				return fmt.Errorf("activation code is already bound to another shop")
 			}
 		} else if conflictErr != nil && conflictErr != gorm.ErrRecordNotFound {
 			return conflictErr
@@ -585,7 +580,7 @@ func (s *ShopService) AuthorizeShop(id uint, req *shopDTO.ShopAuthorizeDTO) (*sh
 			return err
 		}
 
-		authEntity, authErr := s.shopAuthorizationRepository.FindLatestActiveByBusinessIDWithTx(tx, shopEntity.AppUserID, businessID)
+		authEntity, authErr := s.shopAuthorizationRepository.FindLatestActiveByShopIDWithTx(tx, shopEntity.AppUserID, uint64(shopEntity.Id))
 		if authErr != nil && authErr != gorm.ErrRecordNotFound {
 			return authErr
 		}
@@ -594,7 +589,6 @@ func (s *ShopService) AuthorizeShop(id uint, req *shopDTO.ShopAuthorizeDTO) (*sh
 			authEntity = &shopRepository.ShopAuthorization{
 				AppUserID:      shopEntity.AppUserID,
 				ShopID:         uint64(shopEntity.Id),
-				BusinessID:     businessID,
 				ActivationCode: activationCode,
 				Status:         "AUTHORIZED",
 				AuthorizedAt:   &now,
@@ -606,7 +600,6 @@ func (s *ShopService) AuthorizeShop(id uint, req *shopDTO.ShopAuthorizeDTO) (*sh
 		} else {
 			authEntity.ShopID = uint64(shopEntity.Id)
 			authEntity.AppUserID = shopEntity.AppUserID
-			authEntity.BusinessID = businessID
 			authEntity.ActivationCode = activationCode
 			authEntity.Status = "AUTHORIZED"
 			authEntity.AuthorizedAt = &now
@@ -616,7 +609,6 @@ func (s *ShopService) AuthorizeShop(id uint, req *shopDTO.ShopAuthorizeDTO) (*sh
 			}
 		}
 
-		shopEntity.BusinessID = businessID
 		shopEntity.AuthorizationStatus = "AUTHORIZED"
 		shopEntity.AuthorizationCode = activationCode
 		shopEntity.AuthorizationExpiresAt = &expiresAt

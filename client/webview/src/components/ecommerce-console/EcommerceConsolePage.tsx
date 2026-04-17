@@ -21,7 +21,7 @@ import type { ColumnsType } from "antd/es/table";
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
 import { type CollectBatchRecord } from "@eleapi/collect/collect.api";
-import { type ProductRecord, type ShopRecord } from "@eleapi/commerce/commerce.api";
+import { type ProductRecord, type ShopRecord, type WorkspaceOverview as WorkspaceOverviewMetrics } from "@eleapi/commerce/commerce.api";
 import { getCollectApi } from "@/utils/collect";
 import { getCommerceApi } from "@/utils/commerce";
 import { formatDateTime } from "@/utils/format";
@@ -81,6 +81,7 @@ interface SectionConfig {
 }
 
 interface WorkspaceOverview {
+  dailyMetrics: WorkspaceOverviewMetrics | null;
   shopTotal: number;
   authorizedShopTotal: number;
   productTotal: number;
@@ -94,41 +95,42 @@ interface WorkspaceOverview {
 
 const sectionConfigs: Record<SectionKey, SectionConfig> = {
   workspace: {
-    badge: "经营驾驶舱",
+    badge: "实时数据看板",
     title: "工作台",
-    description: "把今日成交、营销节点、待处理任务和服务预警集中到一个桌面视图，适合商家一开机就进入状态。",
-    spotlight: "大促预热进入冲刺期，建议优先处理支付转化与客服响应速度。",
-    heroAction: "查看今日任务",
+    description: "基于当前店铺、商品与采集接口汇总真实业务数据。",
+    spotlight: "正在加载今日数据，请稍候刷新工作台。",
+    heroAction: "",
     metrics: [
-      { label: "今日成交额", value: "¥286,400", helper: "较昨日 +18.6%" },
-      { label: "待发货订单", value: "324", helper: "2 小时内需处理 89 单" },
-      { label: "消息中心", value: "27", helper: "售后 9 条 / 活动 6 条 / 系统 12 条" },
-      { label: "会员新增", value: "1,284", helper: "私域拉新完成率 92%" },
+      { label: "今日新增店铺数量", value: "0", helper: "今日创建的店铺记录" },
+      { label: "今日新发布商品", value: "0", helper: "今日创建且状态为已发布的商品" },
+      { label: "今日新采集商品数量", value: "0", helper: "今日新增采集商品记录" },
+      { label: "已接入店铺", value: "0", helper: "已授权 0 家" },
+      { label: "商品总量", value: "0", helper: "已发布 0 个" },
+      { label: "采集任务总数", value: "0", helper: "运行中 0 个" },
     ],
-    tableTitle: "核心经营卡位",
-    tableDescription: "当前最值得盯的经营模块，按影响营收和风险优先级排序。",
+    tableTitle: "基础数据概览",
+    tableDescription: "来自店铺、商品、采集任务接口的当前汇总数据。",
     rows: [
-      { key: "1", name: "直播间主推款", status: "热卖", owner: "直播运营组", value: "支付转化 8.2%", trend: "+1.4%" },
-      { key: "2", name: "店铺满减活动", status: "进行中", owner: "营销中台", value: "核销 1,042 次", trend: "+18%" },
-      { key: "3", name: "售后超时工单", status: "预警", owner: "客服一组", value: "11 条待回访", trend: "-3 条" },
-      { key: "4", name: "新品首发专区", status: "待加码", owner: "商品运营", value: "点击率 3.7%", trend: "+0.6%" },
+      { key: "shops", name: "店铺接入情况", status: "待加载", owner: "店铺管理", value: "总计 0 家 / 已授权 0 家", trend: "0%" },
+      { key: "products", name: "商品资料情况", status: "待加载", owner: "商品管理", value: "总计 0 个 / 已发布 0 个", trend: "0%" },
+      { key: "collects", name: "采集执行情况", status: "待加载", owner: "采集管理", value: "总计 0 个 / 运行中 0 个", trend: "0%" },
     ],
-    feedTitle: "待办与提醒",
+    feedTitle: "最近更新",
     feed: [
-      { title: "17:00 前完成首页焦点图替换", meta: "来源: 运营日程", status: "高优先" },
-      { title: "售后超时订单需要人工介入", meta: "来源: 消息中心", status: "处理中" },
-      { title: "爆款库存低于安全阈值", meta: "来源: 库存预警", status: "立即补货" },
+      { title: "暂未加载到店铺数据", meta: "可前往店铺管理查看", status: "待处理" },
+      { title: "暂未加载到商品数据", meta: "可前往商品管理查看", status: "待处理" },
+      { title: "暂未加载到采集任务", meta: "可前往采集管理查看", status: "待处理" },
     ],
-    actionTitle: "推荐动作",
+    actionTitle: "数据建议",
     actions: [
-      { title: "补齐晚高峰直播优惠券", description: "18:00-22:00 预计 UV 抬升 22%，建议提高引导券面值。" },
-      { title: "同步客服快捷话术", description: "售后咨询集中在尺码与物流，优先同步快捷回复提升接待效率。" },
+      { title: "检查店铺授权", description: "店铺授权影响商品发布和采集链路，建议优先确保已接入店铺均完成授权。" },
+      { title: "关注采集结果", description: "采集商品记录会进入后续商品资料处理流程，可根据最近更新继续检查采集任务状态。" },
     ],
-    healthTitle: "经营健康度",
+    healthTitle: "数据覆盖率",
     health: [
-      { label: "支付转化", value: 76, tone: "hot" },
-      { label: "客服响应", value: 64, tone: "steady" },
-      { label: "库存安全", value: 38, tone: "risk" },
+      { label: "店铺授权覆盖率", value: 0, tone: "risk" },
+      { label: "商品发布覆盖率", value: 0, tone: "risk" },
+      { label: "采集任务运行率", value: 0, tone: "risk" },
     ],
   },
   store: {
@@ -269,6 +271,7 @@ const statusColorMap: Record<string, string> = {
   自动运行: "green",
   待审核: "orange",
   波动预警: "red",
+  待加载: "default",
 };
 
 const iconMap: Record<SectionKey, ReactNode> = {
@@ -333,6 +336,7 @@ export function EcommerceConsolePage({ section }: { section: SectionKey }) {
         publishedProductResult,
         collectResult,
         runningCollectResult,
+        workspaceOverviewResult,
       ] = await Promise.all([
         commerceApi.listShops({ pageIndex: 1, pageSize: 3 }),
         commerceApi.listShops({ pageIndex: 1, pageSize: 1, authorizationStatus: "AUTHORIZED" }),
@@ -340,6 +344,7 @@ export function EcommerceConsolePage({ section }: { section: SectionKey }) {
         commerceApi.listProducts({ pageIndex: 1, pageSize: 1, status: "PUBLISHED" }),
         collectApi.listCollectBatches({ pageIndex: 1, pageSize: 3 }),
         collectApi.listCollectBatches({ pageIndex: 1, pageSize: 1, status: "RUNNING" }),
+        commerceApi.getWorkspaceOverview(),
       ]);
 
       if (!active) {
@@ -347,6 +352,7 @@ export function EcommerceConsolePage({ section }: { section: SectionKey }) {
       }
 
       setWorkspaceOverview({
+        dailyMetrics: workspaceOverviewResult,
         shopTotal: shopResult.total,
         authorizedShopTotal: authorizedShopResult.total,
         productTotal: productResult.total,
@@ -386,11 +392,29 @@ export function EcommerceConsolePage({ section }: { section: SectionKey }) {
     const latestShop = workspaceOverview.latestShops?.[0];
     const latestProduct = workspaceOverview.latestProducts?.[0];
     const latestCollect = workspaceOverview.latestCollects?.[0];
+    const todayNewShopCount = workspaceOverview.dailyMetrics?.todayNewShopCount ?? 0;
+    const todayPublishedProductCount = workspaceOverview.dailyMetrics?.todayPublishedProductCount ?? 0;
+    const todayCollectedCount = workspaceOverview.dailyMetrics?.todayCollectedCount ?? 0;
 
     return {
       ...sectionConfigs.workspace,
-      spotlight: `当前已接入 ${workspaceOverview.shopTotal} 家店铺、沉淀 ${workspaceOverview.productTotal} 个商品、运行 ${workspaceOverview.collectTotal} 个采集任务。`,
+      spotlight: `今日新增店铺 ${todayNewShopCount} 家、新发布商品 ${todayPublishedProductCount} 个、新采集商品 ${todayCollectedCount} 个。`,
       metrics: [
+        {
+          label: "今日新增店铺数量",
+          value: String(todayNewShopCount),
+          helper: "今日创建的店铺记录",
+        },
+        {
+          label: "今日新发布商品",
+          value: String(todayPublishedProductCount),
+          helper: "今日创建且状态为已发布的商品",
+        },
+        {
+          label: "今日新采集商品数量",
+          value: String(todayCollectedCount),
+          helper: "今日新增采集商品记录",
+        },
         {
           label: "已接入店铺",
           value: String(workspaceOverview.shopTotal),
@@ -402,14 +426,9 @@ export function EcommerceConsolePage({ section }: { section: SectionKey }) {
           helper: `已发布 ${workspaceOverview.publishedProductTotal} 个`,
         },
         {
-          label: "采集任务",
+          label: "采集任务总数",
           value: String(workspaceOverview.collectTotal),
           helper: `运行中 ${workspaceOverview.runningCollectTotal} 个`,
-        },
-        {
-          label: "授权覆盖率",
-          value: `${shopCoverage}%`,
-          helper: "来自店铺管理实时统计",
         },
       ],
       rows: [
@@ -516,9 +535,11 @@ export function EcommerceConsolePage({ section }: { section: SectionKey }) {
           <div style={{ marginTop: 8, fontWeight: 700, color: "#7a3d1a", lineHeight: 1.6 }}>
             {config.spotlight}
           </div>
-          <Button type="primary" size="large" className="manager-commerce-primary-button">
-            {config.heroAction}
-          </Button>
+          {config.heroAction ? (
+            <Button type="primary" size="large" className="manager-commerce-primary-button">
+              {config.heroAction}
+            </Button>
+          ) : null}
         </div>
       </section>
 
@@ -534,6 +555,8 @@ export function EcommerceConsolePage({ section }: { section: SectionKey }) {
         ))}
       </section>
 
+      {section === "workspace" ? null : (
+        <>
       <section className="manager-commerce-dashboard-grid">
         <div className="manager-data-card manager-table">
           <div className="manager-commerce-section-head">
@@ -672,6 +695,8 @@ export function EcommerceConsolePage({ section }: { section: SectionKey }) {
           </div>
         </div>
       </section>
+        </>
+      )}
     </div>
   );
 }

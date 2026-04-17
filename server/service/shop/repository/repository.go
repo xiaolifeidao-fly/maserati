@@ -142,15 +142,24 @@ func (r *ShopAuthorizationRepository) EnsureTable() error {
 	if r.Db == nil {
 		return fmt.Errorf("database is not initialized")
 	}
-	return r.Db.AutoMigrate(&ShopAuthorization{})
+	if err := r.Db.AutoMigrate(&ShopAuthorization{}); err != nil {
+		return err
+	}
+	migrator := r.Db.Migrator()
+	if migrator.HasColumn(&ShopAuthorization{}, "business_id") {
+		if err := migrator.DropColumn(&ShopAuthorization{}, "business_id"); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
-func (r *ShopAuthorizationRepository) FindLatestActiveByBusinessID(appUserID uint64, businessID string) (*ShopAuthorization, error) {
+func (r *ShopAuthorizationRepository) FindLatestActiveByShopID(appUserID uint64, shopID uint64) (*ShopAuthorization, error) {
 	if r.Db == nil {
 		return nil, fmt.Errorf("database is not initialized")
 	}
 	var entity ShopAuthorization
-	err := r.Db.Where("active = ? AND app_user_id = ? AND business_id = ?", 1, appUserID, businessID).
+	err := r.Db.Where("active = ? AND app_user_id = ? AND shop_id = ?", 1, appUserID, shopID).
 		Order("expires_at DESC, id DESC").
 		First(&entity).Error
 	if err != nil {
@@ -169,9 +178,6 @@ func (r *ShopAuthorizationRepository) CountByQuery(query shopDTO.ShopAuthorizati
 	}
 	if query.ShopID > 0 {
 		dbQuery = dbQuery.Where("shop_id = ?", query.ShopID)
-	}
-	if value := strings.TrimSpace(query.BusinessID); value != "" {
-		dbQuery = dbQuery.Where("business_id LIKE ?", "%"+value+"%")
 	}
 	if value := strings.TrimSpace(query.ActivationCode); value != "" {
 		dbQuery = dbQuery.Where("activation_code LIKE ?", "%"+value+"%")
@@ -197,9 +203,6 @@ func (r *ShopAuthorizationRepository) ListByQuery(query shopDTO.ShopAuthorizatio
 	if query.ShopID > 0 {
 		dbQuery = dbQuery.Where("shop_id = ?", query.ShopID)
 	}
-	if value := strings.TrimSpace(query.BusinessID); value != "" {
-		dbQuery = dbQuery.Where("business_id LIKE ?", "%"+value+"%")
-	}
 	if value := strings.TrimSpace(query.ActivationCode); value != "" {
 		dbQuery = dbQuery.Where("activation_code LIKE ?", "%"+value+"%")
 	}
@@ -213,12 +216,12 @@ func (r *ShopAuthorizationRepository) ListByQuery(query shopDTO.ShopAuthorizatio
 	return entities, nil
 }
 
-func (r *ShopAuthorizationRepository) FindConflictActiveAuthorization(activationCode, businessID string) (*ShopAuthorization, error) {
+func (r *ShopAuthorizationRepository) FindConflictActiveAuthorization(activationCode string, shopID uint64) (*ShopAuthorization, error) {
 	if r.Db == nil {
 		return nil, fmt.Errorf("database is not initialized")
 	}
 	var entity ShopAuthorization
-	err := r.Db.Where("active = ? AND activation_code = ? AND business_id <> ?", 1, activationCode, businessID).
+	err := r.Db.Where("active = ? AND activation_code = ? AND shop_id <> ?", 1, activationCode, shopID).
 		Order("id DESC").
 		First(&entity).Error
 	if err != nil {
@@ -239,12 +242,12 @@ func (r *ShopAuthorizationRepository) CreateWithTx(tx *gorm.DB, entity *ShopAuth
 	return r.WithTx(tx).Create(entity)
 }
 
-func (r *ShopAuthorizationRepository) FindLatestActiveByBusinessIDWithTx(tx *gorm.DB, appUserID uint64, businessID string) (*ShopAuthorization, error) {
-	return r.WithTx(tx).FindLatestActiveByBusinessID(appUserID, businessID)
+func (r *ShopAuthorizationRepository) FindLatestActiveByShopIDWithTx(tx *gorm.DB, appUserID uint64, shopID uint64) (*ShopAuthorization, error) {
+	return r.WithTx(tx).FindLatestActiveByShopID(appUserID, shopID)
 }
 
-func (r *ShopAuthorizationRepository) FindConflictActiveAuthorizationWithTx(tx *gorm.DB, activationCode, businessID string) (*ShopAuthorization, error) {
-	return r.WithTx(tx).FindConflictActiveAuthorization(activationCode, businessID)
+func (r *ShopAuthorizationRepository) FindConflictActiveAuthorizationWithTx(tx *gorm.DB, activationCode string, shopID uint64) (*ShopAuthorization, error) {
+	return r.WithTx(tx).FindConflictActiveAuthorization(activationCode, shopID)
 }
 
 func (r *ShopAuthorizationRepository) Transaction(fn func(tx *gorm.DB) error) error {

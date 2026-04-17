@@ -143,6 +143,14 @@ export interface ProductPayload {
   status: string;
 }
 
+export class WorkspaceOverview {
+  generatedAt = "";
+  todayStart = "";
+  todayNewShopCount = 0;
+  todayPublishedProductCount = 0;
+  todayCollectedCount = 0;
+}
+
 export class CommerceApi extends ElectronApi {
   getApiName(): string {
     return "commerce";
@@ -246,5 +254,10 @@ export class CommerceApi extends ElectronApi {
   @InvokeType(Protocols.INVOKE)
   async deleteProduct(id: number): Promise<{ deleted: boolean }> {
     return this.invokeApi("deleteProduct", id);
+  }
+
+  @InvokeType(Protocols.INVOKE)
+  async getWorkspaceOverview(): Promise<WorkspaceOverview> {
+    return this.invokeApi("getWorkspaceOverview");
   }
 }

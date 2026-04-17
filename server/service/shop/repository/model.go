@@ -29,7 +29,6 @@ type ShopAuthorization struct {
 	db.BaseEntity
 	AppUserID      uint64     `gorm:"column:app_user_id;type:bigint unsigned;index:idx_app_user_id" description:"客户端用户ID"`
 	ShopID         uint64     `gorm:"column:shop_id;type:bigint unsigned;index:idx_shop_id" description:"店铺ID"`
-	BusinessID     string     `gorm:"column:business_id;type:varchar(100);index:idx_business_id" description:"业务ID"`
 	ActivationCode string     `gorm:"column:activation_code;type:varchar(100);index:idx_activation_code" description:"激活码"`
 	Status         string     `gorm:"column:status;type:varchar(32)" description:"授权状态"`
 	AuthorizedAt   *time.Time `gorm:"column:authorized_at;type:timestamp null" description:"授权时间"`

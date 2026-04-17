@@ -2,9 +2,11 @@
 
 import {
   AppstoreOutlined,
+  BarcodeOutlined,
   BellOutlined,
   LogoutOutlined,
-  TeamOutlined,
+  ShopOutlined,
+  ShoppingOutlined,
 } from "@ant-design/icons";
 import { Avatar, Button, Empty, Layout, Popover, Space, Tag, Typography } from "antd";
 import { usePathname, useRouter } from "next/navigation";
@@ -59,13 +61,25 @@ const navigationItems = [
     key: "/workspace",
     label: "工作台",
     icon: <AppstoreOutlined />,
-    description: "工作台概览",
+    description: "实时经营看板",
   },
   {
-    key: "/user",
-    label: "用户管理",
-    icon: <TeamOutlined />,
-    description: "用户信息与权限管理",
+    key: "/shop",
+    label: "店铺管理",
+    icon: <ShopOutlined />,
+    description: "店铺接入与授权配置",
+  },
+  {
+    key: "/product",
+    label: "商品管理",
+    icon: <ShoppingOutlined />,
+    description: "商品资料与状态维护",
+  },
+  {
+    key: "/collection",
+    label: "采集管理",
+    icon: <BarcodeOutlined />,
+    description: "采集任务与结果跟踪",
   },
 ] as const;
 

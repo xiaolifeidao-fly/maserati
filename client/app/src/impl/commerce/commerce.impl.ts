@@ -16,6 +16,7 @@ import {
   type PlatformRecord,
   type ProductRecord,
   type ShopRecord,
+  type WorkspaceOverview,
 } from "@eleapi/commerce/commerce.api";
 import { normalizeCollectSourceType } from "@eleapi/collect/collect.platform";
 import { getShopLoginPlatformDriver } from "@src/commerce-login/platforms/registry";
@@ -115,5 +116,9 @@ export class CommerceImpl extends CommerceApi {
 
   async deleteProduct(id: number): Promise<{ deleted: boolean }> {
     return requestBackend("DELETE", `/products/${id}`);
+  }
+
+  async getWorkspaceOverview(): Promise<WorkspaceOverview> {
+    return requestBackend("GET", "/workspace/overview");
   }
 }

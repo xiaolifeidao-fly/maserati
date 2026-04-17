@@ -67,7 +67,6 @@ type ShopAuthorizationDTO struct {
 	baseDTO.BaseDTO
 	AppUserID      uint64 `json:"appUserId"`
 	ShopID         uint64 `json:"shopId"`
-	BusinessID     string `json:"businessId"`
 	ActivationCode string `json:"activationCode"`
 	Status         string `json:"status"`
 	AuthorizedAt   string `json:"authorizedAt"`
@@ -80,7 +79,6 @@ type ShopAuthorizationQueryDTO struct {
 	PageSize       int    `form:"pageSize"`
 	AppUserID      uint64 `form:"appUserId"`
 	ShopID         uint64 `form:"shopId"`
-	BusinessID     string `form:"businessId"`
 	ActivationCode string `form:"activationCode"`
 	Status         string `form:"status"`
 }

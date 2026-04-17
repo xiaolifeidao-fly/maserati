@@ -330,8 +330,16 @@ export abstract class DoorEngine<T = any> {
             key += "_" + storeBrowserPath;
         }   
         if(contextMap.has(key)){
-            log.info("from cache browser key is ", key);
-            return contextMap.get(key) as BrowserContext;
+            const cached = contextMap.get(key) as BrowserContext;
+            try {
+                // cookies() 是轻量检测：已关闭的 context 调用会抛错
+                await cached.cookies();
+                log.info("from cache browser key is ", key);
+                return cached;
+            } catch (error) {
+                log.warn('[Engine] cached context is stale, removing and recreating', error);
+                contextMap.delete(key);
+            }
         }
         const userDataDir = this.getUserDataDir();
         const platform = await ensurePlatform();
@@ -378,6 +386,19 @@ export abstract class DoorEngine<T = any> {
         try{
             const context = await chromium.launchPersistentContext(userDataDir, contextConfig);
             contextMap.set(key, context);
+            // 恢复上次保存的 session cookie（session cookie 不会随持久化 context 的关闭写入磁盘）
+            const sessionPath = await this.getSessionPath();
+            if (sessionPath && fs.existsSync(sessionPath)) {
+                try {
+                    const sessionData = JSON.parse(fs.readFileSync(sessionPath, 'utf8'));
+                    if (Array.isArray(sessionData.cookies) && sessionData.cookies.length > 0) {
+                        await context.addCookies(sessionData.cookies);
+                        log.info('[Engine] restored session cookies from', sessionPath, 'count:', sessionData.cookies.length);
+                    }
+                } catch (restoreError) {
+                    log.warn('[Engine] failed to restore session cookies', restoreError);
+                }
+            }
             return context;
         }catch(error){
             log.error("create context error is ", error);
@@ -717,15 +738,20 @@ export abstract class DoorEngine<T = any> {
 
     public async closeContext(){
         if(this.context){
-            await this.context.close();
-            this.context = undefined;
-            // 清理缓存，防止下次调用拿到已关闭的 context
+            // 先计算 key 并清理 map / 重置引用，避免 close() 抛错后遗留已关闭的 context
             const storeBrowserPath = await this.getRealChromePath().catch(() => undefined);
             let key = this.getKey();
             if(storeBrowserPath){
                 key += "_" + storeBrowserPath;
             }
             contextMap.delete(key);
+            const ctx = this.context;
+            this.context = undefined;
+            try {
+                await ctx.close();
+            } catch (error) {
+                log.warn('[Engine] closeContext: context.close() failed (may already be closed)', error);
+            }
         }
     }
 

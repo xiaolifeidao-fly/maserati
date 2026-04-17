@@ -59,6 +59,7 @@ export class TbEngine extends DoorEngine {
         platformShopId: payload.platformShopId,
         businessId: payload.businessId,
       });
+      await this.saveContextState();
       await this.closeWorkspace();
       return true;
     };

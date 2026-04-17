@@ -11,6 +11,7 @@ import (
 	"app-api/pkg/product"
 	publishTask "app-api/pkg/publish_task"
 	"app-api/pkg/shop"
+	"app-api/pkg/workspace"
 	"common/middleware/routers"
 )
 
@@ -26,5 +27,6 @@ func registerHandler() []routers.Handler {
 		product.NewProductHandler(),
 		publishTask.NewPublishTaskHandler(),
 		shop.NewShopHandler(),
+		workspace.NewWorkspaceHandler(),
 	}
 }

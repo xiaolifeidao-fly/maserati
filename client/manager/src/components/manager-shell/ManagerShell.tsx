@@ -4,8 +4,11 @@ import {
   ApartmentOutlined,
   AppstoreOutlined,
   BellOutlined,
+  CloudDownloadOutlined,
   KeyOutlined,
   LogoutOutlined,
+  ShopOutlined,
+  ShoppingOutlined,
   TeamOutlined,
 } from "@ant-design/icons";
 import { Avatar, Badge, Button, Layout, Menu, Space, Typography } from "antd";
@@ -24,6 +27,18 @@ type MenuItem = Required<MenuProps>["items"][number];
 function getOpenKeys(pathname: string) {
   if (pathname.startsWith("/activation-code")) {
     return ["/activation-code"];
+  }
+  if (pathname.startsWith("/product")) {
+    return ["/product"];
+  }
+  if (pathname.startsWith("/collect")) {
+    return ["/collect"];
+  }
+  if (pathname.startsWith("/shop")) {
+    return ["/shop"];
+  }
+  if (pathname.startsWith("/app-user")) {
+    return ["/app-user-group"];
   }
   return [];
 }
@@ -49,6 +64,26 @@ export function ManagerShell({ children }: ManagerShellProps) {
         icon: <ApartmentOutlined />,
       },
       {
+        key: "/product/publish",
+        label: "商品发布",
+        icon: <ShoppingOutlined />,
+      },
+      {
+        key: "/collect/batches",
+        label: "采集批次",
+        icon: <CloudDownloadOutlined />,
+      },
+      {
+        key: "/shop/list",
+        label: "店铺列表",
+        icon: <ShopOutlined />,
+      },
+      {
+        key: "/app-user",
+        label: "App用户",
+        icon: <TeamOutlined />,
+      },
+      {
         key: "/activation-code/admin",
         label: "激活码",
         icon: <KeyOutlined />,
@@ -72,6 +107,50 @@ export function ManagerShell({ children }: ManagerShellProps) {
         key: "/tenant/list",
         icon: <ApartmentOutlined />,
         label: "租户管理",
+      },
+      {
+        key: "/product",
+        icon: <ShoppingOutlined />,
+        label: "商品管理",
+        children: [
+          {
+            key: "/product/publish",
+            label: "商品发布管理",
+          },
+        ],
+      },
+      {
+        key: "/collect",
+        icon: <CloudDownloadOutlined />,
+        label: "采集管理",
+        children: [
+          {
+            key: "/collect/batches",
+            label: "采集批次管理",
+          },
+        ],
+      },
+      {
+        key: "/shop",
+        icon: <ShopOutlined />,
+        label: "店铺管理",
+        children: [
+          {
+            key: "/shop/list",
+            label: "店铺列表",
+          },
+        ],
+      },
+      {
+        key: "/app-user-group",
+        icon: <TeamOutlined />,
+        label: "app用户",
+        children: [
+          {
+            key: "/app-user",
+            label: "app用户管理",
+          },
+        ],
       },
       {
         key: "/activation-code",
@@ -143,7 +222,7 @@ export function ManagerShell({ children }: ManagerShellProps) {
                 className="manager-shell-menu"
                 mode="inline"
                 selectedKeys={[selectedKey]}
-                defaultOpenKeys={getOpenKeys("/activation-code")}
+                defaultOpenKeys={getOpenKeys(activePath)}
                 items={items}
                 onClick={({ key }) => {
                   if (typeof key === "string" && key.startsWith("/")) {

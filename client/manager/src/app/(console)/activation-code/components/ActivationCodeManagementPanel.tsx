@@ -5,6 +5,7 @@ import {
   DeleteOutlined,
   EditOutlined,
   EyeOutlined,
+  KeyOutlined,
   ProfileOutlined,
   PlusOutlined,
   ReloadOutlined,
@@ -33,6 +34,7 @@ import { ActivationCodeBatchDetailModal } from "./ActivationCodeBatchDetailModal
 import { ActivationCodeDetailDrawer } from "./ActivationCodeDetailDrawer";
 import { GenerateActivationCodeBatchModal } from "./GenerateActivationCodeBatchModal";
 import { ActivationCodeTypeFormModal } from "./ActivationCodeTypeFormModal";
+import { QuickActivationCodeModal } from "./QuickActivationCodeModal";
 import { useActivationCodeTypeManagement } from "../hooks/useActivationCodeTypeManagement";
 
 const { Text } = Typography;
@@ -50,10 +52,12 @@ export function ActivationCodeManagementPanel({
   const [filters, setFilters] = useState({ name: "", durationDays: 0 });
   const [formOpen, setFormOpen] = useState(false);
   const [batchOpen, setBatchOpen] = useState(false);
+  const [quickCodeOpen, setQuickCodeOpen] = useState(false);
   const [batchDetailOpen, setBatchDetailOpen] = useState(false);
   const [detailDrawerOpen, setDetailDrawerOpen] = useState(false);
   const [editingRecord, setEditingRecord] = useState<ActivationCodeTypeRecord | null>(null);
   const [batchRecord, setBatchRecord] = useState<ActivationCodeTypeRecord | null>(null);
+  const [quickCodeRecord, setQuickCodeRecord] = useState<ActivationCodeTypeRecord | null>(null);
   const [batchDetailRecord, setBatchDetailRecord] = useState<ActivationCodeTypeRecord | null>(null);
   const [detailTypeRecord, setDetailTypeRecord] = useState<ActivationCodeTypeRecord | null>(null);
   const [detailBatchRecord, setDetailBatchRecord] = useState<ActivationCodeBatchRecord | null>(null);
@@ -123,6 +127,16 @@ export function ActivationCodeManagementPanel({
               onClick={() => {
                 setBatchRecord(record);
                 setBatchOpen(true);
+              }}
+            />
+          </Tooltip>
+          <Tooltip title="快速获取未使用激活码">
+            <Button
+              type="text"
+              icon={<KeyOutlined />}
+              onClick={() => {
+                setQuickCodeRecord(record);
+                setQuickCodeOpen(true);
               }}
             />
           </Tooltip>
@@ -320,6 +334,15 @@ export function ActivationCodeManagementPanel({
         onCancel={() => {
           setBatchOpen(false);
           setBatchRecord(null);
+        }}
+      />
+
+      <QuickActivationCodeModal
+        open={quickCodeOpen}
+        record={quickCodeRecord}
+        onCancel={() => {
+          setQuickCodeOpen(false);
+          setQuickCodeRecord(null);
         }}
       />
 
