@@ -1,7 +1,7 @@
 {
-  "name": "indo-whatsapp",
+  "name": "maserati",
   "version": "1.0.0",
-  "description": "Indo WhatsApp Client Application",
+  "description": "maserati Client Application",
   "main": "dist/main.js",
   "scripts": {
     "dev-mac": "export NODE_OPTIONS='--max-old-space-size=4096' && sh mac/dev.sh",
@@ -14,7 +14,7 @@
     "package:win-by-win": ".\\win\\package_win.bat"
   },
   "build": {
-    "appId": "com.x.indo.whatsapp.desk.app",
+    "appId": "com.x.ds.maserati.desk.app",
     "files": [
       "dist/**/*",
       "node_modules/**/*",
@@ -33,12 +33,12 @@
     "directories": {
       "output": "package"
     },
-    "productName": "indo-whatsapp",
+    "productName": "maserati",
     "npmRebuild": true,
     "mac": {
       "target": "dmg",
       "icon": "static/logo/logo.jpg",
-      "category": "com.x.indo.whatsapp.category.type"
+      "category": "com.x.ds.maserati.category.type"
     },
     "win": {
       "target": "nsis",
