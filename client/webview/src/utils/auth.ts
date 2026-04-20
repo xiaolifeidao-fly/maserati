@@ -1,6 +1,14 @@
 "use client";
 
-import { AuthApi, type AuthSession, type LoginInput, type RegisterInput } from "@eleapi/auth/auth.api";
+import {
+  AuthApi,
+  type AuthSession,
+  type ChangePasswordInput,
+  type CurrentUserProfile,
+  type LoginInput,
+  type RegisterInput,
+  type UpdateCurrentUserProfileInput,
+} from "@eleapi/auth/auth.api";
 
 type AuthBridge = {
   login?: (...args: unknown[]) => Promise<unknown>;
@@ -9,6 +17,9 @@ type AuthBridge = {
   getAuthState?: (...args: unknown[]) => Promise<unknown>;
   getToken?: (...args: unknown[]) => Promise<unknown>;
   validateStoredSession?: (...args: unknown[]) => Promise<unknown>;
+  getCurrentProfile?: (...args: unknown[]) => Promise<unknown>;
+  updateCurrentProfile?: (...args: unknown[]) => Promise<unknown>;
+  changePassword?: (...args: unknown[]) => Promise<unknown>;
 };
 
 function getWindowBridgeState() {
@@ -51,7 +62,10 @@ function hasAuthBridge(authBridge?: AuthBridge) {
       typeof authBridge.logout === "function" &&
       typeof authBridge.getAuthState === "function" &&
       typeof authBridge.getToken === "function" &&
-      typeof authBridge.validateStoredSession === "function",
+      typeof authBridge.validateStoredSession === "function" &&
+      typeof authBridge.getCurrentProfile === "function" &&
+      typeof authBridge.updateCurrentProfile === "function" &&
+      typeof authBridge.changePassword === "function",
   );
 }
 
@@ -155,4 +169,28 @@ export async function validateStoredSession(): Promise<AuthSession> {
 export async function hasValidSession() {
   const session = await validateStoredSession();
   return Boolean(session.authenticated);
+}
+
+export async function getCurrentProfile(): Promise<CurrentUserProfile> {
+  const authApi = await createAuthApi();
+  if (!authApi) {
+    throw new Error(buildUnavailableMessage());
+  }
+  return authApi.getCurrentProfile();
+}
+
+export async function updateCurrentProfile(input: UpdateCurrentUserProfileInput): Promise<CurrentUserProfile> {
+  const authApi = await createAuthApi();
+  if (!authApi) {
+    throw new Error(buildUnavailableMessage());
+  }
+  return authApi.updateCurrentProfile(input);
+}
+
+export async function changePassword(input: ChangePasswordInput): Promise<void> {
+  const authApi = await createAuthApi();
+  if (!authApi) {
+    throw new Error(buildUnavailableMessage());
+  }
+  await authApi.changePassword(input);
 }

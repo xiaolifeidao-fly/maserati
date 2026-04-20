@@ -1,4 +1,12 @@
-import { AuthApi, type AuthSession, type LoginInput, type RegisterInput } from "@eleapi/auth/auth.api";
+import {
+  AuthApi,
+  type AuthSession,
+  type ChangePasswordInput,
+  type CurrentUserProfile,
+  type LoginInput,
+  type RegisterInput,
+  type UpdateCurrentUserProfileInput,
+} from "@eleapi/auth/auth.api";
 import { requestBackend } from "../shared/backend";
 import { clearAuthSession, readAuthSession, saveAuthSession } from "../shared/auth-session";
 
@@ -77,6 +85,28 @@ const authAdapter = {
       };
     }
   },
+
+  async getCurrentProfile(): Promise<CurrentUserProfile> {
+    return requestBackend<CurrentUserProfile>("GET", "/app-user-profile");
+  },
+
+  async updateCurrentProfile(input: UpdateCurrentUserProfileInput): Promise<CurrentUserProfile> {
+    const result = await requestBackend<CurrentUserProfile>("PUT", "/app-user-profile", { data: input });
+    const session = readAuthSession();
+    if (session.token) {
+      saveAuthSession({
+        ...session,
+        authenticated: true,
+        username: result.username?.trim() || session.username,
+        displayName: result.name?.trim() || result.username?.trim() || session.displayName,
+      });
+    }
+    return result;
+  },
+
+  async changePassword(input: ChangePasswordInput): Promise<void> {
+    await requestBackend("PUT", "/app-user-profile/password", { data: input });
+  },
 };
 
 export class AuthImpl extends AuthApi {
@@ -102,5 +132,17 @@ export class AuthImpl extends AuthApi {
 
   async validateStoredSession(): Promise<AuthSession> {
     return authAdapter.validateStoredSession();
+  }
+
+  async getCurrentProfile(): Promise<CurrentUserProfile> {
+    return authAdapter.getCurrentProfile();
+  }
+
+  async updateCurrentProfile(input: UpdateCurrentUserProfileInput): Promise<CurrentUserProfile> {
+    return authAdapter.updateCurrentProfile(input);
+  }
+
+  async changePassword(input: ChangePasswordInput): Promise<void> {
+    return authAdapter.changePassword(input);
   }
 }

@@ -7,35 +7,35 @@ import (
 
 type AppUserDTO struct {
 	baseDTO.BaseDTO
-	Name           string    `json:"name"`
-	Username       string    `json:"username"`
-	Email          string    `json:"email"`
-	Phone          string    `json:"phone"`
-	Department     string    `json:"department"`
-	Password       string    `json:"password"`
-	OriginPassword string    `json:"originPassword"`
-	Status         string    `json:"status"`
+	Name           string     `json:"name"`
+	Username       string     `json:"username"`
+	Email          string     `json:"email"`
+	Phone          string     `json:"phone"`
+	Department     string     `json:"department"`
+	Password       string     `json:"password"`
+	OriginPassword string     `json:"originPassword"`
+	Status         string     `json:"status"`
 	LastLoginTime  *time.Time `json:"lastLoginTime"`
-	SecretKey      string    `json:"secretKey"`
-	Remark         string    `json:"remark"`
-	PubToken       string    `json:"pubToken"`
-	BanCount       uint32    `json:"banCount"`
+	SecretKey      string     `json:"secretKey"`
+	Remark         string     `json:"remark"`
+	PubToken       string     `json:"pubToken"`
+	BanCount       uint32     `json:"banCount"`
 }
 
 type CreateAppUserDTO struct {
-	Name           string    `json:"name"`
-	Username       string    `json:"username"`
-	Email          string    `json:"email"`
-	Phone          string    `json:"phone"`
-	Department     string    `json:"department"`
-	Password       string    `json:"password"`
-	OriginPassword string    `json:"originPassword"`
-	Status         string    `json:"status"`
+	Name           string     `json:"name"`
+	Username       string     `json:"username"`
+	Email          string     `json:"email"`
+	Phone          string     `json:"phone"`
+	Department     string     `json:"department"`
+	Password       string     `json:"password"`
+	OriginPassword string     `json:"originPassword"`
+	Status         string     `json:"status"`
 	LastLoginTime  *time.Time `json:"lastLoginTime"`
-	SecretKey      string    `json:"secretKey"`
-	Remark         string    `json:"remark"`
-	PubToken       string    `json:"pubToken"`
-	BanCount       uint32    `json:"banCount"`
+	SecretKey      string     `json:"secretKey"`
+	Remark         string     `json:"remark"`
+	PubToken       string     `json:"pubToken"`
+	BanCount       uint32     `json:"banCount"`
 }
 
 type RegisterAppUserDTO struct {
@@ -79,6 +79,30 @@ type AppUserStatsDTO struct {
 	VisibleUsers     int `json:"visibleUsers"`
 	RecentLoginUsers int `json:"recentLoginUsers"`
 	ActiveUsers      int `json:"activeUsers"`
+}
+
+type CurrentAppUserProfileDTO struct {
+	Id            int        `json:"id"`
+	Name          string     `json:"name"`
+	Username      string     `json:"username"`
+	Email         string     `json:"email"`
+	Phone         string     `json:"phone"`
+	Department    string     `json:"department"`
+	Remark        string     `json:"remark"`
+	LastLoginTime *time.Time `json:"lastLoginTime"`
+}
+
+type UpdateCurrentAppUserProfileDTO struct {
+	Name       string `json:"name"`
+	Email      string `json:"email"`
+	Phone      string `json:"phone"`
+	Department string `json:"department"`
+	Remark     string `json:"remark"`
+}
+
+type ChangeCurrentAppUserPasswordDTO struct {
+	OldPassword string `json:"oldPassword"`
+	NewPassword string `json:"newPassword"`
 }
 
 type AppUserLoginRecordDTO struct {

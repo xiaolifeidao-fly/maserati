@@ -5,6 +5,7 @@
   "main": "dist/main.js",
   "scripts": {
     "dev-mac": "export NODE_OPTIONS='--max-old-space-size=4096' && sh mac/dev.sh",
+    "stop-mac": "sh mac/stop.sh",
     "dev-win": "set NODE_OPTIONS=--max-old-space-size=4096 && .\\win\\dev.bat",
     "build": "export NODE_OPTIONS='--max-old-space-size=4096' && webpack --config webpack.config.js --mode production",
     "start": "electron . --disable-gpu --no-sandbox --max-old-space-size=4096",

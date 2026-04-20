@@ -4,14 +4,18 @@ import {
   AppstoreOutlined,
   BarcodeOutlined,
   BellOutlined,
+  DownOutlined,
+  LockOutlined,
   LogoutOutlined,
   ShopOutlined,
   ShoppingOutlined,
+  UserOutlined,
 } from "@ant-design/icons";
-import { Avatar, Button, Empty, Layout, Popover, Space, Tag, Typography } from "antd";
+import { Avatar, Button, Dropdown, Empty, Form, Input, Layout, Modal, Popover, Space, Tag, Typography, message } from "antd";
+import type { MenuProps } from "antd";
 import { usePathname, useRouter } from "next/navigation";
 import { PropsWithChildren, useEffect, useMemo, useState } from "react";
-import { getAuthState, logout } from "@/utils/auth";
+import { changePassword, getAuthState, getCurrentProfile, logout, updateCurrentProfile } from "@/utils/auth";
 import { getPublishApi } from "@/utils/publish";
 import { getPublishWindowApi } from "@/utils/publish-window";
 
@@ -55,6 +59,20 @@ interface PublishCenterMessage {
 type PublishCenterReadState = Record<string, string>;
 
 const PUBLISH_CENTER_READ_STORAGE_KEY = "publish-center-read-state-v1";
+
+interface ProfileFormValues {
+  name: string;
+  email?: string;
+  phone?: string;
+  department?: string;
+  remark?: string;
+}
+
+interface PasswordFormValues {
+  oldPassword: string;
+  newPassword: string;
+  confirmPassword: string;
+}
 
 const navigationItems = [
   {
@@ -100,9 +118,16 @@ export function ManagerShell({ children }: ManagerShellProps) {
   const pathname = usePathname();
   const router = useRouter();
   const activePath = getActivePath(pathname ?? "/workspace");
+  const [profileForm] = Form.useForm<ProfileFormValues>();
+  const [passwordForm] = Form.useForm<PasswordFormValues>();
   const [displayName, setDisplayName] = useState("管理员");
   const [username, setUsername] = useState("已登录用户");
   const [loggingOut, setLoggingOut] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [profileLoading, setProfileLoading] = useState(false);
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [passwordOpen, setPasswordOpen] = useState(false);
+  const [passwordSaving, setPasswordSaving] = useState(false);
   const [publishCenterState, setPublishCenterState] = useState<PublishCenterState>({
     tasks: [],
     messages: [],
@@ -330,6 +355,95 @@ export function ManagerShell({ children }: ManagerShellProps) {
     setPublishCenterOpen(nextOpen);
   };
 
+  const handleOpenProfile = async () => {
+    setProfileOpen(true);
+    setProfileLoading(true);
+    try {
+      const profile = await getCurrentProfile();
+      profileForm.setFieldsValue({
+        name: profile.name || profile.username || "",
+        email: profile.email || "",
+        phone: profile.phone || "",
+        department: profile.department || "",
+        remark: profile.remark || "",
+      });
+      setDisplayName(profile.name || profile.username || "管理员");
+      setUsername(profile.username || "已登录用户");
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "获取个人信息失败");
+    } finally {
+      setProfileLoading(false);
+    }
+  };
+
+  const handleSaveProfile = async () => {
+    const values = await profileForm.validateFields();
+    setProfileSaving(true);
+    try {
+      const profile = await updateCurrentProfile({
+        name: values.name.trim(),
+        email: values.email?.trim(),
+        phone: values.phone?.trim(),
+        department: values.department?.trim(),
+        remark: values.remark?.trim(),
+      });
+      setDisplayName(profile.name || profile.username || "管理员");
+      setUsername(profile.username || "已登录用户");
+      setProfileOpen(false);
+      message.success("个人信息已更新");
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "保存个人信息失败");
+    } finally {
+      setProfileSaving(false);
+    }
+  };
+
+  const handleOpenPassword = () => {
+    passwordForm.resetFields();
+    setPasswordOpen(true);
+  };
+
+  const handleSavePassword = async () => {
+    const values = await passwordForm.validateFields();
+    setPasswordSaving(true);
+    try {
+      await changePassword({
+        oldPassword: values.oldPassword.trim(),
+        newPassword: values.newPassword.trim(),
+      });
+      setPasswordOpen(false);
+      passwordForm.resetFields();
+      message.success("密码已修改");
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "修改密码失败");
+    } finally {
+      setPasswordSaving(false);
+    }
+  };
+
+  const userMenuItems: MenuProps["items"] = [
+    {
+      key: "profile",
+      icon: <UserOutlined />,
+      label: "个人信息",
+    },
+    {
+      key: "password",
+      icon: <LockOutlined />,
+      label: "修改密码",
+    },
+  ];
+
+  const handleUserMenuClick: MenuProps["onClick"] = ({ key }) => {
+    if (key === "profile") {
+      void handleOpenProfile();
+      return;
+    }
+    if (key === "password") {
+      handleOpenPassword();
+    }
+  };
+
   const handleLogout = async () => {
     setLoggingOut(true);
     try {
@@ -395,32 +509,40 @@ export function ManagerShell({ children }: ManagerShellProps) {
                       {publishCenterTrigger}
                     </Popover>
 
-                    <div className="manager-commerce-user-card">
-                      <Avatar
-                        style={{
-                          width: 42,
-                          height: 42,
-                          background: "linear-gradient(135deg, #d96b2b, #f0ae4d)",
-                          color: "#fdfefe",
-                          fontWeight: 700,
-                        }}
-                      >
-                        {(displayName || "管").slice(0, 1)}
-                      </Avatar>
-                      <div>
-                        <div style={{ fontWeight: 700, color: "var(--manager-text)" }}>{displayName}</div>
-                        <Text style={{ color: "var(--manager-text-soft)" }}>{username}</Text>
+                    <Dropdown
+                      trigger={["hover"]}
+                      placement="bottomRight"
+                      menu={{ items: userMenuItems, onClick: handleUserMenuClick }}
+                    >
+                      <div className="manager-commerce-user-card">
+                        <Avatar
+                          style={{
+                            width: 42,
+                            height: 42,
+                            background: "linear-gradient(135deg, #d96b2b, #f0ae4d)",
+                            color: "#fdfefe",
+                            fontWeight: 700,
+                          }}
+                        >
+                          {(displayName || "管").slice(0, 1)}
+                        </Avatar>
+                        <div>
+                          <div style={{ fontWeight: 700, color: "var(--manager-text)" }}>
+                            {displayName} <DownOutlined style={{ color: "var(--manager-text-faint)", fontSize: 10 }} />
+                          </div>
+                          <Text style={{ color: "var(--manager-text-soft)" }}>{username}</Text>
+                        </div>
+                        <Button
+                          type="text"
+                          onClick={handleLogout}
+                          icon={<LogoutOutlined />}
+                          loading={loggingOut}
+                          style={{ color: "var(--manager-text-soft)", fontWeight: 600 }}
+                        >
+                          退出
+                        </Button>
                       </div>
-                      <Button
-                        type="text"
-                        onClick={handleLogout}
-                        icon={<LogoutOutlined />}
-                        loading={loggingOut}
-                        style={{ color: "var(--manager-text-soft)", fontWeight: 600 }}
-                      >
-                        退出
-                      </Button>
-                    </div>
+                    </Dropdown>
                   </Space>
                 </div>
               </div>
@@ -452,6 +574,93 @@ export function ManagerShell({ children }: ManagerShellProps) {
           </Content>
         </Layout>
       </div>
+
+      <Modal
+        title="个人信息"
+        open={profileOpen}
+        okText="保存"
+        cancelText="取消"
+        confirmLoading={profileSaving}
+        onOk={() => void handleSaveProfile()}
+        onCancel={() => setProfileOpen(false)}
+        destroyOnClose
+      >
+        <Form<ProfileFormValues>
+          form={profileForm}
+          layout="vertical"
+          disabled={profileLoading || profileSaving}
+          preserve={false}
+        >
+          <Form.Item label="姓名" name="name" rules={[{ required: true, message: "请输入姓名" }]}>
+            <Input placeholder="请输入姓名" maxLength={50} />
+          </Form.Item>
+          <Form.Item label="邮箱" name="email" rules={[{ type: "email", message: "请输入正确的邮箱" }]}>
+            <Input placeholder="请输入邮箱" maxLength={100} />
+          </Form.Item>
+          <Form.Item label="手机号" name="phone">
+            <Input placeholder="请输入手机号" maxLength={30} />
+          </Form.Item>
+          <Form.Item label="部门" name="department">
+            <Input placeholder="请输入部门" maxLength={50} />
+          </Form.Item>
+          <Form.Item label="备注" name="remark">
+            <Input.TextArea placeholder="请输入备注" maxLength={200} rows={3} showCount />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal
+        title="修改密码"
+        open={passwordOpen}
+        okText="保存"
+        cancelText="取消"
+        confirmLoading={passwordSaving}
+        onOk={() => void handleSavePassword()}
+        onCancel={() => setPasswordOpen(false)}
+        destroyOnClose
+      >
+        <Form<PasswordFormValues> form={passwordForm} layout="vertical" disabled={passwordSaving} preserve={false}>
+          <Form.Item label="原密码" name="oldPassword" rules={[{ required: true, message: "请输入原密码" }]}>
+            <Input.Password placeholder="请输入原密码" autoComplete="current-password" />
+          </Form.Item>
+          <Form.Item
+            label="新密码"
+            name="newPassword"
+            rules={[
+              { required: true, message: "请输入新密码" },
+              { min: 6, message: "新密码至少 6 位" },
+              ({ getFieldValue }) => ({
+                validator(_, value) {
+                  if (!value || value !== getFieldValue("oldPassword")) {
+                    return Promise.resolve();
+                  }
+                  return Promise.reject(new Error("新密码不能与原密码相同"));
+                },
+              }),
+            ]}
+          >
+            <Input.Password placeholder="请输入新密码" autoComplete="new-password" />
+          </Form.Item>
+          <Form.Item
+            label="确认新密码"
+            name="confirmPassword"
+            dependencies={["newPassword"]}
+            rules={[
+              { required: true, message: "请再次输入新密码" },
+              ({ getFieldValue }) => ({
+                validator(_, value) {
+                  if (!value || getFieldValue("newPassword") === value) {
+                    return Promise.resolve();
+                  }
+                  return Promise.reject(new Error("两次输入的新密码不一致"));
+                },
+              }),
+            ]}
+          >
+            <Input.Password placeholder="请再次输入新密码" autoComplete="new-password" />
+          </Form.Item>
+        </Form>
+      </Modal>
     </div>
   );
 }

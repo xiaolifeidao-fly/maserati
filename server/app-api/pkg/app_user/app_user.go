@@ -1,6 +1,7 @@
 package app_user
 
 import (
+	webAuth "app-api/auth"
 	commonRouter "common/middleware/routers"
 	"net/http"
 	appUserService "service/app_user"
@@ -29,6 +30,9 @@ func NewAppUserHandler() *AppUserHandler {
 func (h *AppUserHandler) RegisterHandler(engine *gin.RouterGroup) {
 	engine.GET("/app-users", h.listUsers)
 	engine.GET("/app-users/stats", h.getUserStats)
+	engine.GET("/app-user-profile", h.getCurrentUserProfile)
+	engine.PUT("/app-user-profile", h.updateCurrentUserProfile)
+	engine.PUT("/app-user-profile/password", h.changeCurrentUserPassword)
 	engine.GET("/app-users/:id", h.getUserByID)
 	engine.POST("/app-users", h.createUser)
 	engine.PUT("/app-users/:id", h.updateUser)
@@ -54,6 +58,58 @@ func (h *AppUserHandler) listUsers(context *gin.Context) {
 func (h *AppUserHandler) getUserStats(context *gin.Context) {
 	result, err := h.appUserService.GetUserStats()
 	commonRouter.ToJson(context, result, err)
+}
+
+func (h *AppUserHandler) getCurrentUserProfile(context *gin.Context) {
+	id, ok := currentAppUserID(context)
+	if !ok {
+		commonRouter.ToError(context, "用户未登录")
+		return
+	}
+	result, err := h.appUserService.GetCurrentUserProfile(id)
+	if err == gorm.ErrRecordNotFound {
+		commonRouter.ToError(context, "app user not found")
+		return
+	}
+	commonRouter.ToJson(context, result, err)
+}
+
+func (h *AppUserHandler) updateCurrentUserProfile(context *gin.Context) {
+	id, ok := currentAppUserID(context)
+	if !ok {
+		commonRouter.ToError(context, "用户未登录")
+		return
+	}
+	var req appUserDTO.UpdateCurrentAppUserProfileDTO
+	if err := context.ShouldBindJSON(&req); err != nil {
+		commonRouter.ToError(context, "参数错误")
+		return
+	}
+	result, err := h.appUserService.UpdateCurrentUserProfile(id, &req)
+	if err == gorm.ErrRecordNotFound {
+		commonRouter.ToError(context, "app user not found")
+		return
+	}
+	commonRouter.ToJson(context, result, err)
+}
+
+func (h *AppUserHandler) changeCurrentUserPassword(context *gin.Context) {
+	id, ok := currentAppUserID(context)
+	if !ok {
+		commonRouter.ToError(context, "用户未登录")
+		return
+	}
+	var req appUserDTO.ChangeCurrentAppUserPasswordDTO
+	if err := context.ShouldBindJSON(&req); err != nil {
+		commonRouter.ToError(context, "参数错误")
+		return
+	}
+	err := h.appUserService.ChangeCurrentUserPassword(id, &req)
+	if err == gorm.ErrRecordNotFound {
+		commonRouter.ToError(context, "app user not found")
+		return
+	}
+	commonRouter.ToJson(context, gin.H{"changed": true}, err)
 }
 
 func (h *AppUserHandler) getUserByID(context *gin.Context) {
@@ -186,4 +242,25 @@ func parseAppUserID(context *gin.Context) (uint, bool) {
 		return 0, false
 	}
 	return uint(id), true
+}
+
+func currentAppUserID(context *gin.Context) (uint, bool) {
+	value, ok := context.Get(webAuth.ContextUserIDKey)
+	if !ok {
+		return 0, false
+	}
+	switch id := value.(type) {
+	case uint:
+		return id, id > 0
+	case uint64:
+		return uint(id), id > 0
+	case int:
+		return uint(id), id > 0
+	case int64:
+		return uint(id), id > 0
+	case float64:
+		return uint(id), id > 0
+	default:
+		return 0, false
+	}
 }
