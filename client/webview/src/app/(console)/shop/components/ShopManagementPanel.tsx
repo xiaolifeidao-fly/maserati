@@ -21,6 +21,7 @@ import {
   Select,
   Space,
   Table,
+  Tabs,
   Tag,
   message,
 } from "antd";
@@ -41,30 +42,21 @@ function getShopDisplayName(record: Pick<ShopRecord, "remark" | "nickname" | "na
 }
 
 const platformOptions = [
-  { label: "淘宝", value: "tb" },
-  { label: "拼多多", value: "pxx" },
+  { key: "tb", label: "淘宝", value: "tb" },
+  { key: "pxx", label: "拼多多", value: "pxx" },
 ];
 
-function getShopStage(record: ShopRecord) {
-  if (record.authorizationStatus === "AUTHORIZED") {
-    return {
-      label: "已完成接入",
-      color: "green" as const,
-      description: "可以直接进入采集流程",
-    };
-  }
-  if (record.loginStatus === "LOGGED_IN") {
-    return {
-      label: "待授权",
-      color: "gold" as const,
-      description: "外部账号已登录，下一步完成授权",
-    };
-  }
-  return {
-    label: "待登录",
-    color: "default" as const,
-    description: "先打开外部登录窗口，完成登录后再授权",
-  };
+const shopUsageOptions = [
+  { label: "采集", value: "COLLECT" },
+  { label: "发布", value: "PUBLISH" },
+];
+
+function getDefaultShopUsage(platform: string) {
+  return normalizePlatform(platform) === "pxx" ? "COLLECT" : "PUBLISH";
+}
+
+function getShopUsageLabel(shopUsage: string) {
+  return shopUsageOptions.find((item) => item.value === normalizeShopUsage(shopUsage))?.label || "-";
 }
 
 export function ShopManagementPanel() {
@@ -88,7 +80,6 @@ export function ShopManagementPanel() {
   const [filters, setFilters] = useState({
     name: "",
     businessId: "",
-    platform: "",
     loginStatus: "",
     authorizationStatus: "",
   });
@@ -98,11 +89,13 @@ export function ShopManagementPanel() {
   const [authorizeTarget, setAuthorizeTarget] = useState<ShopRecord | null>(null);
   const [loggingShopId, setLoggingShopId] = useState(0);
   const safeShops = Array.isArray(shops) ? shops : [];
+  const activePlatform = query.platform || "tb";
 
   const openCreateModal = () => {
     setEditingShop(null);
     shopForm.setFieldsValue({
       platform: "tb",
+      shopUsage: "PUBLISH",
       remark: "",
     });
     setEditOpen(true);
@@ -112,6 +105,7 @@ export function ShopManagementPanel() {
     setEditingShop(record);
     shopForm.setFieldsValue({
       platform: normalizePlatform(record.platform),
+      shopUsage: normalizeShopUsage(record.shopUsage || getDefaultShopUsage(record.platform)),
       remark: record.remark,
     });
     setEditOpen(true);
@@ -142,6 +136,7 @@ export function ShopManagementPanel() {
     try {
       await saveShop(editingShop?.id ?? null, {
         platform: values.platform.trim(),
+        shopUsage: normalizeShopUsage(values.shopUsage || getDefaultShopUsage(values.platform)),
         remark: (values.remark || "").trim(),
         loginStatus: editingShop?.loginStatus || "PENDING",
       });
@@ -176,18 +171,16 @@ export function ShopManagementPanel() {
       dataIndex: "name",
       width: 280,
       render: (_, record) => {
-        const stage = getShopStage(record);
         return (
           <div>
             <div style={{ color: "var(--manager-text)", fontWeight: 700 }}>{getShopDisplayName(record)}</div>
             <div style={{ color: "var(--manager-text-faint)", marginTop: 4 }}>
               店铺昵称：{record.nickname || record.name || "-"}
             </div>
-            <div style={{ color: "var(--manager-text-faint)", marginTop: 4 }}>
-              {getPlatformLabel(record.platform)}
-            </div>
-            <div style={{ marginTop: 8 }}>
-              <Tag color={stage.color}>{stage.label}</Tag>
+            <div style={{ marginTop: 6 }}>
+              <Tag color={normalizeShopUsage(record.shopUsage) === "COLLECT" ? "blue" : "purple"}>
+                {getShopUsageLabel(record.shopUsage)}
+              </Tag>
             </div>
           </div>
         );
@@ -213,39 +206,45 @@ export function ShopManagementPanel() {
       title: "登录 / 授权",
       key: "status",
       width: 220,
-      render: (_, record) => (
-        <div>
+      render: (_, record) => {
+        const isCollect = normalizeShopUsage(record.shopUsage) === "COLLECT";
+        return (
           <div>
-            <Tag color={record.loginStatus === "LOGGED_IN" ? "green" : "default"}>
-              {record.loginStatus === "LOGGED_IN" ? "已登录" : "待登录"}
-            </Tag>
-            <Tag
-              color={
-                record.authorizationStatus === "AUTHORIZED"
-                  ? "green"
-                  : record.authorizationStatus === "EXPIRED"
-                    ? "orange"
-                    : "default"
-              }
-            >
-              {record.authorizationStatus === "AUTHORIZED"
-                ? "已授权"
-                : record.authorizationStatus === "EXPIRED"
-                  ? "已过期"
-                  : "未授权"}
-            </Tag>
+            <div>
+              <Tag color={record.loginStatus === "LOGGED_IN" ? "green" : "default"}>
+                {record.loginStatus === "LOGGED_IN" ? "已登录" : "待登录"}
+              </Tag>
+              {!isCollect && (
+                <Tag
+                  color={
+                    record.authorizationStatus === "AUTHORIZED"
+                      ? "green"
+                      : record.authorizationStatus === "EXPIRED"
+                        ? "orange"
+                        : "default"
+                  }
+                >
+                  {record.authorizationStatus === "AUTHORIZED"
+                    ? "已授权"
+                    : record.authorizationStatus === "EXPIRED"
+                      ? "已过期"
+                      : "未授权"}
+                </Tag>
+              )}
+            </div>
+            <div style={{ color: "var(--manager-text-faint)", marginTop: 6 }}>
+              最近登录：{formatDateTime(record.lastLoginAt)}
+            </div>
           </div>
-          <div style={{ color: "var(--manager-text-faint)", marginTop: 6 }}>
-            最近登录：{formatDateTime(record.lastLoginAt)}
-          </div>
-        </div>
-      ),
+        );
+      },
     },
     {
       title: "授权到期",
       dataIndex: "authorizationExpiresAt",
       width: 180,
-      render: (value?: string) => formatDateTime(value),
+      render: (value?: string, record?: ShopRecord) =>
+        normalizeShopUsage(record?.shopUsage || "") === "COLLECT" ? "-" : formatDateTime(value),
     },
     {
       title: "操作",
@@ -261,7 +260,9 @@ export function ShopManagementPanel() {
             loading={loggingShopId === record.id}
             onClick={() => void handleLogin(record)}
           />
-          <IconOnlyButton type="text" icon={<KeyOutlined />} tooltip="激活码授权" onClick={() => openAuthorizeModal(record)} />
+          {normalizeShopUsage(record.shopUsage) !== "COLLECT" && (
+            <IconOnlyButton type="text" icon={<KeyOutlined />} tooltip="激活码授权" onClick={() => openAuthorizeModal(record)} />
+          )}
           <IconOnlyButton type="text" icon={<ArrowRightOutlined />} tooltip="进入采集管理" onClick={() => router.push(`/collection?shopId=${record.id}`)} />
           <IconOnlyButton type="text" icon={<EditOutlined />} tooltip="编辑店铺" onClick={() => openEditModal(record)} />
           <Popconfirm
@@ -302,6 +303,11 @@ export function ShopManagementPanel() {
 
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap", justifyContent: "space-between" }}>
           <Space wrap size={12}>
+            <Tabs
+              activeKey={activePlatform}
+              items={platformOptions}
+              onChange={(platform) => void refresh({ pageIndex: 1, platform })}
+            />
             <Input
               className="manager-filter-input"
               placeholder="按备注或店铺名称筛选"
@@ -315,14 +321,6 @@ export function ShopManagementPanel() {
               value={filters.businessId}
               onChange={(event) => setFilters((current) => ({ ...current, businessId: event.target.value }))}
               style={{ width: 220, maxWidth: "100%", height: 44 }}
-            />
-            <Select
-              allowClear
-              placeholder="平台"
-              value={filters.platform || undefined}
-              onChange={(value) => setFilters((current) => ({ ...current, platform: value || "" }))}
-              options={platformOptions}
-              style={{ width: 140 }}
             />
             <Select
               allowClear
@@ -347,7 +345,12 @@ export function ShopManagementPanel() {
               ]}
               style={{ width: 150 }}
             />
-            <IconOnlyButton type="primary" icon={<SearchOutlined />} tooltip="查询店铺" onClick={() => void refresh({ pageIndex: 1, ...filters })} />
+            <IconOnlyButton
+              type="primary"
+              icon={<SearchOutlined />}
+              tooltip="查询店铺"
+              onClick={() => void refresh({ pageIndex: 1, platform: activePlatform, ...filters })}
+            />
             <IconOnlyButton icon={<ReloadOutlined />} tooltip="刷新店铺列表" onClick={() => void refresh()} />
             <IconOnlyButton type="primary" icon={<PlusOutlined />} tooltip="新增店铺" onClick={openCreateModal} />
           </Space>
@@ -388,7 +391,15 @@ export function ShopManagementPanel() {
       >
         <Form<ShopFormValues> form={shopForm} layout="vertical" preserve={false}>
           <Form.Item name="platform" label="所属平台" rules={[{ required: true, message: "请选择平台" }]}>
-            <Select options={platformOptions} />
+            <Select
+              options={platformOptions}
+              onChange={(value) => {
+                shopForm.setFieldsValue({ shopUsage: getDefaultShopUsage(value) });
+              }}
+            />
+          </Form.Item>
+          <Form.Item name="shopUsage" label="用途" rules={[{ required: true, message: "请选择用途" }]}>
+            <Select options={shopUsageOptions} disabled={normalizeShopUsage(editingShop?.shopUsage || "") === "COLLECT"} />
           </Form.Item>
           <Form.Item name="remark" label="备注">
             <Input.TextArea placeholder="例如：华东旗舰店 / 运营备用号" rows={4} maxLength={255} showCount />
@@ -428,6 +439,13 @@ function normalizePlatform(platform: string) {
   return "tb";
 }
 
-function getPlatformLabel(platform: string) {
-  return platformOptions.find((item) => item.value === normalizePlatform(platform))?.label || platform || "-";
+function normalizeShopUsage(shopUsage: string) {
+  const normalized = (shopUsage || "").trim().toUpperCase();
+  if (normalized === "COLLECT" || normalized === "采集") {
+    return "COLLECT";
+  }
+  if (normalized === "PUBLISH" || normalized === "发布") {
+    return "PUBLISH";
+  }
+  return "";
 }

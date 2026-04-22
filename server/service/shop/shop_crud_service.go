@@ -21,6 +21,10 @@ func (s *ShopService) ListShops(query shopDTO.ShopQueryDTO) (*baseDTO.PageDTO[sh
 	if repositoryQuery.AuthorizationStatus != "" {
 		repositoryQuery.AuthorizationStatus = normalizeShopAuthorizationStatus(repositoryQuery.AuthorizationStatus)
 	}
+	repositoryQuery.ShopUsage = strings.TrimSpace(repositoryQuery.ShopUsage)
+	if repositoryQuery.ShopUsage != "" {
+		repositoryQuery.ShopUsage = normalizeShopUsage(repositoryQuery.Platform, repositoryQuery.ShopUsage)
+	}
 	total, err := s.shopRepository.CountByQuery(repositoryQuery)
 	if err != nil {
 		return nil, err
@@ -67,6 +71,7 @@ func (s *ShopService) CreateShop(req *shopDTO.CreateShopDTO) (*shopDTO.ShopDTO, 
 		Code:                displayName,
 		Name:                displayName,
 		Platform:            platform,
+		ShopUsage:           normalizeShopUsage(platform, req.ShopUsage),
 		Remark:              remark,
 		LoginStatus:         normalizeShopStatus(req.LoginStatus),
 		AuthorizationStatus: "UNAUTHORIZED",
@@ -103,6 +108,11 @@ func (s *ShopService) UpdateShop(id uint, req *shopDTO.UpdateShopDTO) (*shopDTO.
 	previousDisplayName := defaultShopDisplayName(entity.Platform, entity.Remark)
 	if req.Platform != nil {
 		entity.Platform = strings.TrimSpace(*req.Platform)
+	}
+	if req.ShopUsage != nil {
+		entity.ShopUsage = normalizeShopUsage(entity.Platform, *req.ShopUsage)
+	} else {
+		entity.ShopUsage = normalizeShopUsage(entity.Platform, entity.ShopUsage)
 	}
 	if req.Remark != nil {
 		entity.Remark = strings.TrimSpace(*req.Remark)

@@ -9,8 +9,10 @@ declare const document: any;
 type PersistShopLogin = (payload: ShopLoginPayload) => Promise<void>;
 
 const TB_LOGIN_URL = "https://myseller.taobao.com/home.htm/QnworkbenchHome/";
+const TB_COLLECT_LOGIN_URL = "https://login.taobao.com/havanaone/login/login.htm?bizName=taobao&f=top&redirectURL=https%3A%2F%2Fwww.taobao.com%2F";
 const TB_SHOP_CENTER_URL = "https://myseller.taobao.com/home.htm/shop-manage/shop-center";
 const TB_SHOP_INFO_API = "mtop.taobao.jdy.resource.shop.info.get";
+const TB_COLLECT_USER_API = "h5/mtop.user.getusersimple";
 const TB_LOGIN_COOKIE_KEYS = ["cookie2", "cookie3_bak", "cookie1", "login", "uc1", "wk_cookie2", "sgcookie"];
 
 export class TbEngine extends DoorEngine {
@@ -24,7 +26,7 @@ export class TbEngine extends DoorEngine {
       return undefined;
     }
 
-    await page.goto(TB_LOGIN_URL, { waitUntil: "domcontentloaded" });
+    await page.goto(getTbLoginUrl(shop), { waitUntil: "domcontentloaded" });
     await page.bringToFront();
     void this.captureLoginLifecycle(page, shop, persistShopLogin);
     return page;
@@ -64,23 +66,35 @@ export class TbEngine extends DoorEngine {
       return true;
     };
 
+    const isCollect = normalizeShopUsage(shop.shopUsage) === "COLLECT";
+    const targetApi = isCollect ? TB_COLLECT_USER_API : TB_SHOP_INFO_API;
+
     const responseListener = async (response: { url(): string; status(): number; text(): Promise<string> }) => {
-      if (persisted || !response.url().includes(TB_SHOP_INFO_API)) {
+      if (persisted || !response.url().toLowerCase().includes(targetApi.toLowerCase())) {
         return;
       }
       try {
         const rawText = await response.text();
         const parsedPayload = parseTbJsonpPayload(rawText);
-        log.info("[TbEngine] captured target tb response", {
-          url: response.url(),
-          status: response.status(),
-          shopName: pickString(parsedPayload, ["data.result.shopName"]),
-          shopId: pickString(parsedPayload, ["data.result.shopId"]),
-          nick: pickString(parsedPayload, ["data.result.nick", "data.result.displayNick"]),
-        });
+        if (isCollect) {
+          log.info("[TbEngine] captured collect user response", {
+            url: response.url(),
+            status: response.status(),
+            nick: pickString(parsedPayload, ["data.nick", "data.displayNick"]),
+            userNumId: pickString(parsedPayload, ["data.userNumId"]),
+          });
+        } else {
+          log.info("[TbEngine] captured target tb response", {
+            url: response.url(),
+            status: response.status(),
+            shopName: pickString(parsedPayload, ["data.result.shopName"]),
+            shopId: pickString(parsedPayload, ["data.result.shopId"]),
+            nick: pickString(parsedPayload, ["data.result.nick", "data.result.displayNick"]),
+          });
+        }
         await persistFromRawData(parsedPayload, "target_response");
       } catch (error) {
-        log.warn("[TbEngine] failed to parse tb shop info response", error);
+        log.warn("[TbEngine] failed to parse tb response", error);
       }
     };
 
@@ -99,9 +113,11 @@ export class TbEngine extends DoorEngine {
             return;
           }
 
-          const rawData = await this.captureShopInfo(page);
-          if (await persistFromRawData(rawData, "cookie_fallback")) {
-            return;
+          if (!isCollect) {
+            const rawData = await this.captureShopInfo(page);
+            if (await persistFromRawData(rawData, "cookie_fallback")) {
+              return;
+            }
           }
         }
 
@@ -181,6 +197,7 @@ function buildTbShopLoginPayload(shop: ShopRecord, rawData: unknown): ShopLoginP
   const nickname = pickString(rawData, [
     "data.result.displayNick",
     "data.result.nick",
+    "data.displayNick",
     "data.sellerNick",
     "data.nick",
     "data.shop.nick",
@@ -193,6 +210,7 @@ function buildTbShopLoginPayload(shop: ShopRecord, rawData: unknown): ShopLoginP
     "data.result.shopName",
     "data.result.displayNick",
     "data.result.nick",
+    "data.displayNick",
     "data.shopName",
     "data.shop.shopName",
     "data.sellerNick",
@@ -208,6 +226,7 @@ function buildTbShopLoginPayload(shop: ShopRecord, rawData: unknown): ShopLoginP
 
   const platformShopId = pickString(rawData, [
     "data.result.shopId",
+    "data.userNumId",
     "data.shopId",
     "data.shop.shopId",
     "data.shop.shop_id",
@@ -220,6 +239,7 @@ function buildTbShopLoginPayload(shop: ShopRecord, rawData: unknown): ShopLoginP
     "data.result.businessId",
     "data.result.sellerId",
     "data.result.userId",
+    "data.userNumId",
     "data.businessId",
     "data.shop.businessId",
     "data.sellerId",
@@ -237,9 +257,25 @@ function buildTbShopLoginPayload(shop: ShopRecord, rawData: unknown): ShopLoginP
     nickname,
     code: shop.code || platformShopId || businessId || `tb-${shop.id}`,
     platform: "tb",
+    shopUsage: normalizeShopUsage(shop.shopUsage),
     platformShopId,
     businessId,
   };
+}
+
+function getTbLoginUrl(shop: ShopRecord): string {
+  return normalizeShopUsage(shop.shopUsage) === "COLLECT" ? TB_COLLECT_LOGIN_URL : TB_LOGIN_URL;
+}
+
+function normalizeShopUsage(shopUsage: string): string {
+  const normalized = (shopUsage || "").trim().toUpperCase();
+  if (normalized === "COLLECT" || normalized === "采集") {
+    return "COLLECT";
+  }
+  if (normalized === "PUBLISH" || normalized === "发布") {
+    return "PUBLISH";
+  }
+  return "PUBLISH";
 }
 
 function normalizeId(value: string | null | undefined): string {

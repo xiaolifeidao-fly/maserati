@@ -145,8 +145,8 @@ export async function saveStandardProductData(
   return getCollectionWorkspaceApi().saveStandardProductData(sourceProductId, sourceType, data);
 }
 
-export async function fetchCollectionShopOptions() {
-  return getCommerceApi().listShops({ pageIndex: 1, pageSize: 200 });
+export async function fetchCollectionShopOptions(platform = "tb") {
+  return getCommerceApi().listShops({ pageIndex: 1, pageSize: 200, shopUsage: "COLLECT", platform });
 }
 
 export async function fetchCollectBatchTestingOptions() {

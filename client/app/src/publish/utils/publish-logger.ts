@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
-import { app } from 'electron';
+import { app, dialog } from 'electron';
+import AdmZip from 'adm-zip';
 
 const KEEP_DAYS = 7;
 const MAX_TEXT_LENGTH = 120000;
@@ -58,6 +59,97 @@ class PublishLogWriter {
     }
   }
 
+  async exportProductLog(sourceProductId?: string | null): Promise<PublishLogExportResult> {
+    const normalized = normalizeSourceProductId(sourceProductId);
+    if (!normalized) {
+      throw new Error('sourceProductId is required');
+    }
+
+    const logFile = this.findLatestProductLog(normalized);
+    if (!logFile) {
+      throw new Error(`未找到商品 ${sourceProductId} 的发布错误日志`);
+    }
+
+    const { canceled, filePath } = await dialog.showSaveDialog({
+      title: '导出发布错误日志',
+      defaultPath: `${normalized}.log`,
+      filters: [
+        { name: 'Log', extensions: ['log'] },
+        { name: 'All Files', extensions: ['*'] },
+      ],
+    });
+    if (canceled || !filePath) {
+      return { exported: false, cancelled: true, count: 0 };
+    }
+
+    fs.copyFileSync(logFile, filePath);
+    return { exported: true, cancelled: false, filePath, count: 1 };
+  }
+
+  async exportBatchErrorLogs(
+    batchId: number,
+    sourceProductIds: Array<string | null | undefined>,
+  ): Promise<PublishLogExportResult> {
+    if (!Number.isFinite(batchId) || batchId <= 0) {
+      throw new Error('batchId must be positive');
+    }
+
+    const normalizedIds = Array.from(new Set(
+      sourceProductIds
+        .map(item => normalizeSourceProductId(item))
+        .filter((item): item is string => Boolean(item)),
+    ));
+    if (normalizedIds.length === 0) {
+      throw new Error('当前批次没有可导出的失败商品日志');
+    }
+
+    const { canceled, filePath } = await dialog.showSaveDialog({
+      title: '批量导出发布错误日志',
+      defaultPath: `publish-error-logs-batch-${batchId}.zip`,
+      filters: [
+        { name: 'Zip', extensions: ['zip'] },
+        { name: 'All Files', extensions: ['*'] },
+      ],
+    });
+    if (canceled || !filePath) {
+      return { exported: false, cancelled: true, count: 0 };
+    }
+
+    const zip = new AdmZip();
+    const missingProductIds: string[] = [];
+    let count = 0;
+
+    for (const productId of normalizedIds) {
+      const logFile = this.findLatestProductLog(productId);
+      if (!logFile) {
+        missingProductIds.push(productId);
+        continue;
+      }
+      zip.addLocalFile(logFile, '', `${productId}.log`);
+      count += 1;
+    }
+
+    if (count === 0) {
+      throw new Error('没有找到可打包的发布错误日志');
+    }
+
+    if (missingProductIds.length > 0) {
+      zip.addFile(
+        'missing-logs.txt',
+        Buffer.from(`以下商品未找到发布错误日志：\n${missingProductIds.join('\n')}\n`, 'utf8'),
+      );
+    }
+
+    zip.writeZip(filePath);
+    return {
+      exported: true,
+      cancelled: false,
+      filePath,
+      count,
+      missingCount: missingProductIds.length,
+    };
+  }
+
   write(line: string, meta?: unknown): void {
     if (!isEnabled()) {
       return;
@@ -110,6 +202,30 @@ class PublishLogWriter {
 
   private filePath(sourceProductId: string): string {
     return path.join(this.currentDir, `${sourceProductId}.log`);
+  }
+
+  private findLatestProductLog(sourceProductId: string): string | undefined {
+    this.ensureInitialized();
+    if (!fs.existsSync(this.baseDir)) {
+      return undefined;
+    }
+
+    const candidates = fs.readdirSync(this.baseDir)
+      .filter(name => /^\d{4}-\d{2}-\d{2}$/.test(name))
+      .sort((a, b) => b.localeCompare(a));
+
+    for (const dateDir of candidates) {
+      const filePath = path.join(this.baseDir, dateDir, `${sourceProductId}.log`);
+      try {
+        if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
+          return filePath;
+        }
+      } catch {
+        // ignore broken candidate and continue searching older logs
+      }
+    }
+
+    return undefined;
   }
 
   private cleanupOldLogs(): void {
@@ -166,6 +282,14 @@ class PublishLogWriter {
 
 const writer = new PublishLogWriter();
 
+export interface PublishLogExportResult {
+  exported: boolean;
+  cancelled: boolean;
+  filePath?: string;
+  count: number;
+  missingCount?: number;
+}
+
 export function registerPublishTaskLogFile(taskId: number, sourceProductId?: string | null): void {
   writer.registerTaskProduct(taskId, sourceProductId);
 }
@@ -176,6 +300,17 @@ export function unregisterPublishTaskLogFile(taskId: number): void {
 
 export function clearPublishProductLogs(sourceProductId?: string | null): void {
   writer.clearProductLogs(sourceProductId);
+}
+
+export function exportPublishProductLog(sourceProductId?: string | null): Promise<PublishLogExportResult> {
+  return writer.exportProductLog(sourceProductId);
+}
+
+export function exportPublishBatchErrorLogs(
+  batchId: number,
+  sourceProductIds: Array<string | null | undefined>,
+): Promise<PublishLogExportResult> {
+  return writer.exportBatchErrorLogs(batchId, sourceProductIds);
 }
 
 export function publishInfo(message: string, meta?: unknown): void {

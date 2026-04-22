@@ -6,8 +6,9 @@ import { CommerceApi } from "./commerce/commerce.api";
 import { PublishApi } from "./publish/publish.api";
 import { PublishWindowApi } from "./publish/publish-window.api";
 import { PublishBatchJobApi } from "./publish/publish-batch-job.api";
+import { InstallerApi } from "./installer.api";
 
-const register: { new(...args: any[]): ElectronApi }[] = [AuthApi, CollectionWorkspaceApi, CollectApi, CommerceApi, PublishApi, PublishWindowApi, PublishBatchJobApi];
+const register: { new(...args: any[]): ElectronApi }[] = [AuthApi, CollectionWorkspaceApi, CollectApi, CommerceApi, PublishApi, PublishWindowApi, PublishBatchJobApi, InstallerApi];
 
 export function registerApi(){
     return register;

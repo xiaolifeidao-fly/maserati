@@ -29,8 +29,8 @@ export async function deleteProduct(id: number) {
   return getCommerceApi().deleteProduct(id);
 }
 
-export async function fetchShopOptions() {
-  return getCommerceApi().listShops({ pageIndex: 1, pageSize: 200 });
+export async function fetchShopOptions(platform?: string) {
+  return getCommerceApi().listShops({ pageIndex: 1, pageSize: 200, platform });
 }
 
 export async function fetchCategoryOptions() {

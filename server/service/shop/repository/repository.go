@@ -49,6 +49,9 @@ func (r *ShopRepository) CountByQuery(query shopDTO.ShopQueryDTO) (int64, error)
 	if value := strings.TrimSpace(query.Platform); value != "" {
 		dbQuery = dbQuery.Where("platform = ?", value)
 	}
+	if value := strings.TrimSpace(query.ShopUsage); value != "" {
+		dbQuery = dbQuery.Where("shop_usage = ?", value)
+	}
 	if value := strings.TrimSpace(query.Remark); value != "" {
 		dbQuery = dbQuery.Where("remark LIKE ?", "%"+value+"%")
 	}
@@ -87,6 +90,9 @@ func (r *ShopRepository) ListByQuery(query shopDTO.ShopQueryDTO, pageIndex, page
 	}
 	if value := strings.TrimSpace(query.Platform); value != "" {
 		dbQuery = dbQuery.Where("platform = ?", value)
+	}
+	if value := strings.TrimSpace(query.ShopUsage); value != "" {
+		dbQuery = dbQuery.Where("shop_usage = ?", value)
 	}
 	if value := strings.TrimSpace(query.Remark); value != "" {
 		dbQuery = dbQuery.Where("remark LIKE ?", "%"+value+"%")

@@ -26,6 +26,7 @@ export interface CollectBatchListQuery extends Record<string, string | number | 
   shopId?: number;
   name?: string;
   status?: string;
+  platform?: string;
 }
 
 export interface CollectBatchPayload {

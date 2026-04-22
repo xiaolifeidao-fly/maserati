@@ -102,6 +102,21 @@ func normalizeShopStatus(value string) string {
 	}
 }
 
+func normalizeShopUsage(platform, value string) string {
+	switch strings.ToUpper(strings.TrimSpace(value)) {
+	case "COLLECT", "采集":
+		return "COLLECT"
+	case "PUBLISH", "发布":
+		return "PUBLISH"
+	}
+	switch strings.ToLower(strings.TrimSpace(platform)) {
+	case "pdd", "pxx":
+		return "COLLECT"
+	default:
+		return "PUBLISH"
+	}
+}
+
 func normalizeShopAuthorizationStatus(value string) string {
 	switch strings.ToUpper(strings.TrimSpace(value)) {
 	case "AUTHORIZED":
@@ -148,6 +163,7 @@ func toShopDTO(entity *shopRepository.Shop) *shopDTO.ShopDTO {
 		Name:                   entity.Name,
 		Nickname:               entity.Nickname,
 		Platform:               entity.Platform,
+		ShopUsage:              normalizeShopUsage(entity.Platform, entity.ShopUsage),
 		Remark:                 entity.Remark,
 		PlatformShopID:         entity.PlatformShopID,
 		BusinessID:             entity.BusinessID,

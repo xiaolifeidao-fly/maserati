@@ -317,7 +317,7 @@ export class FoodFiller implements IFiller {
     await this.fillFoodFactory(components, draftContext.catId, draftContext.startTraceId, requestHeaders, draftPayload, taskId);
 
     // ── 填充食品图片 ────────────────────────────────────────────────────────────
-    this.fillFoodImages(components, draftPayload, uploadedMainImages);
+    this.fillFoodImages(components, draftPayload, uploadedMainImages, ctx.uploadedImageMetaMap);
 
     if (!this.fillSuccess) {
       publishWarn(`[task:${taskId}] [FOOD] 食品填充存在问题: ${this.fillMessage}`, { taskId });
@@ -492,6 +492,7 @@ export class FoodFiller implements IFiller {
     components: FoodComponents,
     draftPayload: Record<string, unknown>,
     uploadedMainImages: string[],
+    imageMetaMap?: ReadonlyMap<string, { width: number; height: number }>,
   ): void {
     if (!components.foodImages) return;
     if (draftPayload.foodImages) return; // 已有值，不覆盖
@@ -501,19 +502,24 @@ export class FoodFiller implements IFiller {
     const frontUrl = uploadedMainImages[0];
     const backgroundUrl = uploadedMainImages[1];
 
+    const buildPix = (url: string): string => {
+      const meta = imageMetaMap?.get(url);
+      return meta ? `${meta.width}x${meta.height}` : '750x750';
+    };
+
     draftPayload.foodImages = [
       { url: '', thumbUrl: '' },
       { url: '', thumbUrl: '' },
       {
         url: frontUrl,
         thumbUrl: frontUrl,
-        pix: '800x800',
+        pix: buildPix(frontUrl),
         folderId: '0',
       },
       {
         url: backgroundUrl,
         thumbUrl: backgroundUrl,
-        pix: '800x800',
+        pix: buildPix(backgroundUrl),
         folderId: '0',
       },
     ];

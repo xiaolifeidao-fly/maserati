@@ -748,14 +748,32 @@ async function collectCurrentGoods(url: string) {
 
     // Step 2: 存储到服务端（平台无关，由 summary 公共结构承载数据）
     log.info("[collection workspace] saving to server", { sourceProductId: summary.sourceProductId });
-    const { record: savedRecord, updatedBatch } = await saveCollectedToServer(summary, {
-      ...notifyCtx,
-      currentBatch: workspaceState.batch,
-      currentRecordsCount: workspaceState.records.length,
-    });
-
-    if (updatedBatch) {
-      workspaceState.batch = updatedBatch;
+    let savedRecord: CollectRecordPreview;
+    try {
+      const serverResult = await saveCollectedToServer(summary, {
+        ...notifyCtx,
+        currentBatch: workspaceState.batch,
+        currentRecordsCount: workspaceState.records.length,
+      });
+      if (serverResult.updatedBatch) {
+        workspaceState.batch = serverResult.updatedBatch;
+      }
+      savedRecord = serverResult.record;
+    } catch (serverError) {
+      log.warn("[collection workspace] server save failed, continuing with local record", {
+        sourceProductId: summary.sourceProductId,
+        error: serverError,
+      });
+      savedRecord = Object.assign(new CollectRecordPreview(), {
+        id: tempId,
+        appUserId: notifyCtx.appUserId,
+        collectBatchId: notifyCtx.batchId,
+        source: notifyCtx.source,
+        productName: summary.productName,
+        sourceProductId: summary.sourceProductId,
+        sourceSnapshotUrl: notifyCtx.sourceUrl,
+        status: summary.status || "COLLECTED",
+      });
     }
 
     // Step 3: 通知左侧面板 — 用真实 record 替换占位

@@ -1,9 +1,9 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/bin/sh
+set -eu
 
 APP_NAME="manager-api"
 PORT="8291"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PID_FILE="$SCRIPT_DIR/$APP_NAME.pid"
 LOG_DIR="${LOG_DIR:-$SCRIPT_DIR/logs}"
 LOG_FILE="${LOG_FILE:-$LOG_DIR/$APP_NAME.log}"
@@ -29,15 +29,14 @@ if command -v lsof >/dev/null 2>&1; then
 fi
 
 if [ -x "$SCRIPT_DIR/$APP_NAME" ]; then
-  START_CMD=("$SCRIPT_DIR/$APP_NAME")
+  nohup "$SCRIPT_DIR/$APP_NAME" > "$LOG_FILE" 2>&1 &
 elif [ -f "$SCRIPT_DIR/cmd.go" ]; then
-  START_CMD=(go run cmd.go)
+  nohup go run cmd.go > "$LOG_FILE" 2>&1 &
 else
   echo "no executable '$APP_NAME' or cmd.go found in $SCRIPT_DIR" >&2
   exit 1
 fi
 
-nohup "${START_CMD[@]}" > "$LOG_FILE" 2>&1 &
 PID="$!"
 echo "$PID" > "$PID_FILE"
 

@@ -20,6 +20,7 @@ const defaultQuery: Required<CollectBatchListQuery> = {
   shopId: 0,
   name: "",
   status: "",
+  platform: "tb",
 };
 
 export function useCollectionManagement() {
@@ -43,8 +44,8 @@ export function useCollectionManagement() {
     }
   };
 
-  const refreshOptions = async () => {
-    const result = await fetchCollectionShopOptions();
+  const refreshOptions = async (platform = query.platform || "tb") => {
+    const result = await fetchCollectionShopOptions(platform);
     setShops(Array.isArray(result.data) ? result.data : []);
   };
 
@@ -97,7 +98,7 @@ export function useCollectionManagement() {
   };
 
   useEffect(() => {
-    void Promise.all([refresh(), refreshOptions()]);
+    void Promise.all([refresh(), refreshOptions(defaultQuery.platform)]);
   }, []);
 
   return {
@@ -108,6 +109,7 @@ export function useCollectionManagement() {
     loading,
     submitting,
     refresh,
+    refreshOptions,
     saveCollection,
     removeCollection,
   };

@@ -1,5 +1,5 @@
 import path from 'path';
-import { BrowserView, BrowserWindow, type WebContents } from 'electron';
+import { BrowserView, BrowserWindow, shell, type WebContents } from 'electron';
 import log from 'electron-log';
 import { mainWindow } from '@src/kernel/windows';
 import { getLatestCaptchaTask } from './runtime/publish-center';
@@ -27,6 +27,17 @@ type PublishWindowOpenOptions = {
 
 function getPreloadPath() {
   return path.join(__dirname, 'preload.js');
+}
+
+function openExternalUrl(url: string) {
+  const nextUrl = String(url || '').trim();
+  if (!nextUrl || nextUrl === 'about:blank') {
+    return;
+  }
+  if (!/^https?:\/\//i.test(nextUrl)) {
+    return;
+  }
+  void shell.openExternal(nextUrl);
 }
 
 /**
@@ -154,6 +165,11 @@ export function openPublishWindow(options?: PublishWindowOpenOptions): void {
   publishBrowserWindow.addBrowserView(rightBrowserView);
 
   syncBounds();
+
+  leftBrowserView.webContents.setWindowOpenHandler(({ url }) => {
+    openExternalUrl(url);
+    return { action: 'deny' };
+  });
 
   leftBrowserView.webContents.loadURL(pageUrl).catch((err) => {
     log.error('[publish-window] failed to load left view', err);

@@ -25,6 +25,7 @@ const defaultQuery: Required<ProductListQuery> = {
   title: "",
   outerProductId: "",
   status: "",
+  platform: "tb",
 };
 
 export function useProductManagement() {
@@ -50,7 +51,7 @@ export function useProductManagement() {
     }
   };
 
-  const refreshOptions = async () => {
+  const refreshOptions = async (_sourcePlatform = query.platform || "tb") => {
     const [shopResult, categoryResult, batchResult] = await Promise.all([
       fetchShopOptions(),
       fetchCategoryOptions(),
@@ -100,6 +101,7 @@ export function useProductManagement() {
     loading,
     submitting,
     refresh,
+    refreshOptions,
     saveProduct,
     removeProduct,
   };

@@ -159,6 +159,7 @@ function shouldHydrateFromBatch(state: CollectionWorkspaceState | null | undefin
 function useCollectionWorkspaceState({ enabled = true, fallbackBatchId = 0 } = {}) {
   const [workspaceState, setWorkspaceState] = useState<CollectionWorkspaceState>(createEmptyWorkspaceState);
   const [loading, setLoading] = useState(true);
+  const updateVersionRef = useRef(0);
 
   useEffect(() => {
     if (!enabled || typeof window === "undefined") {
@@ -168,6 +169,7 @@ function useCollectionWorkspaceState({ enabled = true, fallbackBatchId = 0 } = {
 
     const collectionWindow = window as CollectTestingWindow;
     const handleWorkspaceUpdate = (nextState: CollectionWorkspaceState) => {
+      updateVersionRef.current += 1;
       setWorkspaceState({
         batch: nextState.batch || new CollectBatchRecord(),
         records: Array.isArray(nextState.records) ? nextState.records : [],
@@ -180,10 +182,18 @@ function useCollectionWorkspaceState({ enabled = true, fallbackBatchId = 0 } = {
     collectionWindow.__COLLECTION_WORKSPACE_UPDATE__ = handleWorkspaceUpdate;
 
     void (async () => {
+      const initialLoadVersion = updateVersionRef.current;
+      const handleInitialServerState = (nextState: CollectionWorkspaceState) => {
+        if (updateVersionRef.current !== initialLoadVersion) {
+          return;
+        }
+        handleWorkspaceUpdate(nextState);
+      };
+
       try {
         const nextState = await fetchCollectionWorkspaceState();
         if (shouldHydrateFromBatch(nextState, fallbackBatchId)) {
-          handleWorkspaceUpdate(await loadBatchWorkspaceState(fallbackBatchId));
+          handleInitialServerState(await loadBatchWorkspaceState(fallbackBatchId));
           return;
         }
         if (hasWorkspacePayload(nextState)) {
@@ -191,14 +201,14 @@ function useCollectionWorkspaceState({ enabled = true, fallbackBatchId = 0 } = {
           return;
         }
         if (fallbackBatchId > 0) {
-          handleWorkspaceUpdate(await loadBatchWorkspaceState(fallbackBatchId));
+          handleInitialServerState(await loadBatchWorkspaceState(fallbackBatchId));
           return;
         }
         handleWorkspaceUpdate(nextState);
       } catch (error) {
         if (fallbackBatchId > 0) {
           try {
-            handleWorkspaceUpdate(await loadBatchWorkspaceState(fallbackBatchId));
+            handleInitialServerState(await loadBatchWorkspaceState(fallbackBatchId));
             return;
           } catch (fallbackError) {
             setLoading(false);

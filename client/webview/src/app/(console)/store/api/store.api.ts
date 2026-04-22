@@ -19,6 +19,8 @@ export class StoreRecord {
 
   platform = "";
 
+  shopUsage = "";
+
   platformShopId = "";
 
   businessId = "";
@@ -44,6 +46,7 @@ export interface StoreListQuery extends Record<string, string | number | undefin
   name?: string;
   businessId?: string;
   platform?: string;
+  shopUsage?: string;
   authorizationStatus?: string;
 }
 
@@ -55,6 +58,7 @@ export interface StorePayload {
   shopTypeCode: string;
   approveFlag: number;
   platform: string;
+  shopUsage: string;
   platformShopId: string;
   businessId: string;
 }

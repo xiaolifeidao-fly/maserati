@@ -1,11 +1,12 @@
 // require('module-alias/register');
-import { app, BrowserWindow, protocol, Menu, MenuItem,screen as electronScreen } from 'electron';
+import { app, BrowserWindow, protocol, Menu, MenuItem, screen as electronScreen, shell } from 'electron';
 const path = require('path');
 const { spawn, exec } = require('child_process');
 const fs = require('fs');
 import * as dotenv from 'dotenv';
 dotenv.config({path: path.join(__dirname, '.env')}); // 加载 .env 文件中的环境变量
 import { mainWindow, setMainWindow } from './windows';
+import { setupAutoUpdater, checkForUpdates } from './update/update';
 
 import log from 'electron-log';
 import { registerRpc } from './register/rpc';
@@ -229,6 +230,16 @@ import { getPlatform, initPlatform, setPlatform } from '@src/browser/engine';
 
 log.info("app load")
 
+function openExternalUrl(url: string) {
+  const nextUrl = String(url || '').trim();
+  if (!nextUrl || nextUrl === 'about:blank') {
+    return;
+  }
+  if (!/^https?:\/\//i.test(nextUrl)) {
+    return;
+  }
+  void shell.openExternal(nextUrl);
+}
 
 async function createDefaultWindow() {
   try {
@@ -265,6 +276,11 @@ export async function createWindow(windowId : string, url : string) {
   // console.log(store.get('userPreferences'));
   // 加载NestJS服务
   windowInstance.loadURL(url); // 假设NestJS服务运行在本地3000端口
+
+  windowInstance.webContents.setWindowOpenHandler(({ url: targetUrl }) => {
+    openExternalUrl(targetUrl);
+    return { action: 'deny' };
+  });
 
   // 打开开发者工具
   // windowInstance.webContents.openDevTools();
@@ -308,14 +324,16 @@ export const start = () => {
 
         await createDefaultWindow();
 
-        
-        // 初始化定时任务
+        setupAutoUpdater();
+
+        // 延迟2秒检查更新，确保主窗口渲染完成
         setTimeout(async () => {
           try {
+            await checkForUpdates();
           } catch (e) {
-            log.error("Failed to initialize scheduled tasks:", e);
+            log.error("checkForUpdates error:", e);
           }
-        }, 2000); // 延迟2秒，确保 RPC 注册完成
+        }, 2000);
       } catch (e) {
         log.error("ready createDefaultWindow error", e);
       }
@@ -342,4 +360,3 @@ export const start = () => {
     });
 
 }
-

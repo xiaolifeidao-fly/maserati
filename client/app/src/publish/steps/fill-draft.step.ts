@@ -13,6 +13,7 @@ import { LogisticsFiller } from '../fillers/logistics.filler';
 import { DetailImagesFiller } from '../fillers/detail-images.filler';
 import { FoodFiller } from '../fillers/food.filler';
 import type { IFiller, FillerContext } from '../fillers/filler.interface';
+import { getImageCropMetaMap } from '../core/publish-image-meta-store';
 import { requestBackend } from '@src/impl/shared/backend';
 import type { TbDraftContext, TbSaleSpecUiMode } from '../types/draft';
 import { v4 as uuidv4 } from 'uuid';
@@ -93,7 +94,9 @@ const TB_PUBLISH_PAGE_URL = 'https://item.upload.taobao.com/sell/v2/publish.htm'
 /** 通过草稿 ID 打开已有草稿的编辑页面 */
 const TB_DRAFT_PAGE_URL = 'https://item.upload.taobao.com/sell/v2/draft.htm';
 /** 保存草稿按钮选择器 */
-const TB_SAVE_DRAFT_SELECTOR = '.sell-draft-save-btn button';
+const TB_SAVE_DRAFT_SELECTOR = '.container-SRWH5Z button';
+/** 保存草稿按钮文本 */
+const TB_SAVE_DRAFT_TEXT = '保存草稿';
 /** 协议确认弹窗按钮选择器 */
 const TB_PROTOCOL_BTN_SELECTOR = '.next-dialog-btn';
 /** 等待 window.Json 就绪的超时时间（ms） */
@@ -115,6 +118,14 @@ function parseRequestForm(postData: string): Record<string, string> {
     result[key] = value;
   }
   return result;
+}
+
+async function clickTbSaveDraftButton(page: Page): Promise<void> {
+  await page
+    .locator(TB_SAVE_DRAFT_SELECTOR)
+    .filter({ hasText: new RegExp(`^\\s*${TB_SAVE_DRAFT_TEXT}\\s*$`) })
+    .first()
+    .click();
 }
 
 export async function detectTbSaleSpecUiState(page: Page): Promise<TbSaleSpecUiState> {
@@ -294,6 +305,7 @@ export class FillDraftStep extends PublishStep {
       uploadedDetailImages,
       uploadedDetailImageMetas: ctx.get('uploadedDetailImageMetas') ?? [],
       uploadedSkuImageMap,
+      uploadedImageMetaMap: getImageCropMetaMap(ctx.taskId),
       draftContext: draftCtx,
       publishConfig: ctx.get('publishConfig'),
       tbWindowJson,
@@ -412,7 +424,7 @@ export class FillDraftStep extends PublishStep {
     ).catch(() => null);
 
     // 点击保存草稿按钮
-    await page.locator(TB_SAVE_DRAFT_SELECTOR).click();
+    await clickTbSaveDraftButton(page);
 
     // 提取 window.Json
     const rawWindowJson = await page.evaluate(() => window?.Json);
@@ -558,7 +570,7 @@ export class FillDraftStep extends PublishStep {
       { timeout: 15_000 },
     ).catch(() => null);
 
-    await page.locator(TB_SAVE_DRAFT_SELECTOR).click();
+    await clickTbSaveDraftButton(page);
 
     const rawWindowJson = await page.evaluate(() => window?.Json);
     const tbWindowJson = parseTbWindowJsonForDraft(rawWindowJson);

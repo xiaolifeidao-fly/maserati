@@ -16,6 +16,8 @@ export class ShopRecord {
 
   platform = "";
 
+  shopUsage = "";
+
   remark = "";
 
   platformShopId = "";
@@ -42,6 +44,7 @@ export class ShopRecord {
 export interface ShopPayload extends Record<string, unknown> {
   appUserId: number;
   platform: string;
+  shopUsage?: string;
   remark?: string;
   loginStatus?: string;
 }

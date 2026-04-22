@@ -15,6 +15,23 @@ import type { PageResult } from '../commerce/commerce.api';
 
 export type { PageResult };
 
+export interface PublishLogExportResult {
+  exported: boolean;
+  cancelled: boolean;
+  filePath?: string;
+  count: number;
+  missingCount?: number;
+}
+
+export interface PublishDraftRecord {
+  id: number;
+  sourceProductId: string;
+  shopId: number;
+  tbCatId: string;
+  tbDraftId: string;
+  status: string;
+}
+
 /**
  * PublishApi — 商品发布 Electron IPC API 定义
  *
@@ -108,6 +125,24 @@ export class PublishApi extends ElectronApi {
   @InvokeType(Protocols.INVOKE)
   async getPublishCenterState(): Promise<PublishCenterState> {
     return this.invokeApi('getPublishCenterState');
+  }
+
+  @InvokeType(Protocols.INVOKE)
+  async exportPublishErrorLog(sourceProductId: string): Promise<PublishLogExportResult> {
+    return this.invokeApi('exportPublishErrorLog', sourceProductId);
+  }
+
+  @InvokeType(Protocols.INVOKE)
+  async exportPublishBatchErrorLogs(
+    batchId: number,
+    sourceProductIds?: string[],
+  ): Promise<PublishLogExportResult> {
+    return this.invokeApi('exportPublishBatchErrorLogs', batchId, sourceProductIds);
+  }
+
+  @InvokeType(Protocols.INVOKE)
+  async getProductDraftBySource(shopId: number, sourceProductId: string): Promise<PublishDraftRecord | null> {
+    return this.invokeApi('getProductDraftBySource', shopId, sourceProductId);
   }
 
   // ─── 进度监听（主进程 → 渲染进程推送）────────────────────────────────────

@@ -2,6 +2,7 @@ import type { NormalizedProduct } from '../types/source-data';
 import type { TbCategoryInfo, TbDraftContext, TbUploadedImageMeta } from '../types/draft';
 import type { TbWindowJsonDraftData } from '../types/tb-window-json';
 import type { PublishConfig } from '../types/publish-task';
+import type { ImageCropMeta } from '../core/publish-image-meta-store';
 
 /**
  * FillerContext — 填充器共享上下文
@@ -26,6 +27,8 @@ export interface FillerContext {
   readonly uploadedDetailImageMetas?: TbUploadedImageMeta[];
   /** 上传后的 SKU 图片 URL 映射（原始 URL → 淘宝 URL） */
   readonly uploadedSkuImageMap?: Record<string, string>;
+  /** 淘宝 URL → 裁剪后尺寸，本次任务上传时写入，供 filler 读取真实宽高 */
+  readonly uploadedImageMetaMap?: ReadonlyMap<string, ImageCropMeta>;
   /** 草稿上下文（含 catId / startTraceId / draftId 等） */
   readonly draftContext: TbDraftContext;
   /** 发布配置（价格调整、发布策略） */

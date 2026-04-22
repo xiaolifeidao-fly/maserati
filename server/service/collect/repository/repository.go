@@ -34,18 +34,22 @@ func (r *CollectBatchRepository) CountByQuery(query collectDTO.CollectBatchQuery
 	if r.Db == nil {
 		return 0, fmt.Errorf("database is not initialized")
 	}
-	dbQuery := r.Db.Model(&CollectBatch{}).Where("active = ?", 1)
+	dbQuery := r.Db.Model(&CollectBatch{}).Where("collect_batch.active = ?", 1)
 	if query.AppUserID > 0 {
-		dbQuery = dbQuery.Where("app_user_id = ?", query.AppUserID)
+		dbQuery = dbQuery.Where("collect_batch.app_user_id = ?", query.AppUserID)
 	}
 	if query.ShopID > 0 {
-		dbQuery = dbQuery.Where("shop_id = ?", query.ShopID)
+		dbQuery = dbQuery.Where("collect_batch.shop_id = ?", query.ShopID)
 	}
 	if value := strings.TrimSpace(query.Name); value != "" {
-		dbQuery = dbQuery.Where("name LIKE ?", "%"+value+"%")
+		dbQuery = dbQuery.Where("collect_batch.name LIKE ?", "%"+value+"%")
 	}
 	if value := strings.TrimSpace(query.Status); value != "" {
-		dbQuery = dbQuery.Where("status = ?", value)
+		dbQuery = dbQuery.Where("collect_batch.status = ?", value)
+	}
+	if value := strings.TrimSpace(query.Platform); value != "" {
+		dbQuery = dbQuery.Joins("JOIN shop ON shop.id = collect_batch.shop_id AND shop.active = ?", 1).
+			Where("shop.platform = ?", value)
 	}
 	var total int64
 	if err := dbQuery.Count(&total).Error; err != nil {
@@ -58,21 +62,25 @@ func (r *CollectBatchRepository) ListByQuery(query collectDTO.CollectBatchQueryD
 	if r.Db == nil {
 		return nil, fmt.Errorf("database is not initialized")
 	}
-	dbQuery := r.Db.Model(&CollectBatch{}).Where("active = ?", 1)
+	dbQuery := r.Db.Model(&CollectBatch{}).Where("collect_batch.active = ?", 1)
 	if query.AppUserID > 0 {
-		dbQuery = dbQuery.Where("app_user_id = ?", query.AppUserID)
+		dbQuery = dbQuery.Where("collect_batch.app_user_id = ?", query.AppUserID)
 	}
 	if query.ShopID > 0 {
-		dbQuery = dbQuery.Where("shop_id = ?", query.ShopID)
+		dbQuery = dbQuery.Where("collect_batch.shop_id = ?", query.ShopID)
 	}
 	if value := strings.TrimSpace(query.Name); value != "" {
-		dbQuery = dbQuery.Where("name LIKE ?", "%"+value+"%")
+		dbQuery = dbQuery.Where("collect_batch.name LIKE ?", "%"+value+"%")
 	}
 	if value := strings.TrimSpace(query.Status); value != "" {
-		dbQuery = dbQuery.Where("status = ?", value)
+		dbQuery = dbQuery.Where("collect_batch.status = ?", value)
+	}
+	if value := strings.TrimSpace(query.Platform); value != "" {
+		dbQuery = dbQuery.Joins("JOIN shop ON shop.id = collect_batch.shop_id AND shop.active = ?", 1).
+			Where("shop.platform = ?", value)
 	}
 	var entities []*CollectBatch
-	if err := dbQuery.Order("id DESC").Offset((pageIndex - 1) * pageSize).Limit(pageSize).Find(&entities).Error; err != nil {
+	if err := dbQuery.Select("collect_batch.*").Order("collect_batch.id DESC").Offset((pageIndex - 1) * pageSize).Limit(pageSize).Find(&entities).Error; err != nil {
 		return nil, err
 	}
 	return entities, nil

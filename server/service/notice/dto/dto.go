@@ -4,13 +4,15 @@ import baseDTO "common/base/dto"
 
 type NoticeDTO struct {
 	baseDTO.BaseDTO
-	Title   string `json:"title"`
-	Content string `json:"content"`
+	AppUserID uint64 `json:"appUserId"`
+	Title     string `json:"title"`
+	Content   string `json:"content"`
 }
 
 type CreateNoticeDTO struct {
-	Title   string `json:"title"`
-	Content string `json:"content"`
+	AppUserID uint64 `json:"appUserId"`
+	Title     string `json:"title"`
+	Content   string `json:"content"`
 }
 
 type UpdateNoticeDTO struct {
@@ -22,5 +24,6 @@ type NoticeQueryDTO struct {
 	Page      int    `form:"page"`
 	PageIndex int    `form:"pageIndex"`
 	PageSize  int    `form:"pageSize"`
+	AppUserID uint64 `form:"appUserId"`
 	Title     string `form:"title"`
 }

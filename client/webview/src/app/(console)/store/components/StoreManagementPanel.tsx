@@ -31,6 +31,31 @@ const platformOptions = [
   { label: "抖店", value: "douyin" },
 ];
 
+const shopUsageOptions = [
+  { label: "采集", value: "COLLECT" },
+  { label: "发布", value: "PUBLISH" },
+];
+
+function getDefaultShopUsage(platform: string) {
+  const normalized = (platform || "").trim().toLowerCase();
+  return normalized === "pdd" || normalized === "pxx" ? "COLLECT" : "PUBLISH";
+}
+
+function normalizeShopUsage(shopUsage: string) {
+  const normalized = (shopUsage || "").trim().toUpperCase();
+  if (normalized === "COLLECT" || normalized === "采集") {
+    return "COLLECT";
+  }
+  if (normalized === "PUBLISH" || normalized === "发布") {
+    return "PUBLISH";
+  }
+  return "";
+}
+
+function getShopUsageLabel(shopUsage: string) {
+  return shopUsageOptions.find((item) => item.value === normalizeShopUsage(shopUsage))?.label || "-";
+}
+
 export function StoreManagementPanel() {
   const [storeForm] = Form.useForm<StoreFormValues>();
   const [authorizeForm] = Form.useForm<AuthorizeFormValues>();
@@ -40,6 +65,7 @@ export function StoreManagementPanel() {
     name: "",
     businessId: "",
     platform: "",
+    shopUsage: "",
     authorizationStatus: "",
   });
   const [editingStore, setEditingStore] = useState<StoreRecord | null>(null);
@@ -57,6 +83,7 @@ export function StoreManagementPanel() {
       shopTypeCode: "",
       approveFlag: 0,
       platform: "taobao",
+      shopUsage: "PUBLISH",
       platformShopId: "",
       businessId: "",
     });
@@ -73,6 +100,7 @@ export function StoreManagementPanel() {
       shopTypeCode: record.shopTypeCode,
       approveFlag: record.approveFlag,
       platform: record.platform || "taobao",
+      shopUsage: normalizeShopUsage(record.shopUsage || getDefaultShopUsage(record.platform)),
       platformShopId: record.platformShopId,
       businessId: record.businessId,
     });
@@ -98,6 +126,7 @@ export function StoreManagementPanel() {
         name: values.name.trim(),
         shopTypeCode: values.shopTypeCode.trim(),
         platform: values.platform.trim(),
+        shopUsage: normalizeShopUsage(values.shopUsage || getDefaultShopUsage(values.platform)),
         platformShopId: values.platformShopId.trim(),
         businessId: values.businessId.trim(),
       });
@@ -142,12 +171,17 @@ export function StoreManagementPanel() {
       ),
     },
     {
-      title: "平台 / 三方店铺ID",
+      title: "平台 / 用途 / 三方店铺ID",
       key: "platformShopId",
       width: 220,
       render: (_, record) => (
         <div>
           <div>{record.platform || "-"}</div>
+          <div style={{ marginTop: 4 }}>
+            <Tag color={normalizeShopUsage(record.shopUsage) === "COLLECT" ? "blue" : "purple"}>
+              {getShopUsageLabel(record.shopUsage)}
+            </Tag>
+          </div>
           <div style={{ color: "var(--manager-text-faint)", marginTop: 4 }}>{record.platformShopId || "-"}</div>
         </div>
       ),
@@ -238,6 +272,14 @@ export function StoreManagementPanel() {
             />
             <Select
               allowClear
+              placeholder="用途"
+              value={filters.shopUsage || undefined}
+              onChange={(value) => setFilters((current) => ({ ...current, shopUsage: value || "" }))}
+              options={shopUsageOptions}
+              style={{ width: 120 }}
+            />
+            <Select
+              allowClear
               placeholder="授权状态"
               value={filters.authorizationStatus || undefined}
               onChange={(value) => setFilters((current) => ({ ...current, authorizationStatus: value || "" }))}
@@ -301,7 +343,15 @@ export function StoreManagementPanel() {
             <Input placeholder="例如：tmall_flagship" />
           </Form.Item>
           <Form.Item name="platform" label="平台" rules={[{ required: true, message: "请选择平台" }]}>
-            <Select options={platformOptions} />
+            <Select
+              options={platformOptions}
+              onChange={(value) => {
+                storeForm.setFieldsValue({ shopUsage: getDefaultShopUsage(value) });
+              }}
+            />
+          </Form.Item>
+          <Form.Item name="shopUsage" label="用途" rules={[{ required: true, message: "请选择用途" }]}>
+            <Select options={shopUsageOptions} />
           </Form.Item>
           <Form.Item name="platformShopId" label="第三方店铺ID" rules={[{ required: true, message: "请输入第三方店铺ID" }]}>
             <Input placeholder="例如：shop_1024" />

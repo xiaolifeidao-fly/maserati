@@ -1,4 +1,8 @@
-import { PublishApi } from '@eleapi/publish/publish.api';
+import {
+  PublishApi,
+  type PublishDraftRecord,
+  type PublishLogExportResult,
+} from '@eleapi/publish/publish.api';
 import { requestBackend } from '../shared/backend';
 import { PublishRunner } from '@src/publish/core/publish-runner';
 import { HttpPublishPersister } from '@src/publish/core/http-publish-persister';
@@ -19,6 +23,8 @@ import { StepCode, StepStatus, TaskStatus } from '@src/publish/types/publish-tas
 import type { PageResult } from '@eleapi/commerce/commerce.api';
 import {
   clearPublishProductLogs,
+  exportPublishBatchErrorLogs,
+  exportPublishProductLog,
   publishError,
   publishInfo,
   registerPublishTaskLogFile,
@@ -272,5 +278,62 @@ export class PublishImpl extends PublishApi {
 
   async getPublishCenterState(): Promise<PublishCenterState> {
     return getRuntimePublishCenterState();
+  }
+
+  async exportPublishErrorLog(sourceProductId: string): Promise<PublishLogExportResult> {
+    return exportPublishProductLog(sourceProductId);
+  }
+
+  async exportPublishBatchErrorLogs(
+    batchId: number,
+    sourceProductIds?: string[],
+  ): Promise<PublishLogExportResult> {
+    const ids = sourceProductIds?.filter(Boolean) ?? [];
+    if (ids.length > 0) {
+      return exportPublishBatchErrorLogs(batchId, ids);
+    }
+
+    const failedSourceProductIds: string[] = [];
+    let pageIndex = 1;
+    const pageSize = 500;
+    let total = 0;
+
+    do {
+      const page = await requestBackend<PageResult<PublishTaskRecord>>('GET', '/publish-tasks', {
+        params: {
+          collectBatchId: batchId,
+          status: TaskStatus.FAILED,
+          pageIndex,
+          pageSize,
+        },
+      });
+      total = page.total ?? 0;
+      for (const task of page.data ?? []) {
+        if (task.sourceProductId) {
+          failedSourceProductIds.push(task.sourceProductId);
+        }
+      }
+      pageIndex += 1;
+    } while ((pageIndex - 1) * pageSize < total);
+
+    return exportPublishBatchErrorLogs(batchId, failedSourceProductIds);
+  }
+
+  async getProductDraftBySource(shopId: number, sourceProductId: string): Promise<PublishDraftRecord | null> {
+    const normalizedSourceProductId = String(sourceProductId || '').trim();
+    if (!shopId || !normalizedSourceProductId) {
+      return null;
+    }
+
+    const result = await requestBackend<PageResult<PublishDraftRecord>>('GET', '/product-drafts', {
+      params: {
+        shopId,
+        sourceProductId: normalizedSourceProductId,
+        pageIndex: 1,
+        pageSize: 1,
+      },
+    });
+
+    return result.data?.[0] ?? null;
   }
 }

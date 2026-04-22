@@ -7,11 +7,20 @@
     "dev-mac": "export NODE_OPTIONS='--max-old-space-size=4096' && sh mac/dev.sh",
     "stop-mac": "sh mac/stop.sh",
     "dev-win": "set NODE_OPTIONS=--max-old-space-size=4096 && .\\win\\dev.bat",
-    "build": "export NODE_OPTIONS='--max-old-space-size=4096' && webpack --config webpack.config.js --mode production",
+    "build": "cross-env NODE_OPTIONS=--max-old-space-size=4096 webpack --config webpack.config.js --mode production",
     "start": "electron . --disable-gpu --no-sandbox --max-old-space-size=4096",
     "electron-dev": "concurrently \"npm run dev\" \"wait-on http://localhost:3000 && electron . --disable-gpu --no-sandbox --max-old-space-size=4096\"",
-    "package:mac": "sh mac/package_mac.sh",
-    "package:win": "sh mac/package_win.sh",
+    "package:mac": "sh mac/package_mac.sh all",
+    "package:mac:x86": "sh mac/package_mac.sh x86",
+    "package:mac:x64": "sh mac/package_mac.sh x64",
+    "package:mac:arm": "sh mac/package_mac.sh arm",
+    "package:mac:arm64": "sh mac/package_mac.sh arm64",
+    "package:win": "sh mac/package_win.sh all",
+    "package:win:x86": "sh mac/package_win.sh x86",
+    "package:win:x64": "sh mac/package_win.sh x64",
+    "package:win:arm": "sh mac/package_win.sh arm",
+    "package:win:arm64": "sh mac/package_win.sh arm64",
+    "package:all": "npm run package:mac && npm run package:win",
     "package:win-by-win": ".\\win\\package_win.bat"
   },
   "build": {
@@ -37,12 +46,28 @@
     "productName": "maserati",
     "npmRebuild": true,
     "mac": {
-      "target": "dmg",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ],
       "icon": "static/logo/logo.jpg",
       "category": "com.x.ds.maserati.category.type"
     },
     "win": {
-      "target": "nsis",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ],
       "icon": "static/logo/logo.jpg"
     },
     "publish": [

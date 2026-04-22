@@ -19,6 +19,7 @@ const defaultQuery: Required<StoreListQuery> = {
   name: "",
   businessId: "",
   platform: "",
+  shopUsage: "",
   authorizationStatus: "",
 };
 

@@ -30,6 +30,7 @@ import { requestBackend } from '@src/impl/shared/backend';
 import type { CollectSourceType } from '@eleapi/collect/collect.platform';
 import type { RawSourceData } from '../types/source-data';
 import { clearPublishStepPayloads } from '../runtime/publish-step-store';
+import { clearImageCropMeta } from './publish-image-meta-store';
 import type { PublishConfig, PublishPriceSettings, PublishStrategy } from '../types/publish-task';
 
 function parseTaskPublishConfig(remark?: string): PublishConfig {
@@ -252,6 +253,7 @@ export class PublishRunner {
       throw err;
     } finally {
       this.taskStartTimeMap.delete(taskId);
+      clearImageCropMeta(taskId);
     }
   }
 

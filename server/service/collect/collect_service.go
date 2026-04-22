@@ -4,6 +4,7 @@ import (
 	"common/middleware/db"
 	"common/middleware/storage/oss"
 	"fmt"
+	"log"
 	appUserRepository "service/app_user/repository"
 	collectRepository "service/collect/repository"
 	shopRepository "service/shop/repository"
@@ -128,8 +129,15 @@ func sanitizeCollectRawDataPathPart(value string) string {
 }
 
 func storeCollectRawData(batchID uint64, sourceProductID string, rawSourceData string) (string, error) {
+	if !oss.IsEnabled() {
+		return "", nil
+	}
 	path := buildCollectRawDataPath(batchID, sourceProductID)
-	return path, oss.Put(path, []byte(rawSourceData))
+	if err := oss.Put(path, []byte(rawSourceData)); err != nil {
+		log.Printf("[collect] storeCollectRawData failed: batchID=%d sourceProductID=%s path=%s err=%v", batchID, sourceProductID, path, err)
+		return "", err
+	}
+	return path, nil
 }
 
 func resolveCollectRawDataURL(

@@ -24,6 +24,9 @@ func (r *NoticeRepository) CountByQuery(query noticeDTO.NoticeQueryDTO) (int64, 
 	}
 
 	dbQuery := r.Db.Model(&Notice{}).Where("active = ?", 1)
+	if query.AppUserID > 0 {
+		dbQuery = dbQuery.Where("app_user_id = ?", query.AppUserID)
+	}
 	if title := strings.TrimSpace(query.Title); title != "" {
 		dbQuery = dbQuery.Where("title LIKE ?", "%"+title+"%")
 	}
@@ -41,6 +44,9 @@ func (r *NoticeRepository) ListByQuery(query noticeDTO.NoticeQueryDTO, pageIndex
 	}
 
 	dbQuery := r.Db.Model(&Notice{}).Where("active = ?", 1)
+	if query.AppUserID > 0 {
+		dbQuery = dbQuery.Where("app_user_id = ?", query.AppUserID)
+	}
 	if title := strings.TrimSpace(query.Title); title != "" {
 		dbQuery = dbQuery.Where("title LIKE ?", "%"+title+"%")
 	}

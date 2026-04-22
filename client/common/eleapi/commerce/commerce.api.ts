@@ -57,6 +57,7 @@ export class ShopRecord {
   name = "";
   nickname = "";
   platform = "";
+  shopUsage = "";
   remark = "";
   platformShopId = "";
   businessId = "";
@@ -76,6 +77,7 @@ export interface ShopListQuery extends Record<string, string | number | undefine
   code?: string;
   name?: string;
   platform?: string;
+  shopUsage?: string;
   remark?: string;
   businessId?: string;
   platformShopId?: string;
@@ -85,6 +87,7 @@ export interface ShopListQuery extends Record<string, string | number | undefine
 
 export interface ShopPayload {
   platform: string;
+  shopUsage: string;
   remark: string;
   loginStatus?: string;
 }
@@ -100,6 +103,7 @@ export interface ShopLoginPayload {
   nickname?: string;
   code: string;
   platform: string;
+  shopUsage?: string;
   platformShopId: string;
   businessId: string;
 }
@@ -132,6 +136,7 @@ export interface ProductListQuery extends Record<string, string | number | undef
   title?: string;
   outerProductId?: string;
   status?: string;
+  platform?: string;
 }
 
 export interface ProductPayload {

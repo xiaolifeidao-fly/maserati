@@ -14,6 +14,10 @@ type AdapterOss interface {
 	BuildKey(path string) string
 }
 
+func IsEnabled() bool {
+	return Oss != nil
+}
+
 func Put(path string, data []byte) error {
 	if Oss == nil {
 		return errors.New("oss not init")

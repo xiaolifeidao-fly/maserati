@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { CopyOutlined, DeleteOutlined, EyeOutlined, PlayCircleOutlined, ReloadOutlined, SearchOutlined } from "@ant-design/icons";
-import { Input, Modal, Popconfirm, Select, Space, Table, Tag, Typography, message } from "antd";
+import { Input, Modal, Popconfirm, Select, Space, Table, Tabs, Tag, Typography, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { type ProductRecord } from "../api/product.api";
 import { useProductManagement } from "../hooks/useProductManagement";
@@ -18,6 +18,8 @@ import { IconOnlyButton } from "@/components/manager-shell/IconOnlyButton";
 import { formatDateTime } from "@/utils/format";
 import { getPublishWindowApi } from "@/utils/publish-window";
 
+const TAOBAO_ITEM_URL_PREFIX = "https://item.taobao.com/item.htm";
+
 const PRODUCT_STATUS_LABELS: Record<string, { label: string; color: string }> = {
   DRAFT: { label: "草稿", color: "gold" },
   PUBLISHED: { label: "已发布", color: "green" },
@@ -25,8 +27,17 @@ const PRODUCT_STATUS_LABELS: Record<string, { label: string; color: string }> = 
   ARCHIVED: { label: "已归档", color: "default" },
 };
 
+const platformOptions = [
+  { key: "tb", label: "淘宝", value: "tb" },
+  { key: "pxx", label: "拼多多", value: "pxx" },
+];
+
+function buildTaobaoItemUrl(itemId: string): string {
+  return `${TAOBAO_ITEM_URL_PREFIX}?id=${encodeURIComponent(itemId)}`;
+}
+
 export function ProductManagementSimplePanel() {
-  const { products, shops, categories, total, query, loading, submitting, refresh, removeProduct } = useProductManagement();
+  const { products, shops, categories, total, query, loading, submitting, refresh, refreshOptions, removeProduct } = useProductManagement();
   const safeShops = Array.isArray(shops) ? shops : [];
   const safeCategories = Array.isArray(categories) ? categories : [];
   const [filters, setFilters] = useState({
@@ -39,6 +50,7 @@ export function ProductManagementSimplePanel() {
   const [detailModalOpen, setDetailModalOpen] = useState(false);
   const [detailTitle, setDetailTitle] = useState("");
   const [detailData, setDetailData] = useState<StandardProductData | null>(null);
+  const activePlatform = query.platform || "tb";
 
   const shopNameMap = useMemo(
     () => new Map(safeShops.map((item) => [item.id, item.remark || item.nickname || item.name || item.code || item.platform])),
@@ -115,21 +127,6 @@ export function ProductManagementSimplePanel() {
     }
   };
 
-  const handleCopyProductUrl = async (outerProductId?: string) => {
-    const productId = String(outerProductId || "").trim();
-    if (!productId) {
-      message.warning("该商品缺少商品ID，无法复制链接");
-      return;
-    }
-
-    try {
-      await navigator.clipboard.writeText(`https://item.taobao.com/item.htm?id=${productId}`);
-      message.success("商品链接已复制");
-    } catch (error) {
-      message.error(error instanceof Error ? error.message : "复制商品链接失败");
-    }
-  };
-
   const productColumns: ColumnsType<ProductRecord> = [
     {
       title: "商品",
@@ -140,7 +137,9 @@ export function ProductManagementSimplePanel() {
           <div style={{ color: "var(--manager-text)", fontWeight: 700 }}>{record.title || "-"}</div>
           <div style={{ marginTop: 4 }}>
             {record.outerProductId ? (
-              <Typography.Link onClick={() => void handleCopyProductUrl(record.outerProductId)}>{record.outerProductId}</Typography.Link>
+              <Typography.Link href={buildTaobaoItemUrl(record.outerProductId)} target="_blank" rel="noreferrer">
+                {record.outerProductId}
+              </Typography.Link>
             ) : (
               <span style={{ color: "var(--manager-text-faint)" }}>-</span>
             )}
@@ -222,6 +221,20 @@ export function ProductManagementSimplePanel() {
       <section className="manager-data-card">
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap", justifyContent: "space-between" }}>
           <Space wrap size={12}>
+            <Typography.Text type="secondary" style={{ lineHeight: "44px" }}>
+              采集来源
+            </Typography.Text>
+            <Tabs
+              activeKey={activePlatform}
+              items={platformOptions}
+              onChange={(platform) => {
+                setFilters((current) => ({ ...current, shopId: 0 }));
+                void Promise.all([
+                  refresh({ pageIndex: 1, platform, shopId: undefined }),
+                  refreshOptions(platform),
+                ]);
+              }}
+            />
             <Input
               className="manager-filter-input"
               placeholder="按商品标题筛选"
@@ -231,7 +244,7 @@ export function ProductManagementSimplePanel() {
             />
             <Select
               allowClear
-              placeholder="所属店铺"
+              placeholder="发布店铺"
               value={filters.shopId || undefined}
               onChange={(value) => setFilters((current) => ({ ...current, shopId: Number(value || 0) }))}
               options={safeShops.map((item) => ({ label: item.remark || item.nickname || item.name || item.code || item.platform, value: item.id }))}
@@ -257,6 +270,7 @@ export function ProductManagementSimplePanel() {
               onClick={() =>
                 void refresh({
                   pageIndex: 1,
+                  platform: activePlatform,
                   title: filters.title,
                   shopId: filters.shopId || undefined,
                   status: filters.status,

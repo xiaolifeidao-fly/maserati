@@ -1,4 +1,13 @@
+#!/bin/bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+APP_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+cd "$APP_DIR"
 rm -rf ./dist/*
-# tsc
 npm run build
-webpack --config webpack.config.js --mode production
+
+if [ -f .env ]; then
+  cp .env ./dist/
+fi

@@ -17,6 +17,7 @@ const (
 
 func ToJson(context *gin.Context, data interface{}, err error) {
 	if err != nil {
+		log.Printf("[api] request failed: method=%s path=%s err=%v", context.Request.Method, context.Request.URL.Path, err)
 		context.JSON(http.StatusOK, gin.H{
 			"success": false,
 			"code":    FailCode,

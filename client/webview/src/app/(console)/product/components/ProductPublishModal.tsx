@@ -5,6 +5,8 @@ import {
   ArrowLeftOutlined,
   ArrowRightOutlined,
   CloseOutlined,
+  DownloadOutlined,
+  EditOutlined,
   PlayCircleOutlined,
   ReloadOutlined,
   StopOutlined,
@@ -43,6 +45,8 @@ import { getPublishWindowApi } from "@/utils/publish-window";
 const SHOP_LOGIN_REQUIRED_MESSAGE = "当前选中的店铺未登录，需要去店铺管理中重新授权登录";
 
 const PRICE_SETTINGS_KEY = "publish_price_settings_v1";
+const TAOBAO_ITEM_URL_PREFIX = "https://item.taobao.com/item.htm";
+const TAOBAO_DRAFT_URL_PREFIX = "https://item.upload.taobao.com/sell/v2/draft.htm";
 
 type PublishStrategy = "warehouse" | "immediate";
 
@@ -119,6 +123,14 @@ function savePriceSettings(settings: PublishSettings): void {
   }
 }
 
+function buildTaobaoItemUrl(itemId: string): string {
+  return `${TAOBAO_ITEM_URL_PREFIX}?id=${encodeURIComponent(itemId)}`;
+}
+
+function buildTaobaoDraftUrl(draftId: string): string {
+  return `${TAOBAO_DRAFT_URL_PREFIX}?dbDraftId=${encodeURIComponent(draftId)}`;
+}
+
 // ─── 发布队列类型 ──────────────────────────────────────────────────────────────
 
 type PublishQueueStatus = "PENDING" | "CREATING" | "PUBLISHING" | "SUCCESS" | "FAILED";
@@ -140,6 +152,7 @@ interface PublishQueueItem {
   currentStepCode?: string;
   statusText?: string;
   waitingForCaptcha?: boolean;
+  draftId?: string;
   error?: string;
 }
 
@@ -287,6 +300,7 @@ export function ProductPublishModal({
   const [republishStatsByBatchId, setRepublishStatsByBatchId] = useState<Record<number, PublishBatchRepublishStats>>({});
   const [republishStatsLoadingBatchIds, setRepublishStatsLoadingBatchIds] = useState<number[]>([]);
   const [selectedBatchId, setSelectedBatchId] = useState(initialBatchId);
+  const [selectedTargetPlatform, setSelectedTargetPlatform] = useState<string>("tb");
   const [selectedTargetShopId, setSelectedTargetShopId] = useState(0);
   const [priceSettings, setPriceSettings] = useState<PublishSettings>(loadPriceSettings);
   const [priceRatioInput, setPriceRatioInput] = useState(() => formatEditableNumber(loadPriceSettings().floatRatio));
@@ -300,8 +314,12 @@ export function ProductPublishModal({
   const [recoverableTasks, setRecoverableTasks] = useState<PublishRuntimeTaskSnapshot[]>([]);
   const [taskErrorDetails, setTaskErrorDetails] = useState<Record<number, TaskErrorDetailState>>({});
   const [stoppingAll, setStoppingAll] = useState(false);
+  const [exportingLogProductIds, setExportingLogProductIds] = useState<string[]>([]);
+  const [exportingBatchLogs, setExportingBatchLogs] = useState(false);
+  const [publishProgressLoading, setPublishProgressLoading] = useState(directToProgress);
   const runningTableWrapRef = useRef<HTMLDivElement | null>(null);
   const publishQueueRef = useRef<PublishQueueItem[]>([]);
+  const draftLookupKeysRef = useRef<Set<string>>(new Set());
   const restoredFromCenterRef = useRef(false);
   const recoveryModeRef = useRef<RecoveryMode>("undecided");
   const stopRequestedRef = useRef(false);
@@ -309,31 +327,36 @@ export function ProductPublishModal({
   // Step 5 内部阶段：preview = 预览待发布数据，recovery = 选择恢复策略，running = 发布任务执行中
   const [step4Phase, setStep4Phase] = useState<"preview" | "recovery" | "running">(directToProgress ? "running" : "preview");
 
-  // 打开时加载选项数据
+  // 打开时加载批次数据
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
 
-    const load = async () => {
-      setOptionsLoading(true);
-      try {
-        const [shopResult, batchResult] = await Promise.all([
-          fetchShopOptions(),
-          fetchCollectBatchOptions(),
-        ]);
-        if (cancelled) return;
-        setShops(Array.isArray(shopResult.data) ? shopResult.data : []);
-        setCollectBatches(Array.isArray(batchResult.data) ? batchResult.data : []);
-      } catch (error) {
-        if (!cancelled) message.error(error instanceof Error ? error.message : "加载配置失败");
-      } finally {
-        if (!cancelled) setOptionsLoading(false);
-      }
-    };
+    void fetchCollectBatchOptions().then((result) => {
+      if (!cancelled) setCollectBatches(Array.isArray(result.data) ? result.data : []);
+    }).catch((error) => {
+      if (!cancelled) message.error(error instanceof Error ? error.message : "加载采集批次失败");
+    });
 
-    void load();
     return () => { cancelled = true; };
   }, [initialBatchId, open]);
+
+  // 平台切换时重新加载店铺
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+
+    setOptionsLoading(true);
+    void fetchShopOptions(selectedTargetPlatform).then((result) => {
+      if (!cancelled) setShops(Array.isArray(result.data) ? result.data : []);
+    }).catch((error) => {
+      if (!cancelled) message.error(error instanceof Error ? error.message : "加载店铺失败");
+    }).finally(() => {
+      if (!cancelled) setOptionsLoading(false);
+    });
+
+    return () => { cancelled = true; };
+  }, [open, selectedTargetPlatform]);
 
   // 打开时重置状态
   useEffect(() => {
@@ -341,6 +364,7 @@ export function ProductPublishModal({
     const nextPriceSettings = loadPriceSettings();
     setCurrentStep(directToProgress ? 4 : isCollectionBatchEntry ? 2 : 1);
     setSelectedBatchId(initialBatchId);
+    setSelectedTargetPlatform("tb");
     setSelectedTargetShopId(0);
     setPublishQueue([]);
     setStep4Phase(directToProgress ? "running" : "preview");
@@ -354,6 +378,10 @@ export function ProductPublishModal({
     setTaskErrorDetails({});
     setPublishRunning(false);
     setStoppingAll(false);
+    setExportingLogProductIds([]);
+    setExportingBatchLogs(false);
+    setPublishProgressLoading(directToProgress);
+    draftLookupKeysRef.current.clear();
     stopRequestedRef.current = false;
     publishRunIdRef.current += 1;
   }, [directToProgress, initialBatchId, isCollectionBatchEntry, open]);
@@ -369,6 +397,42 @@ export function ProductPublishModal({
   useEffect(() => {
     recoveryModeRef.current = recoveryMode;
   }, [recoveryMode]);
+
+  useEffect(() => {
+    if (!open) return;
+
+    const candidates = publishQueue.filter((item) => (
+      item.status === "FAILED" &&
+      !item.draftId &&
+      item.shopId > 0 &&
+      Boolean(item.sourceProductId)
+    ));
+
+    for (const item of candidates) {
+      const lookupKey = `${item.shopId}:${item.sourceProductId}`;
+      if (draftLookupKeysRef.current.has(lookupKey)) {
+        continue;
+      }
+      draftLookupKeysRef.current.add(lookupKey);
+
+      void getPublishApi()
+        .getProductDraftBySource(item.shopId, item.sourceProductId)
+        .then((draft) => {
+          const draftId = draft?.tbDraftId?.trim();
+          if (!draftId) {
+            return;
+          }
+          setPublishQueue((current) =>
+            current.map((queueItem) =>
+              queueItem.shopId === item.shopId && queueItem.sourceProductId === item.sourceProductId
+                ? { ...queueItem, draftId }
+                : queueItem,
+            ),
+          );
+        })
+        .catch(() => undefined);
+    }
+  }, [open, publishQueue]);
 
   useEffect(() => {
     if (!open) return;
@@ -460,9 +524,17 @@ export function ProductPublishModal({
       setCurrentStep(4);
     };
 
-    void publishApi.getPublishCenterState().then((state) => {
-      void applyCenterState(state as PublishCenterState);
-    }).catch(() => undefined);
+    if (directToProgress) {
+      setPublishProgressLoading(true);
+    }
+
+    void publishApi.getPublishCenterState().then((state) => (
+      applyCenterState(state as PublishCenterState)
+    )).catch(() => undefined).finally(() => {
+      if (!cancelled && directToProgress) {
+        setPublishProgressLoading(false);
+      }
+    });
 
     void publishApi.onPublishCenterStateChanged((state) => {
       void applyCenterState(state as PublishCenterState);
@@ -478,9 +550,9 @@ export function ProductPublishModal({
     [shops],
   );
 
-  const tbShops = useMemo(
-    () => shops.filter((shop) => normalizePlatform(shop.platform) === "tb"),
-    [shops],
+  const publishShops = useMemo(
+    () => shops.filter((shop) => normalizePlatform(shop.platform) === selectedTargetPlatform && normalizeShopUsage(shop.shopUsage) === "PUBLISH"),
+    [shops, selectedTargetPlatform],
   );
 
   const selectedBatch = useMemo(
@@ -489,8 +561,8 @@ export function ProductPublishModal({
   );
 
   const selectedTargetShop = useMemo(
-    () => tbShops.find((shop) => shop.id === selectedTargetShopId) ?? null,
-    [selectedTargetShopId, tbShops],
+    () => publishShops.find((shop) => shop.id === selectedTargetShopId) ?? null,
+    [selectedTargetShopId, publishShops],
   );
 
   const selectedTargetShopNeedsLogin = Boolean(
@@ -532,14 +604,14 @@ export function ProductPublishModal({
       setSelectedTargetShopId(0);
       return;
     }
-    const batchShopIsTb = tbShops.some((shop) => shop.id === selectedBatch.shopId);
+    const batchShopOnPlatform = publishShops.some((shop) => shop.id === selectedBatch.shopId);
     setSelectedTargetShopId((current) => {
-      if (current > 0 && tbShops.some((shop) => shop.id === current)) {
+      if (current > 0 && publishShops.some((shop) => shop.id === current)) {
         return current;
       }
-      return batchShopIsTb ? selectedBatch.shopId : 0;
+      return batchShopOnPlatform ? selectedBatch.shopId : 0;
     });
-  }, [open, selectedBatch, tbShops]);
+  }, [open, selectedBatch, publishShops]);
 
   const runningPublishStats = useMemo(() => {
     const dedupedQueue = dedupeQueueItems(publishQueue);
@@ -694,7 +766,7 @@ export function ProductPublishModal({
       return;
     }
     if (!selectedTargetShopId) {
-      message.warning("请先选择淘宝店铺");
+      message.warning(`请先选择${selectedTargetPlatform === "tb" ? "淘宝" : "拼多多"}店铺`);
       return;
     }
     if (selectedTargetShopNotAuthorized) {
@@ -1133,6 +1205,53 @@ export function ProductPublishModal({
     }
   };
 
+  const handleExportProductErrorLog = async (sourceProductId: string) => {
+    const normalized = sourceProductId.trim();
+    if (!normalized) {
+      message.warning("当前商品缺少原商品ID，无法导出日志");
+      return;
+    }
+
+    setExportingLogProductIds((current) => current.includes(normalized) ? current : [...current, normalized]);
+    try {
+      const result = await getPublishApi().exportPublishErrorLog(normalized);
+      if (!result.cancelled && result.exported) {
+        message.success("已导出发布错误日志");
+      }
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "导出发布错误日志失败");
+    } finally {
+      setExportingLogProductIds((current) => current.filter((item) => item !== normalized));
+    }
+  };
+
+  const handleExportBatchErrorLogs = async () => {
+    if (!selectedBatchId) {
+      message.warning("请先选择发布批次");
+      return;
+    }
+    if (runningPublishStats.failedCount === 0) {
+      message.warning("当前批次暂无发布失败商品");
+      return;
+    }
+
+    setExportingBatchLogs(true);
+    try {
+      const failedSourceProductIds = dedupeQueueItems(publishQueue)
+        .filter((item) => item.status === "FAILED" && item.sourceProductId)
+        .map((item) => item.sourceProductId);
+      const result = await getPublishApi().exportPublishBatchErrorLogs(selectedBatchId, failedSourceProductIds);
+      if (!result.cancelled && result.exported) {
+        const missingText = result.missingCount ? `，${result.missingCount} 个商品未找到日志` : "";
+        message.success(`已导出 ${result.count} 份发布错误日志${missingText}`);
+      }
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "批量导出发布错误日志失败");
+    } finally {
+      setExportingBatchLogs(false);
+    }
+  };
+
   const loadTaskErrorDetails = async (taskId: number) => {
     const current = taskErrorDetails[taskId];
     if (current?.loading || current?.steps.length) {
@@ -1320,6 +1439,29 @@ export function ProductPublishModal({
                 {resultText}
               </span>
             )}
+            {record.status === "SUCCESS" && record.publishedItemId ? (
+              <IconOnlyButton
+                size="small"
+                shape="default"
+                icon={<ArrowRightOutlined />}
+                tooltip="预览已发布商品"
+                href={buildTaobaoItemUrl(record.publishedItemId)}
+                target="_blank"
+                rel="noreferrer"
+              />
+            ) : null}
+            {record.status === "FAILED" ? (
+              <IconOnlyButton
+                size="small"
+                shape="default"
+                icon={<EditOutlined />}
+                tooltip={record.draftId ? "打开淘宝草稿" : "暂无草稿ID，无法打开草稿"}
+                disabled={!record.draftId}
+                href={record.draftId ? buildTaobaoDraftUrl(record.draftId) : undefined}
+                target="_blank"
+                rel="noreferrer"
+              />
+            ) : null}
             {resumeTaskId && (record.waitingForCaptcha || record.status === "FAILED") ? (
               <IconOnlyButton
                 size="small"
@@ -1330,6 +1472,16 @@ export function ProductPublishModal({
                 disabled={selectedTargetShopNotAuthorized}
                 loading={resumingTaskIds.includes(resumeTaskId)}
                 onClick={() => void handleResumeTask(resumeTaskId)}
+              />
+            ) : null}
+            {record.status === "FAILED" && record.sourceProductId ? (
+              <IconOnlyButton
+                size="small"
+                shape="default"
+                icon={<DownloadOutlined />}
+                tooltip="导出错误发布日志"
+                loading={exportingLogProductIds.includes(record.sourceProductId)}
+                onClick={() => void handleExportProductErrorLog(record.sourceProductId)}
               />
             ) : null}
           </div>
@@ -1448,19 +1600,30 @@ export function ProductPublishModal({
             </div>
           )}
 
-          {/* ─── Step 2：选择目标淘宝店铺 ─────────────────────────────── */}
+          {/* ─── Step 2：选择目标店铺 ─────────────────────────────── */}
           {currentStep === 2 && (
             <div>
-              <div className="manager-panel-title" style={{ marginBottom: 12 }}>选择淘宝店铺</div>
-              <div className="manager-muted" style={{ marginBottom: 20, fontSize: 13 }}>
-                这里只展示淘宝类型的店铺，发布时 Playwright 使用的 `resourceId` 就是这里选择的店铺 ID
-              </div>
+              <div className="manager-panel-title" style={{ marginBottom: 12 }}>选择平台与店铺</div>
+
+              <Select
+                value={selectedTargetPlatform}
+                onChange={(value) => {
+                  setSelectedTargetPlatform(String(value || "tb"));
+                  setSelectedTargetShopId(0);
+                }}
+                options={[
+                  { label: "淘宝", value: "tb" },
+                  { label: "拼多多", value: "pxx" },
+                ]}
+                style={{ width: "100%", marginBottom: 12 }}
+                size="large"
+              />
 
               <Select
                 value={selectedTargetShopId || undefined}
-                placeholder="请选择要发布到的淘宝店铺"
+                placeholder={`请选择要发布到的${selectedTargetPlatform === "tb" ? "淘宝" : "拼多多"}店铺`}
                 onChange={(value) => setSelectedTargetShopId(Number(value ?? 0))}
-                options={tbShops.map((shop) => {
+                options={publishShops.map((shop) => {
                   const authorized = shop.authorizationStatus === "AUTHORIZED";
                   const loggedIn = shop.loginStatus === "LOGGED_IN";
                   const suffix = !authorized ? " · 未授权" : !loggedIn ? " · 未登录" : "";
@@ -1754,67 +1917,82 @@ export function ProductPublishModal({
 
           {currentStep === 4 && step4Phase === "running" && (
             <div>
-              {selectedTargetShopNeedsLogin ? (
-                <Alert
-                  type="warning"
-                  showIcon
-                  style={{ marginBottom: 16 }}
-                  message="店铺未登录"
-                  description={<span>当前选中的店铺未登录，需要去店铺管理中重新<a onClick={() => { void handleShopLoginFromPublish(selectedTargetShopId); }} style={{ cursor: "pointer", textDecoration: "underline" }}>授权登录</a></span>}
-                />
-              ) : null}
-              {activeCaptchaItem ? (
-                <Alert
-                  type="warning"
-                  showIcon
-                  style={{ marginBottom: 16 }}
-                  message={`任务 #${activeCaptchaItem.taskId} 正在等待验证码`}
-                  description={`${activeCaptchaItem.title} 需要先在右侧完成淘宝验证码，再点击该行右侧的"继续发布"。`}
-                />
-              ) : null}
-              {/* 发布任务进度 */}
-              <div style={{ marginBottom: 20 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, marginBottom: 10 }}>
-                  <div>
-                    <span style={{ fontSize: 14, fontWeight: 600, color: "var(--manager-text)" }}>
-                      发布任务进行中
-                    </span>
-                    <div className="manager-muted" style={{ fontSize: 12, marginTop: 4 }}>
-                      共 {runningPublishStats.total} 件 &nbsp;·&nbsp;
-                      <span style={{ color: "#52c41a" }}>成功 {runningPublishStats.successCount}</span>
-                      {runningPublishStats.pendingCount > 0 && (
-                        <> &nbsp;·&nbsp; <span style={{ color: "#1677ff" }}>待发布 {runningPublishStats.pendingCount}</span></>
-                      )}
-                      {runningPublishStats.failedCount > 0 && (
-                        <> &nbsp;·&nbsp; <span style={{ color: "#ff4d4f" }}>失败 {runningPublishStats.failedCount}</span></>
-                      )}
-                      {publishRunning && <> &nbsp;·&nbsp; 发布中…</>}
-                    </div>
-                  </div>
-                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
-                    <IconOnlyButton danger icon={<StopOutlined />} tooltip="全部停止" onClick={() => void handleStopAllPublish()} loading={stoppingAll} />
-                    <IconOnlyButton icon={<ReloadOutlined />} tooltip={selectedTargetShopNotAuthorized ? "店铺未授权，无法重新发布" : "重新发布"} disabled={selectedTargetShopNotAuthorized} onClick={handleRepublishAll} loading={stoppingAll} />
-                  </div>
+              {publishProgressLoading ? (
+                <div style={{ padding: "56px 0", textAlign: "center" }}>
+                  <Spin tip="正在加载发布中的数据..." />
                 </div>
-                <Progress
-                  percent={runningPublishStats.progress}
-                  status={progressStatus}
-                  strokeWidth={8}
-                />
-              </div>
+              ) : (
+                <>
+                  {selectedTargetShopNeedsLogin ? (
+                    <Alert
+                      type="warning"
+                      showIcon
+                      style={{ marginBottom: 16 }}
+                      message="店铺未登录"
+                      description={<span>当前选中的店铺未登录，需要去店铺管理中重新<a onClick={() => { void handleShopLoginFromPublish(selectedTargetShopId); }} style={{ cursor: "pointer", textDecoration: "underline" }}>授权登录</a></span>}
+                    />
+                  ) : null}
+                  {activeCaptchaItem ? (
+                    <Alert
+                      type="warning"
+                      showIcon
+                      style={{ marginBottom: 16 }}
+                      message={`任务 #${activeCaptchaItem.taskId} 正在等待验证码`}
+                      description={`${activeCaptchaItem.title} 需要先在右侧完成淘宝验证码，再点击该行右侧的"继续发布"。`}
+                    />
+                  ) : null}
+                  {/* 发布任务进度 */}
+                  <div style={{ marginBottom: 20 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, marginBottom: 10 }}>
+                      <div>
+                        <span style={{ fontSize: 14, fontWeight: 600, color: "var(--manager-text)" }}>
+                          发布任务进行中
+                        </span>
+                        <div className="manager-muted" style={{ fontSize: 12, marginTop: 4 }}>
+                          共 {runningPublishStats.total} 件 &nbsp;·&nbsp;
+                          <span style={{ color: "#52c41a" }}>成功 {runningPublishStats.successCount}</span>
+                          {runningPublishStats.pendingCount > 0 && (
+                            <> &nbsp;·&nbsp; <span style={{ color: "#1677ff" }}>待发布 {runningPublishStats.pendingCount}</span></>
+                          )}
+                          {runningPublishStats.failedCount > 0 && (
+                            <> &nbsp;·&nbsp; <span style={{ color: "#ff4d4f" }}>失败 {runningPublishStats.failedCount}</span></>
+                          )}
+                          {publishRunning && <> &nbsp;·&nbsp; 发布中…</>}
+                        </div>
+                      </div>
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                        <IconOnlyButton
+                          icon={<DownloadOutlined />}
+                          tooltip={runningPublishStats.failedCount > 0 ? "批量导出当前批次错误日志" : "暂无失败商品日志"}
+                          disabled={runningPublishStats.failedCount === 0}
+                          loading={exportingBatchLogs}
+                          onClick={() => void handleExportBatchErrorLogs()}
+                        />
+                        <IconOnlyButton danger icon={<StopOutlined />} tooltip="全部停止" onClick={() => void handleStopAllPublish()} loading={stoppingAll} />
+                        <IconOnlyButton icon={<ReloadOutlined />} tooltip={selectedTargetShopNotAuthorized ? "店铺未授权，无法重新发布" : "重新发布"} disabled={selectedTargetShopNotAuthorized} onClick={handleRepublishAll} loading={stoppingAll} />
+                      </div>
+                    </div>
+                    <Progress
+                      percent={runningPublishStats.progress}
+                      status={progressStatus}
+                      strokeWidth={8}
+                    />
+                  </div>
 
-              <div ref={runningTableWrapRef}>
-                <Table<PublishQueueItem>
-                  rowKey="key"
-                  dataSource={publishQueue}
-                  columns={queueColumns}
-                  pagination={false}
-                  scroll={{ y: 300 }}
-                  size="small"
-                  locale={{ emptyText: "暂无发布记录" }}
-                  rowClassName={(record) => record.waitingForCaptcha ? "publish-row-captcha-pending" : ""}
-                />
-              </div>
+                  <div ref={runningTableWrapRef}>
+                    <Table<PublishQueueItem>
+                      rowKey="key"
+                      dataSource={publishQueue}
+                      columns={queueColumns}
+                      pagination={false}
+                      scroll={{ y: 300 }}
+                      size="small"
+                      locale={{ emptyText: "暂无发布记录" }}
+                      rowClassName={(record) => record.waitingForCaptcha ? "publish-row-captcha-pending" : ""}
+                    />
+                  </div>
+                </>
+              )}
             </div>
           )}
         </div>
@@ -1887,6 +2065,17 @@ function normalizePlatform(platform: string) {
   }
   if (normalized === "pdd" || normalized === "pxx") {
     return "pxx";
+  }
+  return normalized;
+}
+
+function normalizeShopUsage(shopUsage: string) {
+  const normalized = (shopUsage || "").trim().toUpperCase();
+  if (normalized === "PUBLISH" || normalized === "发布") {
+    return "PUBLISH";
+  }
+  if (normalized === "COLLECT" || normalized === "采集") {
+    return "COLLECT";
   }
   return normalized;
 }

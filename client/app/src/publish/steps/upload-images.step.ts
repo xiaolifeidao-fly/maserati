@@ -20,6 +20,7 @@ import {
 import { handleTbLoginRequired, handleTbMaybeLoginRequired } from '../utils/tb-login-state';
 import type { TbUploadedImageMeta } from '../types/draft';
 import { parseTaobaoResponseText } from '../utils/tb-publish-api';
+import { setImageCropMeta } from '../core/publish-image-meta-store';
 
 const TB_UPLOAD_URL =
   'https://stream-upload.taobao.com/api/upload.api?_input_charset=utf-8&appkey=tu&folderId=0&picCompress=true&watermark=false';
@@ -57,7 +58,7 @@ interface UploadFailureResult {
  * 流程：
  *  1. 服务端幂等检查（bizUniqueId = SHA256(originalUrl)）
  *  2. 下载未缓存图片到本地临时目录，用 Jimp 做尺寸处理
- *     - 主图：缩放至 800×800 内（保持比例，不放大）
+ *     - 主图：缩放至 750×750 内（保持比例，不放大）
  *     - 详情图：限制最大 2000×1600（保持比例）
  *  3. 从 TbEngine 获取淘宝会话 Cookie
  *  4. 调用淘宝图片空间 stream-upload API 上传每张图片（3 次重试）
@@ -179,12 +180,15 @@ export class UploadImagesStep extends PublishStep {
           if ('url' in uploadedImage) {
             imageUrlMap[originalUrl] = uploadedImage.url;
             await this.storeToServerCache(product.sourceId ?? '', originalUrl, uploadedImage.url);
+            const cropWidth = processedImage.width;
+            const cropHeight = processedImage.height;
+            setImageCropMeta(ctx.taskId, uploadedImage.url, { width: cropWidth, height: cropHeight });
             if (!isMain) {
               const meta: TbUploadedImageMeta = {
                 originalUrl,
                 url: uploadedImage.url,
-                width: uploadedImage.width ?? processedImage.width,
-                height: uploadedImage.height ?? processedImage.height,
+                width: uploadedImage.width ?? cropWidth,
+                height: uploadedImage.height ?? cropHeight,
                 size: uploadedImage.size ?? processedImage.size,
                 imageId: uploadedImage.imageId,
               };
@@ -304,7 +308,7 @@ export class UploadImagesStep extends PublishStep {
 
   /**
    * 下载远程图片并用 Jimp 处理尺寸，写入临时文件后返回本地路径。
-   * 主图缩放至 800×800 内（保持比例），详情图限制 2000×1600（保持比例）。
+   * 主图缩放至 750×750 内（保持比例），详情图限制 2000×1600（保持比例）。
    */
   private async downloadAndProcess(
     url: string,
@@ -341,7 +345,7 @@ export class UploadImagesStep extends PublishStep {
 
   /**
    * 用 Jimp 对图片缩放：
-   *  - 主图：scaleToFit 800×800（保持比例，不超过 800px）
+   *  - 主图：scaleToFit 750×750（保持比例，不超过 750px）
    *  - 详情图：scaleToFit 2000×1600（保持比例，超出才缩小）
    */
   private async processImage(
@@ -351,7 +355,7 @@ export class UploadImagesStep extends PublishStep {
   ): Promise<{ buffer: Buffer; width: number; height: number }> {
     const image = await Jimp.read(buffer);
     const { width, height } = image.bitmap;
-    const [maxW, maxH] = isMain ? [800, 800] : [2000, 1600];
+    const [maxW, maxH] = isMain ? [750, 750] : [2000, 1600];
 
     if (width > maxW || height > maxH) {
       image.scaleToFit({ w: maxW, h: maxH });

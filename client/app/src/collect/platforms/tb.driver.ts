@@ -1,6 +1,6 @@
 import type { CollectionPlatformDriver } from "./types";
 
-const TB_HOME_URL = "https://www.taobao.com/";
+const TB_HOME_URL = "https://s.taobao.com/search?page=1&tab=pc_taobao";
 const TB_DESC_API = "mtop.taobao.detail.getdesc";
 
 function trimString(value: unknown): string {

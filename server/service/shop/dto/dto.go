@@ -9,6 +9,7 @@ type ShopDTO struct {
 	Name                   string `json:"name"`
 	Nickname               string `json:"nickname"`
 	Platform               string `json:"platform"`
+	ShopUsage              string `json:"shopUsage"`
 	Remark                 string `json:"remark"`
 	PlatformShopID         string `json:"platformShopId"`
 	BusinessID             string `json:"businessId"`
@@ -22,6 +23,7 @@ type ShopDTO struct {
 type CreateShopDTO struct {
 	AppUserID   uint64 `json:"appUserId"`
 	Platform    string `json:"platform"`
+	ShopUsage   string `json:"shopUsage"`
 	Remark      string `json:"remark"`
 	LoginStatus string `json:"loginStatus"`
 }
@@ -29,6 +31,7 @@ type CreateShopDTO struct {
 type UpdateShopDTO struct {
 	AppUserID   *uint64 `json:"appUserId,omitempty"`
 	Platform    *string `json:"platform,omitempty"`
+	ShopUsage   *string `json:"shopUsage,omitempty"`
 	Remark      *string `json:"remark,omitempty"`
 	LoginStatus *string `json:"loginStatus,omitempty"`
 }
@@ -41,6 +44,7 @@ type ShopQueryDTO struct {
 	Code                string `form:"code"`
 	Name                string `form:"name"`
 	Platform            string `form:"platform"`
+	ShopUsage           string `form:"shopUsage"`
 	Remark              string `form:"remark"`
 	BusinessID          string `form:"businessId"`
 	PlatformShopID      string `form:"platformShopId"`
@@ -55,6 +59,7 @@ type ShopLoginDTO struct {
 	Nickname       string `json:"nickname"`
 	Code           string `json:"code"`
 	Platform       string `json:"platform"`
+	ShopUsage      string `json:"shopUsage"`
 	PlatformShopID string `json:"platformShopId"`
 	BusinessID     string `json:"businessId"`
 }

@@ -3,6 +3,7 @@ package oss
 var Entity = new(OssEntity)
 
 type OssEntity struct {
+	Enabled         bool   `json:"enabled"`
 	DirPrefix       string `json:"dirPrefix"`
 	Endpoint        string `json:"endpoint"`
 	BucketName      string `json:"bucketName"`

@@ -29,3 +29,4 @@ package
 !.claude
 old_source_code
 old_client_code
+*/**/application.properties

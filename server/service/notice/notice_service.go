@@ -56,8 +56,9 @@ func (s *NoticeService) CreateNotice(req *noticeDTO.CreateNoticeDTO) (*noticeDTO
 	}
 
 	created, err := s.noticeRepository.Create(&noticeRepository.Notice{
-		Title:   strings.TrimSpace(req.Title),
-		Content: strings.TrimSpace(req.Content),
+		AppUserID: req.AppUserID,
+		Title:     strings.TrimSpace(req.Title),
+		Content:   strings.TrimSpace(req.Content),
 	})
 	if err != nil {
 		return nil, err

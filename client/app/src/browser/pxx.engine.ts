@@ -164,6 +164,7 @@ function buildShopLoginPayload(shop: ShopRecord, rawData: unknown): ShopLoginPay
     nickname: name,
     code: shop.code || platformShopId,
     platform: "pxx",
+    shopUsage: "COLLECT",
     platformShopId: normalizedPlatformShopId,
     businessId: normalizedBusinessId,
   };

@@ -48,6 +48,7 @@ func (s *ShopService) LoginShop(req *shopDTO.ShopLoginDTO) (*shopDTO.ShopDTO, er
 			entity.Nickname = name
 		}
 		entity.Platform = platform
+		entity.ShopUsage = normalizeShopUsage(platform, firstNonEmpty(req.ShopUsage, entity.ShopUsage))
 		if platformShopID != "" {
 			entity.PlatformShopID = platformShopID
 		}
@@ -87,6 +88,7 @@ func (s *ShopService) LoginShop(req *shopDTO.ShopLoginDTO) (*shopDTO.ShopDTO, er
 			Name:                name,
 			Nickname:            firstNonEmpty(nickname, name),
 			Platform:            platform,
+			ShopUsage:           normalizeShopUsage(platform, req.ShopUsage),
 			PlatformShopID:      platformShopID,
 			BusinessID:          businessID,
 			LoginStatus:         "LOGGED_IN",
@@ -115,6 +117,7 @@ func (s *ShopService) LoginShop(req *shopDTO.ShopLoginDTO) (*shopDTO.ShopDTO, er
 	entity.Name = name
 	entity.Nickname = firstNonEmpty(nickname, name, entity.Nickname)
 	entity.Platform = platform
+	entity.ShopUsage = normalizeShopUsage(platform, firstNonEmpty(req.ShopUsage, entity.ShopUsage))
 	entity.PlatformShopID = platformShopID
 	entity.BusinessID = businessID
 	entity.LoginStatus = "LOGGED_IN"

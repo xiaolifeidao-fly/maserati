@@ -44,6 +44,10 @@ type ProductQueryDTO struct {
 	Title           string `form:"title"`
 	OuterProductID  string `form:"outerProductId"`
 	Status          string `form:"status"`
+	// Platform is kept as the existing query parameter name, but in product
+	// management it represents the collection source platform: tb/pxx.
+	Platform       string `form:"platform"`
+	SourcePlatform string `form:"sourcePlatform"`
 }
 
 // Sku DTOs

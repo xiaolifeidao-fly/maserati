@@ -1,6 +1,7 @@
 package notice
 
 import (
+	webAuth "app-api/auth"
 	commonRouter "common/middleware/routers"
 	"net/http"
 	noticeService "service/notice"
@@ -40,6 +41,7 @@ func (h *NoticeHandler) listNotices(context *gin.Context) {
 		commonRouter.ToError(context, "参数错误")
 		return
 	}
+	applyAppUserID(context, &query.AppUserID)
 	result, err := h.noticeService.ListNotices(query)
 	commonRouter.ToJson(context, result, err)
 }
@@ -63,6 +65,7 @@ func (h *NoticeHandler) createNotice(context *gin.Context) {
 		commonRouter.ToError(context, "参数错误")
 		return
 	}
+	applyAppUserID(context, &req.AppUserID)
 	result, err := h.noticeService.CreateNotice(&req)
 	commonRouter.ToJson(context, result, err)
 }
@@ -110,4 +113,22 @@ func parseNoticeID(context *gin.Context) (uint, bool) {
 		return 0, false
 	}
 	return uint(id), true
+}
+
+func applyAppUserID(c *gin.Context, target *uint64) {
+	if target == nil || *target > 0 {
+		return
+	}
+	if userID, ok := c.Get(webAuth.ContextUserIDKey); ok {
+		switch v := userID.(type) {
+		case uint64:
+			*target = v
+		case uint:
+			*target = uint64(v)
+		case int:
+			if v > 0 {
+				*target = uint64(v)
+			}
+		}
+	}
 }

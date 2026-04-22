@@ -60,19 +60,27 @@ var initializers = []Initializer{
 
 	{
 		Order: OssInit,
-		Name:  "Router",
+		Name:  "OSS",
 		InitFn: func() error {
+			enabled := vipper.GetBool("oss.enabled")
 			dirPrefix := vipper.GetString("oss.dirPrefix")
 			bucketName := vipper.GetString("oss.bucketName")
 			accessKeyId := vipper.GetString("oss.accessKeyId")
 			accessKeySecret := vipper.GetString("oss.accessKeySecret")
 			endpoint := vipper.GetString("oss.endpoint")
+			expireTime := vipper.GetInt64("oss.expireTime")
+			callbackUrl := vipper.GetString("oss.callbackUrl")
+			tokenExpireTime := vipper.GetInt64("oss.tokenExpireTime")
 			ossEntity := &oss.OssEntity{
+				Enabled:         enabled,
 				DirPrefix:       dirPrefix,
 				Endpoint:        endpoint,
 				BucketName:      bucketName,
 				AccessKeyId:     accessKeyId,
 				AccessKeySecret: accessKeySecret,
+				ExpireTime:      expireTime,
+				CallbackUrl:     callbackUrl,
+				TokenExpireTime: tokenExpireTime,
 			}
 			oss.Setup(ossEntity)
 			return nil

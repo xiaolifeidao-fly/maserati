@@ -22,7 +22,10 @@
       "Bash(ls -1 /Users/fly/Documents/develop/project/private/taobao/maserati/client/app/src/publish/fillers/*.ts)",
       "Read(//tmp/**)",
       "Bash(grep -E \"\\\\.\\(ts|tsx|js\\)$\")",
-      "Bash(grep -E \"\\\\.\\(ts|tsx\\)$\")"
+      "Bash(grep -E \"\\\\.\\(ts|tsx\\)$\")",
+      "Bash(grep -E \"\\\\.\\(ts|js|sql\\)$\")",
+      "Bash(grep -E \"\\\\.\\(go|sql\\)$\")",
+      "Bash(grep -E \"\\\\.\\(tsx?|jsx?\\)$\")"
     ]
   }
 }

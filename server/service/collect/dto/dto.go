@@ -38,6 +38,7 @@ type CollectBatchQueryDTO struct {
 	ShopID    uint64 `form:"shopId"`
 	Name      string `form:"name"`
 	Status    string `form:"status"`
+	Platform  string `form:"platform"`
 }
 
 type CollectRecordDTO struct {

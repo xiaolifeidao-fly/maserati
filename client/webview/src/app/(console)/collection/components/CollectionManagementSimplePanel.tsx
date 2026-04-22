@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import {
   ArrowRightOutlined,
+  ClockCircleOutlined,
   DeleteOutlined,
   EditOutlined,
   EyeOutlined,
@@ -14,7 +15,7 @@ import {
   SearchOutlined,
   UploadOutlined,
 } from "@ant-design/icons";
-import { Button, Form, Input, Modal, Popconfirm, Progress, Select, Space, Table, Tag, Upload, message } from "antd";
+import { Button, Form, Input, Modal, Popconfirm, Progress, Select, Space, Table, Tabs, Tag, Upload, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import type { UploadFile, UploadProps } from "antd/es/upload/interface";
 import {
@@ -34,6 +35,7 @@ import { formatDateTime } from "@/utils/format";
 
 interface CollectionFormValues {
   name: string;
+  platform: string;
   shopId: number;
 }
 
@@ -53,7 +55,7 @@ function formatShopLabel(shop?: {
     return "-";
   }
 
-  const primary = shop.name || shop.code || shop.platform || `店铺 #${shop.id ?? 0}`;
+  const primary = shop.name || shop.code || shop.platform || `采集账号 #${shop.id ?? 0}`;
   const details = [
     shop.nickname?.trim() ? `昵称：${shop.nickname.trim()}` : "",
     shop.remark?.trim() ? `备注：${shop.remark.trim()}` : "",
@@ -68,11 +70,16 @@ function buildBatchSerial(record: Pick<CollectBatchRecord, "id" | "createdTime" 
   return `${timePart}-${String(record.id || 0).padStart(6, "0")}`;
 }
 
+const platformOptions = [
+  { key: "tb", label: "淘宝", value: "tb" },
+  { key: "pxx", label: "拼多多", value: "pxx" },
+];
+
 export function CollectionManagementSimplePanel() {
   const searchParams = useSearchParams();
   const [form] = Form.useForm<CollectionFormValues>();
   const [importForm] = Form.useForm<ImportFormValues>();
-  const { collections, shops, total, query, loading, submitting, refresh, saveCollection, removeCollection } =
+  const { collections, shops, total, query, loading, submitting, refresh, refreshOptions, saveCollection, removeCollection } =
     useCollectionManagement();
   const [filters, setFilters] = useState({
     keyword: "",
@@ -90,12 +97,13 @@ export function CollectionManagementSimplePanel() {
   const [importProgress, setImportProgress] = useState<ImportCollectBatchProgress | null>(null);
   const [startingBatchId, setStartingBatchId] = useState(0);
   const shopMap = useMemo(() => new Map(shops.map((item) => [item.id, item])), [shops]);
+  const activePlatform = query.platform || "tb";
 
   useEffect(() => {
     const initialShopId = Number(searchParams?.get("shopId") || 0);
     if (initialShopId > 0) {
       setFilters((current) => ({ ...current, shopId: initialShopId }));
-      void refresh({ pageIndex: 1, shopId: initialShopId });
+      void refresh({ pageIndex: 1, shopId: initialShopId, platform: activePlatform });
     }
   }, [searchParams]);
 
@@ -112,8 +120,10 @@ export function CollectionManagementSimplePanel() {
 
   const openCreateModal = () => {
     setEditingRecord(null);
+    const platform = activePlatform;
     form.setFieldsValue({
       name: "",
+      platform,
       shopId: filters.shopId || (shops[0]?.id as never),
     });
     setModalOpen(true);
@@ -121,8 +131,13 @@ export function CollectionManagementSimplePanel() {
 
   const openEditModal = (record: CollectBatchRecord) => {
     setEditingRecord(record);
+    const shop = shopMap.get(record.shopId);
+    const platform = normalizeCollectSourceType(shop?.platform) !== "unknown"
+      ? normalizeCollectSourceType(shop?.platform)
+      : activePlatform;
     form.setFieldsValue({
       name: record.name,
+      platform,
       shopId: record.shopId,
     });
     setModalOpen(true);
@@ -166,6 +181,14 @@ export function CollectionManagementSimplePanel() {
     void getPublishWindowApi().openPublishWindow({
       batchId: record.id,
       entryScene: "collection",
+    });
+  };
+
+  const openPublishProgressModal = (record: CollectBatchRecord) => {
+    void getPublishWindowApi().openPublishWindow({
+      batchId: record.id,
+      entryScene: "collection",
+      initialView: "progress",
     });
   };
 
@@ -250,7 +273,7 @@ export function CollectionManagementSimplePanel() {
       ),
     },
     {
-      title: "所属店铺",
+      title: "采集账号",
       key: "shop",
       width: 220,
       render: (_, record) => {
@@ -282,14 +305,16 @@ export function CollectionManagementSimplePanel() {
       render: (_, record) => {
         const batchShop = shopMap.get(record.shopId);
         const batchShopAuthorized = batchShop?.authorizationStatus === "AUTHORIZED";
+        const isCollectShop = (batchShop?.shopUsage || "").toUpperCase() === "COLLECT";
+        const canCollect = isCollectShop || batchShopAuthorized;
         return (
         <Space size={4} wrap>
           <IconOnlyButton
             type="text"
             icon={<PlayCircleOutlined />}
-            tooltip={batchShopAuthorized ? "开始采集" : "店铺未授权，无法采集"}
+            tooltip={canCollect ? "开始采集" : "店铺未授权，无法采集"}
             loading={startingBatchId === record.id}
-            disabled={!batchShopAuthorized}
+            disabled={!canCollect}
             onClick={() => void startCollection(record)}
           />
           <IconOnlyButton type="text" icon={<EyeOutlined />} tooltip="查看详情" onClick={() => openDetailModal(record)} />
@@ -300,6 +325,13 @@ export function CollectionManagementSimplePanel() {
             tooltip={batchShopAuthorized ? "去发布" : "店铺未授权，无法发布"}
             disabled={!batchShopAuthorized}
             onClick={() => openPublishModal(record)}
+          />
+          <IconOnlyButton
+            type="text"
+            icon={<ClockCircleOutlined />}
+            tooltip={batchShopAuthorized ? "发布进度" : "店铺未授权，无法查看发布进度"}
+            disabled={!batchShopAuthorized}
+            onClick={() => openPublishProgressModal(record)}
           />
           <IconOnlyButton type="text" icon={<EditOutlined />} tooltip="编辑采集批次" onClick={() => openEditModal(record)} />
           <Popconfirm
@@ -328,6 +360,17 @@ export function CollectionManagementSimplePanel() {
       <section className="manager-data-card">
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap", justifyContent: "space-between" }}>
           <Space wrap size={12}>
+            <Tabs
+              activeKey={activePlatform}
+              items={platformOptions}
+              onChange={(platform) => {
+                setFilters((current) => ({ ...current, shopId: 0 }));
+                void Promise.all([
+                  refresh({ pageIndex: 1, platform, shopId: undefined }),
+                  refreshOptions(platform),
+                ]);
+              }}
+            />
             <Input
               className="manager-filter-input"
               placeholder="按批次名称筛选"
@@ -337,7 +380,7 @@ export function CollectionManagementSimplePanel() {
             />
             <Select
               allowClear
-              placeholder="所属店铺"
+              placeholder="采集账号"
               value={filters.shopId || undefined}
               onChange={(value) => setFilters((current) => ({ ...current, shopId: Number(value || 0) }))}
               options={shops.map((item) => ({ label: formatShopLabel(item), value: item.id }))}
@@ -350,6 +393,7 @@ export function CollectionManagementSimplePanel() {
               onClick={() =>
                 void refresh({
                   pageIndex: 1,
+                  platform: activePlatform,
                   name: filters.keyword,
                   shopId: filters.shopId || undefined,
                 })
@@ -360,7 +404,7 @@ export function CollectionManagementSimplePanel() {
               tooltip="重置并刷新采集批次"
               onClick={() => {
                 setFilters({ keyword: "", shopId: 0 });
-                void refresh({ pageIndex: 1, name: "", shopId: undefined, status: "" });
+                void refresh({ pageIndex: 1, platform: activePlatform, name: "", shopId: undefined, status: "" });
               }}
             />
             <IconOnlyButton type="primary" icon={<PlusOutlined />} tooltip="新增采集批次" onClick={openCreateModal} />
@@ -404,14 +448,26 @@ export function CollectionManagementSimplePanel() {
           <Form.Item name="name" label="批次名称" rules={[{ required: true, message: "请输入批次名称" }]}>
             <Input placeholder="例如：春季竞品采集批次" />
           </Form.Item>
-          <Form.Item name="shopId" label="所属店铺" rules={[{ required: true, message: "请选择所属店铺" }]}>
+          <Form.Item name="platform" label="平台" rules={[{ required: true, message: "请选择平台" }]}>
+            <Select
+              options={platformOptions}
+              onChange={(value) => {
+                const platform = String(value || "tb");
+                form.setFieldValue("shopId", undefined);
+                void refreshOptions(platform);
+              }}
+            />
+          </Form.Item>
+          <Form.Item name="shopId" label="采集账号" rules={[{ required: true, message: "请选择采集账号" }]}>
             <Select
               options={shops.map((item) => {
                 const authorized = item.authorizationStatus === "AUTHORIZED";
+                const isCollect = (item.shopUsage || "").toUpperCase() === "COLLECT";
+                const available = isCollect || authorized;
                 return {
-                  label: authorized ? formatShopLabel(item) : `${formatShopLabel(item)}（未授权）`,
+                  label: available ? formatShopLabel(item) : `${formatShopLabel(item)}（未授权）`,
                   value: item.id,
-                  disabled: !authorized,
+                  disabled: !available,
                 };
               })}
             />

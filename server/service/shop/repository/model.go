@@ -13,6 +13,7 @@ type Shop struct {
 	Nickname               string     `gorm:"column:nickname;type:varchar(100)" description:"店铺昵称"`
 	ShopTypeCode           string     `gorm:"column:shop_type_code;type:varchar(50)" description:"商品类型编码"`
 	Platform               string     `gorm:"column:platform;type:varchar(50);index:idx_platform" description:"平台"`
+	ShopUsage              string     `gorm:"column:shop_usage;type:varchar(32);index:idx_shop_usage" description:"店铺用途: COLLECT|PUBLISH"`
 	Remark                 string     `gorm:"column:remark;type:varchar(255)" description:"备注"`
 	PlatformShopID         string     `gorm:"column:platform_shop_id;type:varchar(100);index:idx_platform_shop_id" description:"第三方店铺ID"`
 	BusinessID             string     `gorm:"column:business_id;type:varchar(100);index:idx_business_id" description:"业务ID"`
