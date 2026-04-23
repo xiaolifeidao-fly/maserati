@@ -13,6 +13,7 @@ import {
   PlusOutlined,
   ReloadOutlined,
   SearchOutlined,
+  ShareAltOutlined,
   UploadOutlined,
 } from "@ant-design/icons";
 import { Button, Form, Input, Modal, Popconfirm, Progress, Select, Space, Table, Tabs, Tag, Upload, message } from "antd";
@@ -24,6 +25,7 @@ import {
   subscribeImportCollectProgress,
   type CollectBatchRecord,
   normalizeCollectSourceType,
+  shareCollectBatch,
   startCollection as startCollectionByRoute,
   type CollectSourceType,
 } from "../api/collection.api";
@@ -41,6 +43,10 @@ interface CollectionFormValues {
 
 interface ImportFormValues {
   shopType: "tb" | "pdd";
+}
+
+interface ShareFormValues {
+  username: string;
 }
 
 function formatShopLabel(shop?: {
@@ -79,6 +85,7 @@ export function CollectionManagementSimplePanel() {
   const searchParams = useSearchParams();
   const [form] = Form.useForm<CollectionFormValues>();
   const [importForm] = Form.useForm<ImportFormValues>();
+  const [shareForm] = Form.useForm<ShareFormValues>();
   const { collections, shops, total, query, loading, submitting, refresh, refreshOptions, saveCollection, removeCollection } =
     useCollectionManagement();
   const [filters, setFilters] = useState({
@@ -96,6 +103,9 @@ export function CollectionManagementSimplePanel() {
   const [importSubmitting, setImportSubmitting] = useState(false);
   const [importProgress, setImportProgress] = useState<ImportCollectBatchProgress | null>(null);
   const [startingBatchId, setStartingBatchId] = useState(0);
+  const [sharingRecord, setSharingRecord] = useState<CollectBatchRecord | null>(null);
+  const [shareModalOpen, setShareModalOpen] = useState(false);
+  const [shareSubmitting, setShareSubmitting] = useState(false);
   const shopMap = useMemo(() => new Map(shops.map((item) => [item.id, item])), [shops]);
   const activePlatform = query.platform || "tb";
 
@@ -192,6 +202,12 @@ export function CollectionManagementSimplePanel() {
     });
   };
 
+  const openShareModal = (record: CollectBatchRecord) => {
+    setSharingRecord(record);
+    shareForm.resetFields();
+    setShareModalOpen(true);
+  };
+
   const openImportModal = (record: CollectBatchRecord) => {
     const shop = shopMap.get(record.shopId);
     const defaultShopType = normalizeCollectSourceType(shop?.platform) === "tb" ? "tb" : "pdd";
@@ -260,6 +276,28 @@ export function CollectionManagementSimplePanel() {
     }
   };
 
+  const handleShareSubmit = async () => {
+    if (!sharingRecord?.id) {
+      return;
+    }
+    const values = await shareForm.validateFields();
+    setShareSubmitting(true);
+    try {
+      await shareCollectBatch({
+        collectBatchId: sharingRecord.id,
+        username: values.username.trim(),
+      });
+      message.success(`已分享批次「${sharingRecord.name}」`);
+      setShareModalOpen(false);
+      setSharingRecord(null);
+      shareForm.resetFields();
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "分享采集批次失败");
+    } finally {
+      setShareSubmitting(false);
+    }
+  };
+
   const columns: ColumnsType<CollectBatchRecord> = [
     {
       title: "采集批次",
@@ -322,17 +360,16 @@ export function CollectionManagementSimplePanel() {
           <IconOnlyButton
             type="text"
             icon={<ArrowRightOutlined />}
-            tooltip={batchShopAuthorized ? "去发布" : "店铺未授权，无法发布"}
-            disabled={!batchShopAuthorized}
+            tooltip="去发布"
             onClick={() => openPublishModal(record)}
           />
           <IconOnlyButton
             type="text"
             icon={<ClockCircleOutlined />}
-            tooltip={batchShopAuthorized ? "发布进度" : "店铺未授权，无法查看发布进度"}
-            disabled={!batchShopAuthorized}
+            tooltip="发布进度"
             onClick={() => openPublishProgressModal(record)}
           />
+          <IconOnlyButton type="text" icon={<ShareAltOutlined />} tooltip="分享采集批次" onClick={() => openShareModal(record)} />
           <IconOnlyButton type="text" icon={<EditOutlined />} tooltip="编辑采集批次" onClick={() => openEditModal(record)} />
           <Popconfirm
             title="确认删除这条采集批次吗？"
@@ -486,6 +523,29 @@ export function CollectionManagementSimplePanel() {
         sourceType={detailSourceType}
         onClose={() => setDetailModalOpen(false)}
       />
+
+      <Modal
+        title={sharingRecord ? `分享采集批次 · ${sharingRecord.name}` : "分享采集批次"}
+        open={shareModalOpen}
+        onCancel={() => {
+          setShareModalOpen(false);
+          setSharingRecord(null);
+          shareForm.resetFields();
+        }}
+        onOk={() => void handleShareSubmit()}
+        confirmLoading={shareSubmitting}
+        destroyOnClose
+      >
+        <Form<ShareFormValues> form={shareForm} layout="vertical" preserve={false}>
+          <Form.Item
+            name="username"
+            label="用户名"
+            rules={[{ required: true, message: "请输入要分享给的用户名" }]}
+          >
+            <Input placeholder="请输入对方用户名" maxLength={50} />
+          </Form.Item>
+        </Form>
+      </Modal>
 
       <Modal
         title={importingRecord ? `导入采集数据 · ${importingRecord.name}` : "导入采集数据"}

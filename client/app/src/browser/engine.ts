@@ -26,6 +26,22 @@ const browserMap = new Map<string, Browser>();
 
 const contextMap = new Map<string, BrowserContext>();
 
+export async function closeAllBrowserContexts(): Promise<void> {
+    const tasks: Promise<void>[] = [];
+
+    for (const context of contextMap.values()) {
+        tasks.push(context.close().catch((e) => log.warn('[Engine] close context error on quit', e)));
+    }
+    contextMap.clear();
+
+    for (const browser of browserMap.values()) {
+        tasks.push(browser.close().catch((e) => log.warn('[Engine] close browser error on quit', e)));
+    }
+    browserMap.clear();
+
+    await Promise.allSettled(tasks);
+}
+
 
 export function loadChromePath(){
     try {

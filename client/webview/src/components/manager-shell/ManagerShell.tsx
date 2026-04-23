@@ -7,6 +7,7 @@ import {
   DownOutlined,
   LockOutlined,
   LogoutOutlined,
+  ShareAltOutlined,
   ShopOutlined,
   ShoppingOutlined,
   UserOutlined,
@@ -98,6 +99,12 @@ const navigationItems = [
     label: "采集管理",
     icon: <BarcodeOutlined />,
     description: "采集任务与结果跟踪",
+  },
+  {
+    key: "/collection-share",
+    label: "分享管理",
+    icon: <ShareAltOutlined />,
+    description: "采集批次共享与发布",
   },
 ] as const;
 

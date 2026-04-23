@@ -10,6 +10,7 @@ export class CollectBatchRecord {
   id = 0;
   appUserId = 0;
   shopId = 0;
+  platform = "";
   name = "";
   status = "";
   ossUrl = "";
@@ -68,6 +69,49 @@ export interface CollectRecordUpdatePayload {
   productName?: string;
   isFavorite?: boolean;
   status?: string;
+}
+
+export interface CollectBatchStats {
+  batchId: number;
+  totalCollectCount: number;
+  totalFavoriteCount: number;
+  updatedAt: string;
+}
+
+export interface CollectShareQuery extends Record<string, string | number | undefined> {
+  pageIndex?: number;
+  pageSize?: number;
+  keyword?: string;
+  status?: string;
+}
+
+export interface CollectSharePayload {
+  collectBatchId: number;
+  username: string;
+}
+
+export class CollectShareRecord {
+  id = 0;
+  collectBatchId = 0;
+  ownerUserId = 0;
+  shareUserId = 0;
+  status = "";
+  batchName = "";
+  ownerUsername = "";
+  shareUsername = "";
+  active = 1;
+  createdTime?: string;
+  updatedTime?: string;
+}
+
+export class SharedCollectBatchRecord extends CollectBatchRecord {
+  shareId = 0;
+  shareStatus = "";
+  ownerUserId = 0;
+  ownerUsername = "";
+  shareUserId = 0;
+  shareUsername = "";
+  shareCreatedTime = "";
 }
 
 export interface ImportCollectBatchResult {
@@ -130,6 +174,26 @@ export class CollectApi extends ElectronApi {
   }
 
   @InvokeType(Protocols.INVOKE)
+  async shareCollectBatch(payload: CollectSharePayload): Promise<CollectShareRecord> {
+    return this.invokeApi("shareCollectBatch", payload);
+  }
+
+  @InvokeType(Protocols.INVOKE)
+  async listMyCollectShares(query: CollectShareQuery): Promise<PageResult<CollectShareRecord>> {
+    return this.invokeApi("listMyCollectShares", query);
+  }
+
+  @InvokeType(Protocols.INVOKE)
+  async listSharedCollectBatches(query: CollectShareQuery): Promise<PageResult<SharedCollectBatchRecord>> {
+    return this.invokeApi("listSharedCollectBatches", query);
+  }
+
+  @InvokeType(Protocols.INVOKE)
+  async cancelCollectShare(id: number): Promise<{ cancelled: boolean }> {
+    return this.invokeApi("cancelCollectShare", id);
+  }
+
+  @InvokeType(Protocols.INVOKE)
   async startCollection(batchId: number): Promise<CollectStartResult> {
     return this.invokeApi("startCollection", batchId);
   }
@@ -157,6 +221,16 @@ export class CollectApi extends ElectronApi {
   @InvokeType(Protocols.INVOKE)
   async updateCollectRecord(id: number, payload: CollectRecordUpdatePayload): Promise<CollectRecordPreview> {
     return this.invokeApi("updateCollectRecord", id, payload);
+  }
+
+  @InvokeType(Protocols.INVOKE)
+  async getCollectBatchStats(batchId: number): Promise<CollectBatchStats | null> {
+    return this.invokeApi("getCollectBatchStats", batchId);
+  }
+
+  @InvokeType(Protocols.INVOKE)
+  async syncCollectBatchStats(batchId: number): Promise<CollectBatchStats> {
+    return this.invokeApi("syncCollectBatchStats", batchId);
   }
 
   @InvokeType(Protocols.INVOKE)

@@ -85,7 +85,8 @@
       "perMachine": true,
       "createDesktopShortcut": true,
       "uninstallDisplayName": "${productName}",
-      "deleteAppDataOnUninstall": false
+      "deleteAppDataOnUninstall": false,
+      "include": "build/installer.nsh"
     }
   },
   "_moduleAliases": {

@@ -122,6 +122,33 @@ export function getCollectedProductRawData(sourceProductId: string, sourceType: 
   }
 }
 
+export async function getCollectedProductRawDataWithFallback(sourceProductId: string, sourceType: CollectSourceType = workspaceState.sourceType || "unknown"): Promise<unknown | null> {
+  const localData = getCollectedProductRawData(sourceProductId, sourceType);
+  if (localData) {
+    return localData;
+  }
+  if (!sourceProductId || sourceType === "unknown") {
+    return null;
+  }
+
+  try {
+    const result = await requestBackend<{ rawData?: unknown }>("GET", "/collect-records/source/raw-data", {
+      params: {
+        sourceProductId,
+        sourcePlatform: sourceType,
+      },
+    });
+    if (result?.rawData !== undefined && result.rawData !== null) {
+      saveRawDataToStore(sourceProductId, result.rawData, sourceType);
+      return result.rawData;
+    }
+  } catch (error) {
+    log.warn("[collection workspace] failed to read rawData from server", { sourceProductId, sourceType, error });
+  }
+
+  return null;
+}
+
 export function hasCollectedHtml(sourceProductId: string, sourceType: CollectSourceType = workspaceState.sourceType || "unknown"): boolean {
   return fs.existsSync(getCollectedHtmlPath(sourceProductId, sourceType));
 }
@@ -737,6 +764,7 @@ async function collectCurrentGoods(url: string) {
       batchId: workspaceState.batch.id,
       appUserId: workspaceState.batch.appUserId,
       source: "manual" as const,
+      sourceType: workspaceState.sourceType,
       sourceUrl: url,
       rawSourceData: getCollectedProductRawData(summary.sourceProductId, workspaceState.sourceType),
     };

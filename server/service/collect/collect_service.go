@@ -7,9 +7,9 @@ import (
 	"log"
 	appUserRepository "service/app_user/repository"
 	collectRepository "service/collect/repository"
+	collectShareRepository "service/collect_share/repository"
 	shopRepository "service/shop/repository"
 	"strings"
-	"time"
 
 	"gorm.io/gorm"
 )
@@ -17,6 +17,7 @@ import (
 type CollectService struct {
 	collectBatchRepository  *collectRepository.CollectBatchRepository
 	collectRecordRepository *collectRepository.CollectRecordRepository
+	collectShareRepository  *collectShareRepository.CollectShareRepository
 	appUserRepository       *appUserRepository.AppUserRepository
 	shopRepository          *shopRepository.ShopRepository
 }
@@ -25,6 +26,7 @@ func NewCollectService() *CollectService {
 	return &CollectService{
 		collectBatchRepository:  db.GetRepository[collectRepository.CollectBatchRepository](),
 		collectRecordRepository: db.GetRepository[collectRepository.CollectRecordRepository](),
+		collectShareRepository:  db.GetRepository[collectShareRepository.CollectShareRepository](),
 		appUserRepository:       db.GetRepository[appUserRepository.AppUserRepository](),
 		shopRepository:          db.GetRepository[shopRepository.ShopRepository](),
 	}
@@ -90,18 +92,30 @@ func normalizeCollectRecordSource(value string) string {
 	}
 }
 
-func buildCollectRawDataPath(batchID uint64, sourceProductID string) string {
-	now := time.Now()
+func normalizeCollectSourcePlatform(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "pdd", "pxx", "pinduoduo":
+		return "pxx"
+	case "tb", "taobao":
+		return "tb"
+	default:
+		return "unknown"
+	}
+}
+
+func buildCollectRawDataPath(sourcePlatform string, sourceProductID string) string {
 	sourceID := sanitizeCollectRawDataPathPart(sourceProductID)
 	if sourceID == "" {
 		sourceID = "unknown"
 	}
+	platform := sanitizeCollectRawDataPathPart(normalizeCollectSourcePlatform(sourcePlatform))
+	if platform == "" {
+		platform = "unknown"
+	}
 	return fmt.Sprintf(
-		"client/collect/%s/%d/%s_%d.json",
-		now.Format("20060102"),
-		batchID,
+		"client/collect/rawdata/%s/%s.json",
+		platform,
 		sourceID,
-		now.UnixNano(),
 	)
 }
 
@@ -128,13 +142,13 @@ func sanitizeCollectRawDataPathPart(value string) string {
 	return strings.Trim(builder.String(), "._-")
 }
 
-func storeCollectRawData(batchID uint64, sourceProductID string, rawSourceData string) (string, error) {
+func storeCollectRawData(sourcePlatform string, sourceProductID string, rawSourceData string) (string, error) {
 	if !oss.IsEnabled() {
 		return "", nil
 	}
-	path := buildCollectRawDataPath(batchID, sourceProductID)
+	path := buildCollectRawDataPath(sourcePlatform, sourceProductID)
 	if err := oss.Put(path, []byte(rawSourceData)); err != nil {
-		log.Printf("[collect] storeCollectRawData failed: batchID=%d sourceProductID=%s path=%s err=%v", batchID, sourceProductID, path, err)
+		log.Printf("[collect] storeCollectRawData failed: sourcePlatform=%s sourceProductID=%s path=%s err=%v", sourcePlatform, sourceProductID, path, err)
 		return "", err
 	}
 	return path, nil
@@ -142,6 +156,7 @@ func storeCollectRawData(batchID uint64, sourceProductID string, rawSourceData s
 
 func resolveCollectRawDataURL(
 	batchID uint64,
+	sourcePlatform string,
 	sourceProductID string,
 	explicitURL string,
 	rawSourceData string,
@@ -152,7 +167,30 @@ func resolveCollectRawDataURL(
 	if strings.TrimSpace(rawSourceData) == "" {
 		return "", nil
 	}
-	return storeCollectRawData(batchID, sourceProductID, rawSourceData)
+	if strings.TrimSpace(sourcePlatform) == "" {
+		sourcePlatform = resolveCollectBatchPlatform(batchID)
+	}
+	return storeCollectRawData(sourcePlatform, sourceProductID, rawSourceData)
+}
+
+func resolveCollectBatchPlatform(batchID uint64) string {
+	if batchID == 0 {
+		return ""
+	}
+	repo := db.GetRepository[collectRepository.CollectBatchRepository]()
+	shopRepo := db.GetRepository[shopRepository.ShopRepository]()
+	if repo == nil || shopRepo == nil {
+		return ""
+	}
+	batch, err := repo.FindById(uint(batchID))
+	if err != nil || batch == nil || batch.ShopID == 0 {
+		return ""
+	}
+	shop, err := shopRepo.FindById(uint(batch.ShopID))
+	if err != nil || shop == nil {
+		return ""
+	}
+	return shop.Platform
 }
 
 func ensureCollectAppUserExists(repo *appUserRepository.AppUserRepository, appUserID uint64) error {

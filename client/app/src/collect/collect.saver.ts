@@ -1,12 +1,15 @@
 import log from "electron-log";
 import { CollectBatchRecord, CollectRecordPreview } from "@eleapi/collect/collect.api";
 import type { CollectedGoodsSummary } from "./platforms/types";
+import type { CollectSourceType } from "@eleapi/collect/collect.platform";
+import { collectBatchStatsDb } from "./collect-batch-stats.db";
 import { requestBackend } from "@src/impl/shared/backend";
 
 export interface CollectSaveContext {
   batchId: number;
   appUserId: number;
   source: "file" | "manual";
+  sourceType: CollectSourceType;
   sourceUrl: string;
   rawSourceData?: unknown;
   /** 当前 workspaceState.batch，用于计算 collectedCount */
@@ -33,7 +36,7 @@ export async function saveCollectedToServer(
   summary: CollectedGoodsSummary,
   ctx: CollectSaveContext,
 ): Promise<CollectSaveResult> {
-  const { batchId, appUserId, source, sourceUrl, currentBatch, currentRecordsCount } = ctx;
+  const { batchId, appUserId, source, sourceType, sourceUrl, currentBatch, currentRecordsCount } = ctx;
 
   log.info("[collect.saver] saveCollectedToServer start", {
     batchId,
@@ -78,6 +81,7 @@ export async function saveCollectedToServer(
       {
         data: {
           source,
+          sourcePlatform: sourceType,
           productName: summary.productName,
           sourceProductId: summary.sourceProductId,
           sourceSnapshotUrl: sourceUrl,
@@ -97,6 +101,7 @@ export async function saveCollectedToServer(
         appUserId,
         collectBatchId: batchId,
         source,
+        sourcePlatform: sourceType,
         productName: summary.productName,
         sourceProductId: summary.sourceProductId,
         sourceSnapshotUrl: sourceUrl,
@@ -128,6 +133,13 @@ export async function saveCollectedToServer(
       updatedBatch = Object.assign(new CollectBatchRecord(), result);
     } catch (error) {
       log.warn("[collect.saver] failed to update batch collectedCount", error);
+    }
+
+    try {
+      await collectBatchStatsDb.ensureInit();
+      collectBatchStatsDb.increment(batchId, { collectCount: 1 });
+    } catch (error) {
+      log.warn("[collect.saver] failed to increment local batch stats", { batchId, error });
     }
   }
 

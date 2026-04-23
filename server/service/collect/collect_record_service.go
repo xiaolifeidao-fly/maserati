@@ -3,6 +3,8 @@ package collect
 import (
 	baseDTO "common/base/dto"
 	"common/middleware/db"
+	"common/middleware/storage/oss"
+	"encoding/json"
 	"fmt"
 	collectDTO "service/collect/dto"
 	collectRepository "service/collect/repository"
@@ -25,6 +27,26 @@ func (s *CollectService) ListCollectRecords(query collectDTO.CollectRecordQueryD
 }
 
 func (s *CollectService) ListCollectRecordsByBatch(batchID uint, query collectDTO.CollectRecordQueryDTO) (*baseDTO.PageDTO[collectDTO.CollectRecordDTO], error) {
+	batch, err := s.collectBatchRepository.FindById(batchID)
+	if err != nil {
+		return nil, err
+	}
+	if batch.Active == 0 {
+		return nil, gorm.ErrRecordNotFound
+	}
+	if query.AppUserID > 0 && batch.AppUserID != query.AppUserID {
+		shared, err := s.collectShareRepository.HasActiveShare(uint64(batchID), query.AppUserID)
+		if err != nil {
+			return nil, err
+		}
+		if !shared {
+			return nil, gorm.ErrRecordNotFound
+		}
+		query.AppUserID = batch.AppUserID
+	}
+	if query.AppUserID == 0 {
+		query.AppUserID = batch.AppUserID
+	}
 	if err := ensureBatch(s.collectBatchRepository, uint64(batchID)); err != nil {
 		return nil, err
 	}
@@ -53,7 +75,7 @@ func (s *CollectService) CreateCollectRecord(req *collectDTO.CreateCollectRecord
 	if err := ensureBatchBelongsToAppUser(s.collectBatchRepository, req.CollectBatchID, req.AppUserID); err != nil {
 		return nil, err
 	}
-	rawDataURL, err := resolveCollectRawDataURL(req.CollectBatchID, req.SourceProductID, req.RawDataURL, req.RawSourceData)
+	rawDataURL, err := resolveCollectRawDataURL(req.CollectBatchID, req.SourcePlatform, req.SourceProductID, req.RawDataURL, req.RawSourceData)
 	if err != nil {
 		return nil, err
 	}
@@ -128,7 +150,11 @@ func (s *CollectService) UpdateCollectRecord(id uint, req *collectDTO.UpdateColl
 		if req.RawSourceData != nil {
 			rawSourceData = *req.RawSourceData
 		}
-		resolvedRawDataURL, err := resolveCollectRawDataURL(entity.CollectBatchID, entity.SourceProductID, rawDataURL, rawSourceData)
+		sourcePlatform := ""
+		if req.SourcePlatform != nil {
+			sourcePlatform = *req.SourcePlatform
+		}
+		resolvedRawDataURL, err := resolveCollectRawDataURL(entity.CollectBatchID, sourcePlatform, entity.SourceProductID, rawDataURL, rawSourceData)
 		if err != nil {
 			return nil, err
 		}
@@ -145,6 +171,43 @@ func (s *CollectService) UpdateCollectRecord(id uint, req *collectDTO.UpdateColl
 		return nil, err
 	}
 	return db.ToDTO[collectDTO.CollectRecordDTO](saved), nil
+}
+
+func (s *CollectService) GetCollectRecordRawDataBySource(query collectDTO.CollectRecordQueryDTO) (*collectDTO.CollectRecordRawDataDTO, error) {
+	sourceProductID := strings.TrimSpace(query.SourceProductID)
+	if sourceProductID == "" {
+		return nil, fmt.Errorf("sourceProductId is required")
+	}
+	sourcePlatform := strings.TrimSpace(query.SourcePlatform)
+	if sourcePlatform == "" {
+		sourcePlatform = strings.TrimSpace(query.Platform)
+	}
+	if sourcePlatform == "" {
+		return nil, fmt.Errorf("sourcePlatform is required")
+	}
+
+	entity, platform, err := s.collectRecordRepository.FindLatestBySourceIdentity(sourceProductID, sourcePlatform, query.AppUserID)
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(entity.RawDataURL) == "" {
+		return nil, gorm.ErrRecordNotFound
+	}
+	rawBytes, err := oss.Get(entity.RawDataURL)
+	if err != nil {
+		return nil, err
+	}
+
+	var rawData any
+	if err := json.Unmarshal(rawBytes, &rawData); err != nil {
+		rawData = string(rawBytes)
+	}
+	return &collectDTO.CollectRecordRawDataDTO{
+		SourceProductID: entity.SourceProductID,
+		SourcePlatform:  normalizeCollectSourcePlatform(platform),
+		RawDataURL:      entity.RawDataURL,
+		RawData:         rawData,
+	}, nil
 }
 
 func (s *CollectService) DeleteCollectRecord(id uint) error {

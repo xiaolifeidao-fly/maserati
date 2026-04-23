@@ -13,6 +13,8 @@ import type { ImageCropMeta } from '../core/publish-image-meta-store';
 export interface FillerContext {
   /** 当前发布任务 ID（用于日志路由） */
   readonly taskId: number;
+  /** 内部店铺 ID（用于创建 TbEngine） */
+  readonly shopId: number;
   /** 第三方平台店铺 ID（用于查询 address_template） */
   readonly platformShopId: string;
   /** 归一化商品数据（只读） */

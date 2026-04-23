@@ -279,14 +279,13 @@ export class FillDraftStep extends PublishStep {
       tbExtractWay: summarizeForLog(initialDraftPayload['tbExtractWay'] ?? null),
     });
 
-    // 使用 imageUrlMap（来源于 product_file.file_path 缓存）将原始 URL 解析为淘宝图片空间 URL
+    // 优先使用上传步骤已写入 ctx 的淘宝 URL 列表；
+    // 若上传步骤未执行，则通过 imageUrlMap 查找，找不到用空字符串占位（不能回退到原始外部 URL）
     const imageUrlMap = ctx.get('imageUrlMap') ?? {};
-    const resolveImageUrl = (url: string) => imageUrlMap[url] ?? url;
-
-    const uploadedMainImages = (ctx.get('uploadedMainImages') ?? product.mainImages)
-      .map(resolveImageUrl);
-    const uploadedDetailImages = (ctx.get('uploadedDetailImages') ?? product.detailImages)
-      .map(resolveImageUrl);
+    const uploadedMainImages = ctx.get('uploadedMainImages')
+      ?? product.mainImages.map(url => imageUrlMap[url] ?? '');
+    const uploadedDetailImages = ctx.get('uploadedDetailImages')
+      ?? product.detailImages.map(url => imageUrlMap[url] ?? '');
 
     // 从 ctx 或 imageUrlMap 构建 SKU 图片映射
     const uploadedSkuImageMap: Record<string, string> = { ...(ctx.get('uploadedSkuImageMap') ?? {}) };
@@ -298,6 +297,7 @@ export class FillDraftStep extends PublishStep {
 
     const fillerCtx: FillerContext = {
       taskId: ctx.taskId,
+      shopId: ctx.shopId,
       platformShopId,
       product,
       categoryInfo,

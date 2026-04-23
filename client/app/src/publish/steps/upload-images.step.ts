@@ -95,16 +95,35 @@ export class UploadImagesStep extends PublishStep {
 
     if (toUpload.length === 0) {
       // 即使跳过上传，也确保 ctx 中的图片 URL 列表使用 existingMap 中的淘宝 URL
-      const uploadedMainImages = mainImages.map(img => existingMap[img] ?? img);
-      const uploadedDetailImages = detailImages.map(img => existingMap[img] ?? img);
+      // 注意：未命中 existingMap 的图片使用空字符串，filler 会过滤掉，不能回退到原始外部 URL
+      const uploadedMainImages = mainImages.map(img => existingMap[img] ?? '');
+      const uploadedDetailImages = detailImages.map(img => existingMap[img] ?? '');
       const uploadedSkuImageMap: Record<string, string> = {};
       for (const url of skuImages) {
         if (existingMap[url]) {
           uploadedSkuImageMap[url] = existingMap[url];
         }
       }
+      // 重建 detailImageMetas：优先使用已有的 meta，回退到 existingMap 里的 TB URL
+      const existingMetaByOriginal = new Map<string, TbUploadedImageMeta>();
+      for (const meta of existingDetailMetas) {
+        if (meta.originalUrl) existingMetaByOriginal.set(meta.originalUrl, meta);
+      }
+      const uploadedDetailImageMetas: TbUploadedImageMeta[] = detailImages.map((originalUrl, index) => {
+        const uploadedUrl = uploadedDetailImages[index];
+        const existingMeta = existingMetaByOriginal.get(originalUrl);
+        return {
+          originalUrl,
+          url: uploadedUrl,
+          width: existingMeta?.width,
+          height: existingMeta?.height,
+          size: existingMeta?.size,
+          imageId: existingMeta?.imageId,
+        };
+      });
       ctx.set('uploadedMainImages', uploadedMainImages);
       ctx.set('uploadedDetailImages', uploadedDetailImages);
+      ctx.set('uploadedDetailImageMetas', uploadedDetailImageMetas);
       ctx.set('uploadedSkuImageMap', uploadedSkuImageMap);
       throw new StepSkippedError(this.stepCode, '图片已全部上传，跳过');
     }
@@ -223,8 +242,18 @@ export class UploadImagesStep extends PublishStep {
       }
     }
 
-    const uploadedMainImages = mainImages.map(img => imageUrlMap[img] ?? img);
-    const uploadedDetailImages = detailImages.map(img => imageUrlMap[img] ?? img);
+    // 任意图片下载或上传失败，直接终止发布流程
+    if (tbUploadFailures.length > 0) {
+      const failedUrls = tbUploadFailures
+        .map(f => `${String(f['originalUrl'])}（${String(f['message'] ?? f['error'] ?? '未知错误')}）`)
+        .join('\n');
+      throw new PublishError(this.stepCode, `图片上传失败，请检查后重试：\n${failedUrls}`);
+    }
+
+    // 只使用已上传的淘宝 URL，上传失败的图片用空字符串占位，filler 会过滤掉
+    // 不能回退到原始外部 URL，否则淘宝会报"引用的外部图片"错误
+    const uploadedMainImages = mainImages.map(img => imageUrlMap[img] ?? '');
+    const uploadedDetailImages = detailImages.map(img => imageUrlMap[img] ?? '');
     const uploadedSkuImageMap: Record<string, string> = {};
     for (const url of skuImages) {
       if (imageUrlMap[url]) {
@@ -319,28 +348,35 @@ export class UploadImagesStep extends PublishStep {
     sequence: number,
     imageType: 'main' | 'detail' | 'sku',
   ): Promise<ProcessedImageResult | null> {
-    try {
-      const response = await axios.get<ArrayBuffer>(url, {
-        responseType: 'arraybuffer',
-        timeout: 30000,
-        headers: { 'User-Agent': DOWNLOAD_UA },
-      });
+    let lastError: unknown;
+    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+      try {
+        const response = await axios.get<ArrayBuffer>(url, {
+          responseType: 'arraybuffer',
+          timeout: 30000,
+          headers: { 'User-Agent': DOWNLOAD_UA },
+        });
 
-      const buffer = Buffer.from(response.data);
-      const extension = this.resolveImageExtension(url, response.headers['content-type']);
-      const fileName = `${sourceProductId}_${timestamp}_${sequence}_${imageType}${extension}`;
-      const tempPath = path.join(tempDir, fileName);
-      const processedImage = await this.processImage(buffer, isMain, extension);
-      fs.writeFileSync(tempPath, processedImage.buffer);
-      return {
-        localPath: tempPath,
-        width: processedImage.width,
-        height: processedImage.height,
-        size: processedImage.buffer.length,
-      };
-    } catch {
-      return null;
+        const buffer = Buffer.from(response.data);
+        const extension = this.resolveImageExtension(url, response.headers['content-type']);
+        const fileName = `${sourceProductId}_${timestamp}_${sequence}_${imageType}${extension}`;
+        const tempPath = path.join(tempDir, fileName);
+        const processedImage = await this.processImage(buffer, isMain, extension);
+        fs.writeFileSync(tempPath, processedImage.buffer);
+        return {
+          localPath: tempPath,
+          width: processedImage.width,
+          height: processedImage.height,
+          size: processedImage.buffer.length,
+        };
+      } catch (error) {
+        lastError = error;
+        if (attempt < MAX_RETRIES - 1) {
+          await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS * (attempt + 1)));
+        }
+      }
     }
+    throw lastError;
   }
 
   /**

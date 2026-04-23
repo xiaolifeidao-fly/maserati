@@ -52,4 +52,13 @@ export class PublishWindowApi extends ElectronApi {
   async closePublishWindow(): Promise<void> {
     return this.invokeApi('closePublishWindow');
   }
+
+  /**
+   * 订阅验证码面板可见性变化事件。
+   * 右侧验证码面板展示时推送 { visible: true }，隐藏时推送 { visible: false }。
+   */
+  @InvokeType(Protocols.TRRIGER)
+  async onCaptchaPanelVisibilityChanged(callback: (payload: { visible: boolean }) => void): Promise<void> {
+    return this.onMessage('onCaptchaPanelVisibilityChanged', callback);
+  }
 }

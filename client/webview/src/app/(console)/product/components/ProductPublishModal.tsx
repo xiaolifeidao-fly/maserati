@@ -29,8 +29,11 @@ import type { ColumnsType } from "antd/es/table";
 import {
   fetchCollectBatchFavoriteRecords,
   fetchCollectBatchOptions,
+  fetchCollectBatchStats,
   fetchShopOptions,
+  syncCollectBatchStatsFromServer,
   type CollectBatchRecord,
+  type CollectBatchStats,
   type CollectRecordPreview,
   type ShopRecord,
 } from "../api/product.api";
@@ -46,7 +49,6 @@ const SHOP_LOGIN_REQUIRED_MESSAGE = "当前选中的店铺未登录，需要去�
 
 const PRICE_SETTINGS_KEY = "publish_price_settings_v1";
 const TAOBAO_ITEM_URL_PREFIX = "https://item.taobao.com/item.htm";
-const TAOBAO_DRAFT_URL_PREFIX = "https://item.upload.taobao.com/sell/v2/draft.htm";
 
 type PublishStrategy = "warehouse" | "immediate";
 
@@ -127,9 +129,6 @@ function buildTaobaoItemUrl(itemId: string): string {
   return `${TAOBAO_ITEM_URL_PREFIX}?id=${encodeURIComponent(itemId)}`;
 }
 
-function buildTaobaoDraftUrl(draftId: string): string {
-  return `${TAOBAO_DRAFT_URL_PREFIX}?dbDraftId=${encodeURIComponent(draftId)}`;
-}
 
 // ─── 发布队列类型 ──────────────────────────────────────────────────────────────
 
@@ -317,6 +316,9 @@ export function ProductPublishModal({
   const [exportingLogProductIds, setExportingLogProductIds] = useState<string[]>([]);
   const [exportingBatchLogs, setExportingBatchLogs] = useState(false);
   const [publishProgressLoading, setPublishProgressLoading] = useState(directToProgress);
+  const [captchaPanelActuallyVisible, setCaptchaPanelActuallyVisible] = useState(false);
+  const [batchStatsMap, setBatchStatsMap] = useState<Record<number, CollectBatchStats | null>>({});
+  const [batchStatsLoading, setBatchStatsLoading] = useState(false);
   const runningTableWrapRef = useRef<HTMLDivElement | null>(null);
   const publishQueueRef = useRef<PublishQueueItem[]>([]);
   const draftLookupKeysRef = useRef<Set<string>>(new Set());
@@ -540,6 +542,15 @@ export function ProductPublishModal({
       void applyCenterState(state as PublishCenterState);
     });
 
+    try {
+      const publishWindowApi = getPublishWindowApi();
+      void publishWindowApi.onCaptchaPanelVisibilityChanged((payload) => {
+        setCaptchaPanelActuallyVisible(Boolean(payload?.visible));
+      });
+    } catch {
+      // 非 Electron 环境忽略
+    }
+
     return () => {
       cancelled = true;
     };
@@ -551,7 +562,11 @@ export function ProductPublishModal({
   );
 
   const publishShops = useMemo(
-    () => shops.filter((shop) => normalizePlatform(shop.platform) === selectedTargetPlatform && normalizeShopUsage(shop.shopUsage) === "PUBLISH"),
+    () => shops.filter((shop) => (
+      normalizePlatform(shop.platform) === selectedTargetPlatform
+      && normalizeShopUsage(shop.shopUsage) === "PUBLISH"
+      && shop.authorizationStatus === "AUTHORIZED"
+    )),
     [shops, selectedTargetPlatform],
   );
 
@@ -664,6 +679,34 @@ export function ProductPublishModal({
       cancelled = true;
     };
   }, [open, republishStatsByBatchId, republishStatsLoadingBatchIds, selectedBatchId, showBatchHistory]);
+
+  useEffect(() => {
+    if (!open || !selectedBatchId) return;
+    if (batchStatsMap[selectedBatchId] !== undefined) return;
+
+    let cancelled = false;
+    setBatchStatsLoading(true);
+
+    void (async () => {
+      try {
+        let stats = await fetchCollectBatchStats(selectedBatchId);
+        if (!stats) {
+          stats = await syncCollectBatchStatsFromServer(selectedBatchId);
+        }
+        if (!cancelled) {
+          setBatchStatsMap((m) => ({ ...m, [selectedBatchId]: stats }));
+        }
+      } catch {
+        if (!cancelled) {
+          setBatchStatsMap((m) => ({ ...m, [selectedBatchId]: null }));
+        }
+      } finally {
+        if (!cancelled) setBatchStatsLoading(false);
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [open, selectedBatchId, batchStatsMap]);
 
   const markSelectedShopLoggedOut = (shopId: number) => {
     setShops((current) =>
@@ -1000,11 +1043,9 @@ export function ProductPublishModal({
       return;
     }
 
-    const sourceShop = shops.find((shop) => shop.id === selectedBatch.shopId);
-    const sourcePlatform = normalizeCollectSourceType(sourceShop?.platform);
-    const sourceType = collectSourceTypeToPublishSourceType(sourcePlatform);
+    const sourceType = collectSourceTypeToPublishSourceType(normalizeCollectSourceType(selectedTargetPlatform));
     if (!sourceType) {
-      message.error("当前批次来源平台暂不支持发布");
+      message.error("当前目标平台暂不支持发布");
       return;
     }
 
@@ -1457,9 +1498,7 @@ export function ProductPublishModal({
                 icon={<EditOutlined />}
                 tooltip={record.draftId ? "打开淘宝草稿" : "暂无草稿ID，无法打开草稿"}
                 disabled={!record.draftId}
-                href={record.draftId ? buildTaobaoDraftUrl(record.draftId) : undefined}
-                target="_blank"
-                rel="noreferrer"
+                onClick={record.draftId ? () => void getPublishApi().openPublishDraft(record.shopId, record.draftId!) : undefined}
               />
             ) : null}
             {resumeTaskId && (record.waitingForCaptcha || record.status === "FAILED") ? (
@@ -1570,15 +1609,22 @@ export function ProductPublishModal({
                 <div className="publish-info-card" style={{ marginTop: 20 }}>
                   <Descriptions size="small" column={2} colon>
                     <Descriptions.Item label="批次名称">{selectedBatch.name}</Descriptions.Item>
-                    <Descriptions.Item label="采集数量">
-                      {selectedBatchRepublishStatsLoading
-                        ? "正在统计喜欢的商品..."
-                        : showBatchHistory
-                          ? `${selectedBatchRepublishStats?.totalCount ?? 0} 条（服务端去重）`
+                    <Descriptions.Item label="总采集数">
+                      {batchStatsLoading
+                        ? "统计中..."
+                        : batchStatsMap[selectedBatch.id] != null
+                          ? `${batchStatsMap[selectedBatch.id]!.totalCollectCount} 条`
                           : `${selectedBatch.collectedCount ?? 0} 条`}
                     </Descriptions.Item>
                     <Descriptions.Item label="所属店铺">
                       {shopNameMap.get(selectedBatch.shopId) ?? `#${selectedBatch.shopId}`}
+                    </Descriptions.Item>
+                    <Descriptions.Item label="总收藏数">
+                      {batchStatsLoading
+                        ? "统计中..."
+                        : batchStatsMap[selectedBatch.id] != null
+                          ? `${batchStatsMap[selectedBatch.id]!.totalFavoriteCount} 条`
+                          : "—"}
                     </Descriptions.Item>
                     <Descriptions.Item label="状态">{selectedBatch.status}</Descriptions.Item>
                   </Descriptions>
@@ -1624,13 +1670,11 @@ export function ProductPublishModal({
                 placeholder={`请选择要发布到的${selectedTargetPlatform === "tb" ? "淘宝" : "拼多多"}店铺`}
                 onChange={(value) => setSelectedTargetShopId(Number(value ?? 0))}
                 options={publishShops.map((shop) => {
-                  const authorized = shop.authorizationStatus === "AUTHORIZED";
                   const loggedIn = shop.loginStatus === "LOGGED_IN";
-                  const suffix = !authorized ? " · 未授权" : !loggedIn ? " · 未登录" : "";
+                  const suffix = !loggedIn ? " · 未登录" : "";
                   return {
                     label: `${formatShopLabel(shop)} · ID ${shop.id}${suffix}`,
                     value: shop.id,
-                    disabled: !authorized,
                   };
                 })}
                 style={{ width: "100%" }}
@@ -1932,7 +1976,7 @@ export function ProductPublishModal({
                       description={<span>当前选中的店铺未登录，需要去店铺管理中重新<a onClick={() => { void handleShopLoginFromPublish(selectedTargetShopId); }} style={{ cursor: "pointer", textDecoration: "underline" }}>授权登录</a></span>}
                     />
                   ) : null}
-                  {activeCaptchaItem ? (
+                  {activeCaptchaItem && captchaPanelActuallyVisible ? (
                     <Alert
                       type="warning"
                       showIcon

@@ -655,16 +655,18 @@ select {
 
 .manager-commerce-nav {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(128px, 1fr));
   gap: 10px;
-  width: min(60%, 1080px);
+  width: 100%;
+  overflow-x: auto;
+  padding-bottom: 2px;
 }
 
 .manager-commerce-nav-item {
   border: 1px solid rgba(191, 143, 108, 0.16);
   background: rgba(255, 250, 244, 0.92);
   border-radius: 22px;
-  padding: 14px 16px;
+  padding: 12px 14px;
   display: flex;
   gap: 12px;
   align-items: center;
@@ -683,6 +685,7 @@ select {
   display: block;
   color: var(--manager-text);
   font-size: 15px;
+  white-space: nowrap;
 }
 
 .manager-commerce-nav-item small {
@@ -690,6 +693,9 @@ select {
   margin-top: 4px;
   color: var(--manager-text-faint);
   font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .manager-commerce-nav-item.is-active {
@@ -940,7 +946,7 @@ select {
 
   .manager-commerce-nav {
     width: 100%;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(5, minmax(128px, 1fr));
   }
 
   .manager-commerce-dashboard-grid,
@@ -961,7 +967,7 @@ select {
 
   .manager-commerce-nav {
     width: 100%;
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(5, minmax(128px, 1fr));
   }
 
   .manager-commerce-feed-item {

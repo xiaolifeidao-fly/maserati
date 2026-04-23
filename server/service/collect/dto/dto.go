@@ -54,9 +54,17 @@ type CollectRecordDTO struct {
 	Status            string `json:"status"`
 }
 
+type CollectRecordRawDataDTO struct {
+	SourceProductID string `json:"sourceProductId"`
+	SourcePlatform  string `json:"sourcePlatform"`
+	RawDataURL      string `json:"rawDataUrl"`
+	RawData         any    `json:"rawData"`
+}
+
 type CreateCollectRecordDTO struct {
 	AppUserID         uint64 `json:"appUserId"`
 	CollectBatchID    uint64 `json:"collectBatchId"`
+	SourcePlatform    string `json:"sourcePlatform"`
 	Source            string `json:"source"`
 	ProductName       string `json:"productName"`
 	SourceProductID   string `json:"sourceProductId"`
@@ -70,6 +78,7 @@ type CreateCollectRecordDTO struct {
 type UpdateCollectRecordDTO struct {
 	AppUserID         *uint64 `json:"appUserId,omitempty"`
 	CollectBatchID    *uint64 `json:"collectBatchId,omitempty"`
+	SourcePlatform    *string `json:"sourcePlatform,omitempty"`
 	Source            *string `json:"source,omitempty"`
 	ProductName       *string `json:"productName,omitempty"`
 	SourceProductID   *string `json:"sourceProductId,omitempty"`
@@ -81,12 +90,15 @@ type UpdateCollectRecordDTO struct {
 }
 
 type CollectRecordQueryDTO struct {
-	Page           int    `form:"page"`
-	PageIndex      int    `form:"pageIndex"`
-	PageSize       int    `form:"pageSize"`
-	AppUserID      uint64 `form:"appUserId"`
-	CollectBatchID uint64 `form:"collectBatchId"`
-	Source         string `form:"source"`
-	ProductName    string `form:"productName"`
-	Status         string `form:"status"`
+	Page            int    `form:"page"`
+	PageIndex       int    `form:"pageIndex"`
+	PageSize        int    `form:"pageSize"`
+	AppUserID       uint64 `form:"appUserId"`
+	CollectBatchID  uint64 `form:"collectBatchId"`
+	SourceProductID string `form:"sourceProductId"`
+	SourcePlatform  string `form:"sourcePlatform"`
+	Platform        string `form:"platform"`
+	Source          string `form:"source"`
+	ProductName     string `form:"productName"`
+	Status          string `form:"status"`
 }

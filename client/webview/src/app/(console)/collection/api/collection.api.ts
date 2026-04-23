@@ -5,12 +5,16 @@ import {
   type CollectStartResult,
   type CollectBatchListQuery,
   type CollectBatchPayload,
+  type CollectSharePayload,
+  type CollectShareQuery,
+  type CollectShareRecord,
   type ImportCollectBatchProgress,
   type CollectRecordListQuery,
   type CollectRecordUpdatePayload,
   CollectBatchRecord,
   type ImportCollectBatchResult,
   CollectRecordPreview,
+  type SharedCollectBatchRecord,
 } from "@eleapi/collect/collect.api";
 import { normalizeCollectSourceType, type CollectSourceType } from "@eleapi/collect/collect.platform";
 import { CollectionWorkspaceApi, CollectionWorkspaceState, type CollectedProductData } from "@eleapi/collection-workspace/collection-workspace.api";
@@ -31,6 +35,9 @@ export function normalizeCollectRecordSource(value?: string): CollectRecordSourc
 export type {
   CollectBatchListQuery,
   CollectBatchPayload,
+  CollectSharePayload,
+  CollectShareQuery,
+  CollectShareRecord,
   CollectRecordListQuery,
   CollectRecordUpdatePayload,
   ShopRecord,
@@ -39,6 +46,7 @@ export type {
   CollectStartResult,
   ImportCollectBatchResult,
   ImportCollectBatchProgress,
+  SharedCollectBatchRecord,
   StandardProductData,
 };
 
@@ -80,6 +88,22 @@ export async function updateCollectBatch(id: number, payload: Partial<CollectBat
 
 export async function deleteCollectBatch(id: number) {
   return getCollectApi().deleteCollectBatch(id);
+}
+
+export async function shareCollectBatch(payload: CollectSharePayload) {
+  return getCollectApi().shareCollectBatch(payload);
+}
+
+export async function fetchMyCollectShares(query: CollectShareQuery) {
+  return getCollectApi().listMyCollectShares(query);
+}
+
+export async function fetchSharedCollectBatches(query: CollectShareQuery) {
+  return getCollectApi().listSharedCollectBatches(query);
+}
+
+export async function cancelCollectShare(id: number) {
+  return getCollectApi().cancelCollectShare(id);
 }
 
 export async function startCollection(batchId: number) {

@@ -32,7 +32,7 @@ func (r *AddressRepository) CountByQuery(query logisticsDTO.AddressQueryDTO) (in
 		dbQuery = dbQuery.Where("city_code = ?", v)
 	}
 	if v := strings.TrimSpace(query.Keywords); v != "" {
-		dbQuery = dbQuery.Where("keywords LIKE ?", "%"+v+"%")
+		dbQuery = dbQuery.Where("(keywords LIKE ? OR city_name LIKE ?)", "%"+v+"%", "%"+v+"%")
 	}
 	var total int64
 	if err := dbQuery.Count(&total).Error; err != nil {
@@ -56,7 +56,7 @@ func (r *AddressRepository) ListByQuery(query logisticsDTO.AddressQueryDTO, page
 		dbQuery = dbQuery.Where("city_code = ?", v)
 	}
 	if v := strings.TrimSpace(query.Keywords); v != "" {
-		dbQuery = dbQuery.Where("keywords LIKE ?", "%"+v+"%")
+		dbQuery = dbQuery.Where("(keywords LIKE ? OR city_name LIKE ?)", "%"+v+"%", "%"+v+"%")
 	}
 	var entities []*Address
 	if err := dbQuery.Order("id DESC").Offset((pageIndex - 1) * pageSize).Limit(pageSize).Find(&entities).Error; err != nil {

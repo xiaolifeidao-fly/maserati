@@ -4,6 +4,7 @@ import (
 	"app-api/pkg/app_user"
 	"app-api/pkg/category"
 	"app-api/pkg/collect"
+	collectShare "app-api/pkg/collect_share"
 	"app-api/pkg/login"
 	"app-api/pkg/logistics"
 	"app-api/pkg/notice"
@@ -20,6 +21,7 @@ func registerHandler() []routers.Handler {
 		app_user.NewAppUserHandler(),
 		category.NewCategoryHandler(),
 		collect.NewCollectHandler(),
+		collectShare.NewCollectShareHandler(),
 		login.NewLoginHandler(),
 		logistics.NewLogisticsHandler(),
 		notice.NewNoticeHandler(),

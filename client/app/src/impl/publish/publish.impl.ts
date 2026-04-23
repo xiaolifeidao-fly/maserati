@@ -3,6 +3,7 @@ import {
   type PublishDraftRecord,
   type PublishLogExportResult,
 } from '@eleapi/publish/publish.api';
+import { TbEngine } from '@src/browser/tb.engine';
 import { requestBackend } from '../shared/backend';
 import { PublishRunner } from '@src/publish/core/publish-runner';
 import { HttpPublishPersister } from '@src/publish/core/http-publish-persister';
@@ -179,9 +180,11 @@ export class PublishImpl extends PublishApi {
 
     runner.onProgress((event: PublishProgressEvent) => {
       PublishImpl.syncProgress(taskId, event);
-      // 检测到验证码时，自动在发布窗口右侧抽屉展示验证码
+      // 检测到验证码时，自动在发布窗口右侧展示验证码；验证通过后自动继续发布
       if (event.captchaUrl) {
-        showCaptchaPanel(event.captchaUrl);
+        showCaptchaPanel(event.captchaUrl, () => {
+          void this.resumePublish(taskId);
+        });
       }
     });
 
@@ -335,5 +338,14 @@ export class PublishImpl extends PublishApi {
     });
 
     return result.data?.[0] ?? null;
+  }
+
+  async openPublishDraft(shopId: number, draftId: string): Promise<void> {
+    const url = `https://item.upload.taobao.com/sell/v2/draft.htm?dbDraftId=${encodeURIComponent(draftId)}`;
+    const engine = new TbEngine(String(shopId), false);
+    const page = await engine.init(url);
+    if (page) {
+      await page.bringToFront();
+    }
   }
 }

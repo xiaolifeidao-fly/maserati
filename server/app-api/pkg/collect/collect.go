@@ -32,6 +32,7 @@ func (h *CollectHandler) RegisterHandler(engine *gin.RouterGroup) {
 	engine.DELETE("/collect-batches/:id", h.deleteCollectBatch)
 
 	engine.GET("/collect-records", h.listCollectRecords)
+	engine.GET("/collect-records/source/raw-data", h.getCollectRecordRawDataBySource)
 	engine.GET("/collect-records/:id", h.getCollectRecordByID)
 	engine.POST("/collect-records", h.createCollectRecord)
 	engine.PUT("/collect-records/:id", h.updateCollectRecord)
@@ -132,6 +133,21 @@ func (h *CollectHandler) listCollectRecords(c *gin.Context) {
 	}
 	applyCollectAppUserID(c, &q.AppUserID)
 	r, e := h.collectService.ListCollectRecords(q)
+	commonRouter.ToJson(c, r, e)
+}
+
+func (h *CollectHandler) getCollectRecordRawDataBySource(c *gin.Context) {
+	var q collectDTO.CollectRecordQueryDTO
+	if c.ShouldBindQuery(&q) != nil {
+		commonRouter.ToError(c, "参数错误")
+		return
+	}
+	applyCollectAppUserID(c, &q.AppUserID)
+	r, e := h.collectService.GetCollectRecordRawDataBySource(q)
+	if e == gorm.ErrRecordNotFound {
+		commonRouter.ToError(c, "collect record raw data not found")
+		return
+	}
 	commonRouter.ToJson(c, r, e)
 }
 

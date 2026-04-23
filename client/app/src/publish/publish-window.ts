@@ -6,9 +6,8 @@ import { getLatestCaptchaTask } from './runtime/publish-center';
 
 // ─── 布局常量 ─────────────────────────────────────────────────────────────────
 
-/** 右侧验证码面板占窗口宽度的比例（抽屉覆盖在左侧之上） */
-const CAPTCHA_PANEL_RATIO = 0.4;
-const MIN_CAPTCHA_WIDTH = 360;
+/** 右侧验证码面板固定宽度（px） */
+const CAPTCHA_PANEL_WIDTH = 420;
 
 // ─── 状态 ─────────────────────────────────────────────────────────────────────
 
@@ -16,6 +15,9 @@ let publishBrowserWindow: BrowserWindow | null = null;
 let leftBrowserView: BrowserView | null = null;
 let rightBrowserView: BrowserView | null = null;
 let captchaPanelVisible = false;
+let captchaSolvedCallback: (() => void) | null = null;
+/** 展示验证码前保存的窗口外框宽度，用于恢复 */
+let captchaOriginalBoundsWidth: number | null = null;
 
 type PublishWindowOpenOptions = {
   batchId?: number;
@@ -42,8 +44,7 @@ function openExternalUrl(url: string) {
 
 /**
  * 同步左右 BrowserView 的布局。
- * 左侧始终占满窗口；右侧（验证码抽屉）在可见时以 CAPTCHA_PANEL_RATIO 比例
- * 从右边缘向左覆盖在左侧之上。
+ * 验证码不可见时左侧占满窗口；可见时左侧保持原始宽度，右侧紧贴其右展示验证码。
  */
 function syncBounds(): void {
   if (!publishBrowserWindow || publishBrowserWindow.isDestroyed() || !leftBrowserView || !rightBrowserView) {
@@ -52,20 +53,23 @@ function syncBounds(): void {
 
   const { width, height } = publishBrowserWindow.getContentBounds();
 
-  // 左侧始终占 100% 宽度
-  leftBrowserView.setBounds({ x: 0, y: 0, width, height });
-
-  if (captchaPanelVisible) {
-    const captchaWidth = Math.max(Math.floor(width * CAPTCHA_PANEL_RATIO), MIN_CAPTCHA_WIDTH);
-    rightBrowserView.setBounds({
-      x: width - captchaWidth,
-      y: 0,
-      width: captchaWidth,
-      height,
-    });
+  if (captchaPanelVisible && captchaOriginalBoundsWidth !== null) {
+    const bounds = publishBrowserWindow.getBounds();
+    const frameWidth = bounds.width - width;
+    const leftWidth = Math.max(captchaOriginalBoundsWidth - frameWidth, 0);
+    const captchaWidth = Math.max(width - leftWidth, 0);
+    leftBrowserView.setBounds({ x: 0, y: 0, width: leftWidth, height });
+    rightBrowserView.setBounds({ x: leftWidth, y: 0, width: captchaWidth, height });
   } else {
+    leftBrowserView.setBounds({ x: 0, y: 0, width, height });
     // 隐藏右侧面板：宽度置 0
     rightBrowserView.setBounds({ x: 0, y: 0, width: 0, height: 0 });
+  }
+}
+
+function broadcastCaptchaPanelVisibility(visible: boolean): void {
+  for (const webContents of getPublishRelatedWebContents()) {
+    webContents.send('publishWindow.onCaptchaPanelVisibilityChanged', { visible });
   }
 }
 
@@ -193,14 +197,16 @@ export function openPublishWindow(options?: PublishWindowOpenOptions): void {
     leftBrowserView = null;
     rightBrowserView = null;
     captchaPanelVisible = false;
+    captchaSolvedCallback = null;
+    captchaOriginalBoundsWidth = null;
   });
 }
 
 /**
- * 在右侧抽屉中展示验证码。
- * 直接加载验证码 URL（淘宝验证码页面），无需 iframe 中转。
+ * 在右侧并排展示验证码面板。
+ * 直接加载验证码 URL（淘宝验证码页面）；验证码页面跳转离开后自动调用 onSolved。
  */
-export function showCaptchaPanel(captchaUrl: string): void {
+export function showCaptchaPanel(captchaUrl: string, onSolved?: () => void): void {
   if (!publishBrowserWindow || publishBrowserWindow.isDestroyed()) {
     log.warn('[publish-window] showCaptchaPanel: publish window is not open');
     return;
@@ -210,8 +216,39 @@ export function showCaptchaPanel(captchaUrl: string): void {
     return;
   }
 
+  // 清除上一次的监听器和回调
+  rightBrowserView.webContents.removeAllListeners('did-navigate');
+  captchaSolvedCallback = onSolved ?? null;
+
+  // 保存当前窗口外框宽度，并向右扩展 CAPTCHA_PANEL_WIDTH
+  if (!captchaPanelVisible) {
+    const currentBounds = publishBrowserWindow.getBounds();
+    captchaOriginalBoundsWidth = currentBounds.width;
+    publishBrowserWindow.setBounds({
+      ...currentBounds,
+      width: currentBounds.width + CAPTCHA_PANEL_WIDTH,
+    });
+  }
+
   captchaPanelVisible = true;
   syncBounds();
+  broadcastCaptchaPanelVisibility(true);
+
+  if (captchaSolvedCallback) {
+    const webContents = rightBrowserView.webContents;
+    const onNavigate = (_event: Electron.Event, url: string): void => {
+      if (!url || url === 'about:blank') return;
+      // 忽略验证码页面本身及其重定向
+      if (/captcha|checkcode/i.test(url)) return;
+      // 跳转到非验证码页面 = 验证通过
+      log.info('[publish-window] captcha solved, resuming publish', { url });
+      webContents.removeListener('did-navigate', onNavigate);
+      const cb = captchaSolvedCallback;
+      hideCaptchaPanel();
+      cb?.();
+    };
+    webContents.on('did-navigate', onNavigate);
+  }
 
   rightBrowserView.webContents.loadURL(captchaUrl).catch((err) => {
     log.error('[publish-window] failed to load captcha url', err);
@@ -222,11 +259,27 @@ export function showCaptchaPanel(captchaUrl: string): void {
 }
 
 /**
- * 隐藏右侧验证码抽屉。
+ * 隐藏右侧验证码面板，并将窗口恢复为展示验证码之前的宽度。
  */
 export function hideCaptchaPanel(): void {
   captchaPanelVisible = false;
+  if (rightBrowserView && !rightBrowserView.webContents.isDestroyed()) {
+    rightBrowserView.webContents.removeAllListeners('did-navigate');
+  }
+  captchaSolvedCallback = null;
   syncBounds();
+
+  // 恢复窗口到展示验证码前的宽度
+  if (captchaOriginalBoundsWidth !== null && publishBrowserWindow && !publishBrowserWindow.isDestroyed()) {
+    const currentBounds = publishBrowserWindow.getBounds();
+    publishBrowserWindow.setBounds({
+      ...currentBounds,
+      width: captchaOriginalBoundsWidth,
+    });
+  }
+  captchaOriginalBoundsWidth = null;
+
+  broadcastCaptchaPanelVisibility(false);
   log.info('[publish-window] captcha panel hidden');
 }
 

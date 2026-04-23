@@ -10,6 +10,7 @@ import {
   previewCollectedRecord,
   getCollectedProductStoreData,
   getCollectedProductRawData,
+  getCollectedProductRawDataWithFallback,
   hasCollectedHtml,
   saveStandardProductToStore,
 } from "@src/collect/workspace.manager";
@@ -44,7 +45,7 @@ export class CollectionWorkspaceImpl extends CollectionWorkspaceApi {
   }
 
   async getCollectedProductRawData(sourceProductId: string, sourceType?: CollectSourceType) {
-    return getCollectedProductRawData(sourceProductId, sourceType);
+    return getCollectedProductRawDataWithFallback(sourceProductId, sourceType);
   }
 
   async hasCollectedHtml(sourceProductId: string, sourceType?: CollectSourceType) {

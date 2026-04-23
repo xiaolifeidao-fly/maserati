@@ -145,6 +145,11 @@ export class PublishApi extends ElectronApi {
     return this.invokeApi('getProductDraftBySource', shopId, sourceProductId);
   }
 
+  @InvokeType(Protocols.INVOKE)
+  async openPublishDraft(shopId: number, draftId: string): Promise<void> {
+    return this.invokeApi('openPublishDraft', shopId, draftId);
+  }
+
   // ─── 进度监听（主进程 → 渲染进程推送）────────────────────────────────────
 
   /**

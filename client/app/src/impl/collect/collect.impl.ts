@@ -8,12 +8,17 @@ import {
   type CollectBatchListQuery,
   type CollectBatchPayload,
   CollectBatchRecord,
+  type CollectBatchStats,
+  type CollectSharePayload,
+  type CollectShareQuery,
+  type CollectShareRecord,
   type ImportCollectBatchProgress,
   type ImportCollectBatchResult,
   type CollectRecordPreview,
   type CollectRecordListQuery,
   type CollectRecordUpdatePayload,
   type PageResult,
+  type SharedCollectBatchRecord,
 } from "@eleapi/collect/collect.api";
 import { normalizeCollectSourceType } from "@eleapi/collect/collect.platform";
 import type { ShopRecord } from "@eleapi/commerce/commerce.api";
@@ -23,6 +28,7 @@ import { getCollectionPlatformDriver } from "@src/collect/platforms/registry";
 import type { CollectedGoodsSummary } from "@src/collect/platforms/types";
 import { importCollectedRecordToStore, navigateCollectionWorkspace, openCollectionWorkspace } from "@src/collect/workspace.manager";
 import { saveCollectedToServer } from "@src/collect/collect.saver";
+import { collectBatchStatsDb } from "@src/collect/collect-batch-stats.db";
 import { requestBackend } from "../shared/backend";
 
 function mapCookieSameSite(value?: "Strict" | "Lax" | "None") {
@@ -128,6 +134,22 @@ export class CollectImpl extends CollectApi {
 
   async deleteCollectBatch(id: number): Promise<{ deleted: boolean }> {
     return requestBackend("DELETE", `/collect-batches/${id}`);
+  }
+
+  async shareCollectBatch(payload: CollectSharePayload): Promise<CollectShareRecord> {
+    return requestBackend("POST", "/collect-shares", { data: payload });
+  }
+
+  async listMyCollectShares(query: CollectShareQuery): Promise<PageResult<CollectShareRecord>> {
+    return requestBackend("GET", "/collect-shares/mine", { params: query });
+  }
+
+  async listSharedCollectBatches(query: CollectShareQuery): Promise<PageResult<SharedCollectBatchRecord>> {
+    return requestBackend("GET", "/collect-shares/to-me", { params: query });
+  }
+
+  async cancelCollectShare(id: number): Promise<{ cancelled: boolean }> {
+    return requestBackend("PUT", `/collect-shares/${id}/cancel`);
   }
 
   async startCollection(batchId: number): Promise<CollectStartResult> {
@@ -248,7 +270,50 @@ export class CollectImpl extends CollectApi {
   }
 
   async updateCollectRecord(id: number, payload: CollectRecordUpdatePayload): Promise<CollectRecordPreview> {
-    return requestBackend("PUT", `/collect-records/${id}`, { data: payload });
+    let oldIsFavorite: boolean | undefined;
+    let batchId = 0;
+
+    if (payload.isFavorite !== undefined) {
+      try {
+        const oldRecord = await requestBackend<CollectRecordPreview>("GET", `/collect-records/${id}`);
+        oldIsFavorite = oldRecord.isFavorite;
+        batchId = oldRecord.collectBatchId;
+      } catch {
+        // ignore
+      }
+    }
+
+    const result = await requestBackend<CollectRecordPreview>("PUT", `/collect-records/${id}`, { data: payload });
+
+    if (payload.isFavorite !== undefined && batchId > 0 && oldIsFavorite !== payload.isFavorite) {
+      try {
+        await collectBatchStatsDb.ensureInit();
+        collectBatchStatsDb.increment(batchId, { favoriteCount: payload.isFavorite ? 1 : -1 });
+      } catch (error) {
+        log.warn("[collect.impl] failed to update local batch stats for favorite toggle", { batchId, error });
+      }
+    }
+
+    return result;
+  }
+
+  async getCollectBatchStats(batchId: number): Promise<CollectBatchStats | null> {
+    await collectBatchStatsDb.ensureInit();
+    return collectBatchStatsDb.get(batchId);
+  }
+
+  async syncCollectBatchStats(batchId: number): Promise<CollectBatchStats> {
+    await collectBatchStatsDb.ensureInit();
+    const result = await requestBackend<PageResult<CollectRecordPreview>>(
+      "GET",
+      `/collect-batches/${batchId}/records`,
+      { params: { pageIndex: 1, pageSize: 2000 } },
+    );
+    const totalCollectCount = result.total ?? 0;
+    const data = Array.isArray(result.data) ? result.data : [];
+    const totalFavoriteCount = data.filter((r) => r.isFavorite).length;
+    collectBatchStatsDb.upsert(batchId, totalCollectCount, totalFavoriteCount);
+    return collectBatchStatsDb.get(batchId)!;
   }
 
   async importCollectBatchZip(
@@ -337,6 +402,7 @@ export class CollectImpl extends CollectApi {
             batchId,
             appUserId: Number(batch.appUserId || 0),
             source: "file",
+            sourceType: driver.sourceType,
             sourceUrl: "",
             rawSourceData: rawData,
             currentBatch,
@@ -389,6 +455,9 @@ export class CollectImpl extends CollectApi {
         status: "completed",
         message: `导入完成，新增 ${importedCount} 条，更新 ${updatedCount} 条`,
       });
+
+      // 导入完成后同步本地统计数据（覆盖 saveCollectedToServer 逐条累计的偏差）
+      void this.syncCollectBatchStats(batchId).catch(() => undefined);
 
       return {
         importedCount,
