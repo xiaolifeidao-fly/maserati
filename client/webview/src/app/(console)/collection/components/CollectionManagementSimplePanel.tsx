@@ -339,7 +339,7 @@ export function CollectionManagementSimplePanel() {
       title: "操作",
       key: "actions",
       fixed: "right",
-      width: 300,
+      width: 360,
       render: (_, record) => {
         const batchShop = shopMap.get(record.shopId);
         const batchShopAuthorized = batchShop?.authorizationStatus === "AUTHORIZED";
@@ -466,7 +466,7 @@ export function CollectionManagementSimplePanel() {
             showSizeChanger: true,
             onChange: (page, pageSize) => void refresh({ pageIndex: page, pageSize }),
           }}
-          scroll={{ x: 1180 }}
+          scroll={{ x: 1240 }}
         />
       </section>
 

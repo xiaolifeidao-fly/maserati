@@ -299,6 +299,29 @@ export function getPublishWindow(): BrowserWindow | null {
   return publishBrowserWindow;
 }
 
+/**
+ * 获取验证码面板（rightBrowserView）session 中与淘宝相关的 cookie。
+ * 用于验证码通过后将 cookie 同步到 Playwright 浏览器 context。
+ */
+export async function getCaptchaBrowserCookies(): Promise<Electron.Cookie[]> {
+  if (!rightBrowserView || rightBrowserView.webContents.isDestroyed()) {
+    return [];
+  }
+  try {
+    const all = await rightBrowserView.webContents.session.cookies.get({});
+    return all.filter(c =>
+      c.domain && (
+        c.domain.includes('taobao.com') ||
+        c.domain.includes('tmall.com') ||
+        c.domain.includes('alipay.com') ||
+        c.domain.includes('alibaba.com')
+      )
+    );
+  } catch {
+    return [];
+  }
+}
+
 export function getPublishRelatedWebContents(): WebContents[] {
   const contents: WebContents[] = [];
   const add = (webContents?: WebContents | null) => {

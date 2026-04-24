@@ -44,6 +44,7 @@ export enum SourceType {
 }
 
 export type PublishStrategy = 'warehouse' | 'immediate';
+export type PublishBrandMode = 'none' | 'follow_source';
 
 export interface PublishPriceSettings {
   floatRatio: number;
@@ -53,6 +54,7 @@ export interface PublishPriceSettings {
 export interface PublishConfig {
   strategy: PublishStrategy;
   priceSettings?: PublishPriceSettings;
+  brandMode?: PublishBrandMode;
 }
 
 // ─── 服务端记录 ───────────────────────────────────────────────────────────────

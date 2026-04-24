@@ -52,16 +52,30 @@ function getDebugRawDataDir() {
   return path.join(app.getPath("userData"), "debug-rawdata");
 }
 
+function getCollectedProductDataDir() {
+  return path.join(app.getPath("userData"), "collected-products");
+}
+
+function normalizeProductFileNamePart(value: string) {
+  return String(value || "unknown").trim().replace(/[\\/:*?"<>|]/g, "_") || "unknown";
+}
+
+function getCollectedProductDataPath(
+  sourceProductId: string,
+  sourceType: CollectSourceType,
+  kind: "rawdata" | "standard",
+) {
+  const normalizedSourceType = normalizeProductFileNamePart(sourceType || "unknown");
+  const normalizedSourceProductId = normalizeProductFileNamePart(sourceProductId);
+  return path.join(getCollectedProductDataDir(), `${normalizedSourceType}_${normalizedSourceProductId}_${kind}.json`);
+}
+
 function getCollectedHtmlPath(sourceProductId: string, sourceType: CollectSourceType = workspaceState.sourceType || "unknown") {
   return path.join(getCollectedHtmlDir(), `${sourceType}_${sourceProductId}.html`);
 }
 
 function getCollectedStoreKey(sourceProductId: string, sourceType: CollectSourceType = workspaceState.sourceType || "unknown") {
   return `${getCollectionPlatformDriver(sourceType).storeKeyPrefix}_${sourceProductId}`;
-}
-
-function getCollectedRawDataStoreKey(sourceProductId: string, sourceType: CollectSourceType = workspaceState.sourceType || "unknown") {
-  return `${getCollectionPlatformDriver(sourceType).storeKeyPrefix}_rawdata_${sourceProductId}`;
 }
 
 function saveCollectedProductToStore(sourceProductId: string, data: CollectedProductData, sourceType: CollectSourceType) {
@@ -73,12 +87,14 @@ function saveCollectedProductToStore(sourceProductId: string, data: CollectedPro
   }
 }
 
-function saveRawDataToStore(sourceProductId: string, rawData: unknown, sourceType: CollectSourceType) {
+export function saveCollectedProductRawData(sourceProductId: string, rawData: unknown, sourceType: CollectSourceType) {
   try {
-    setGlobal(getCollectedRawDataStoreKey(sourceProductId, sourceType), rawData);
-    log.info("[collection workspace] saved rawData to store", { sourceProductId, sourceType });
+    const filePath = getCollectedProductDataPath(sourceProductId, sourceType, "rawdata");
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.writeFileSync(filePath, JSON.stringify(rawData), "utf8");
+    log.info("[collection workspace] saved rawData to file", { sourceProductId, sourceType, filePath });
   } catch (error) {
-    log.warn("[collection workspace] failed to save rawData to store", { sourceProductId, sourceType, error });
+    log.warn("[collection workspace] failed to save rawData to file", { sourceProductId, sourceType, error });
   }
 }
 
@@ -100,7 +116,7 @@ export function importCollectedRecordToStore(
     },
     sourceType,
   );
-  saveRawDataToStore(summary.sourceProductId, rawData, sourceType);
+  saveCollectedProductRawData(summary.sourceProductId, rawData, sourceType);
 }
 
 export function getCollectedProductStoreData(sourceProductId: string, sourceType: CollectSourceType = workspaceState.sourceType || "unknown"): CollectedProductData | null {
@@ -114,12 +130,17 @@ export function getCollectedProductStoreData(sourceProductId: string, sourceType
 }
 
 export function getCollectedProductRawData(sourceProductId: string, sourceType: CollectSourceType = workspaceState.sourceType || "unknown"): unknown | null {
+  const filePath = getCollectedProductDataPath(sourceProductId, sourceType, "rawdata");
   try {
-    return getGlobal(getCollectedRawDataStoreKey(sourceProductId, sourceType)) ?? null;
+    if (fs.existsSync(filePath)) {
+      const text = fs.readFileSync(filePath, "utf8");
+      return text.trim() ? JSON.parse(text) : null;
+    }
   } catch (error) {
-    log.warn("[collection workspace] failed to read rawData from store", { sourceProductId, sourceType, error });
-    return null;
+    log.warn("[collection workspace] failed to read rawData from file", { sourceProductId, sourceType, filePath, error });
   }
+
+  return null;
 }
 
 export async function getCollectedProductRawDataWithFallback(sourceProductId: string, sourceType: CollectSourceType = workspaceState.sourceType || "unknown"): Promise<unknown | null> {
@@ -139,7 +160,7 @@ export async function getCollectedProductRawDataWithFallback(sourceProductId: st
       },
     });
     if (result?.rawData !== undefined && result.rawData !== null) {
-      saveRawDataToStore(sourceProductId, result.rawData, sourceType);
+      saveCollectedProductRawData(sourceProductId, result.rawData, sourceType);
       return result.rawData;
     }
   } catch (error) {
@@ -151,10 +172,6 @@ export async function getCollectedProductRawDataWithFallback(sourceProductId: st
 
 export function hasCollectedHtml(sourceProductId: string, sourceType: CollectSourceType = workspaceState.sourceType || "unknown"): boolean {
   return fs.existsSync(getCollectedHtmlPath(sourceProductId, sourceType));
-}
-
-function getStandardProductStoreKey(sourceProductId: string, sourceType: CollectSourceType) {
-  return `standard_product_${sourceType}_${sourceProductId}`;
 }
 
 function isNavigationAbortedError(error: unknown) {
@@ -176,21 +193,28 @@ async function safeLoadWorkspaceUrl(webContents: Electron.WebContents, url: stri
 
 export function saveStandardProductToStore(sourceProductId: string, data: StandardProductData, sourceType: CollectSourceType): void {
   try {
-    setGlobal(getStandardProductStoreKey(sourceProductId, sourceType), data);
-    log.info("[collection workspace] saved standard product data to store", { sourceProductId, sourceType });
+    const filePath = getCollectedProductDataPath(sourceProductId, sourceType, "standard");
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.writeFileSync(filePath, JSON.stringify(data), "utf8");
+    log.info("[collection workspace] saved standard product data to file", { sourceProductId, sourceType, filePath });
   } catch (error) {
-    log.warn("[collection workspace] failed to save standard product data to store", { sourceProductId, sourceType, error });
+    log.warn("[collection workspace] failed to save standard product data to file", { sourceProductId, sourceType, error });
   }
 }
 
 export function getStandardProductFromStore(sourceProductId: string, sourceType: CollectSourceType): StandardProductData | null {
+  const filePath = getCollectedProductDataPath(sourceProductId, sourceType, "standard");
   try {
-    const data = getGlobal(getStandardProductStoreKey(sourceProductId, sourceType));
-    return data && typeof data === "object" ? (data as StandardProductData) : null;
+    if (fs.existsSync(filePath)) {
+      const text = fs.readFileSync(filePath, "utf8");
+      const data = text.trim() ? JSON.parse(text) : null;
+      return data && typeof data === "object" ? (data as StandardProductData) : null;
+    }
   } catch (error) {
-    log.warn("[collection workspace] failed to read standard product data from store", { sourceProductId, sourceType, error });
-    return null;
+    log.warn("[collection workspace] failed to read standard product data from file", { sourceProductId, sourceType, filePath, error });
   }
+
+  return null;
 }
 
 let workspaceWindow: BrowserWindow | null = null;
@@ -391,7 +415,7 @@ function isTbRawPayload(value: unknown): value is Record<string, unknown> {
 
 function mergeCollectedRawData(sourceProductId: string, nextRawData: unknown, sourceType: CollectSourceType) {
   if (!isTbRawPayload(nextRawData)) {
-    saveRawDataToStore(sourceProductId, nextRawData, sourceType);
+    saveCollectedProductRawData(sourceProductId, nextRawData, sourceType);
     return;
   }
 
@@ -402,7 +426,7 @@ function mergeCollectedRawData(sourceProductId: string, nextRawData: unknown, so
         ...nextRawData,
       }
     : nextRawData;
-  saveRawDataToStore(sourceProductId, merged, sourceType);
+  saveCollectedProductRawData(sourceProductId, merged, sourceType);
 }
 
 function writeDebugRawDataFile(sourceProductId: string, sourceType: CollectSourceType) {

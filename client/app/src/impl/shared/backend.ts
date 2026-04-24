@@ -1,7 +1,13 @@
+import http from "http";
+import https from "https";
 import axios from "axios";
 import { readAuthSession } from "./auth-session";
 import { readShopSignature } from "./shop-signature";
 import { publishError, summarizeForLog } from "@src/publish/utils/publish-logger";
+
+// 禁用 keep-alive 避免服务端关闭空闲连接后复用失效 socket 导致超时
+const httpAgent = new http.Agent({ keepAlive: false });
+const httpsAgent = new https.Agent({ keepAlive: false });
 
 interface BackendResponse<T> {
   success: boolean;
@@ -93,6 +99,8 @@ export async function requestBackend<T>(
       params: options?.params,
       headers: Object.keys(requestHeaders).length > 0 ? requestHeaders : undefined,
       timeout: 10000,
+      httpAgent,
+      httpsAgent,
     });
 
     const result = response.data;

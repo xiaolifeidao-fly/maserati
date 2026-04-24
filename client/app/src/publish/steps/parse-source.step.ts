@@ -90,7 +90,6 @@ export class ParseSourceStep extends PublishStep {
     return {
       status: StepStatus.SUCCESS,
       message: `源数据解析完成，标题: ${product.title}`,
-      outputData: { product },
     };
   }
 }

@@ -141,6 +141,11 @@ export class PublishApi extends ElectronApi {
   }
 
   @InvokeType(Protocols.INVOKE)
+  async openPublishLogDirectory(): Promise<{ opened: boolean; path?: string }> {
+    return this.invokeApi('openPublishLogDirectory');
+  }
+
+  @InvokeType(Protocols.INVOKE)
   async getProductDraftBySource(shopId: number, sourceProductId: string): Promise<PublishDraftRecord | null> {
     return this.invokeApi('getProductDraftBySource', shopId, sourceProductId);
   }

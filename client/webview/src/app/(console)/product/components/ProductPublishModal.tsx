@@ -7,6 +7,7 @@ import {
   CloseOutlined,
   DownloadOutlined,
   EditOutlined,
+  FolderOpenOutlined,
   PlayCircleOutlined,
   ReloadOutlined,
   StopOutlined,
@@ -18,6 +19,7 @@ import {
   Modal,
   Popover,
   Progress,
+  Radio,
   Select,
   Spin,
   Steps,
@@ -51,17 +53,20 @@ const PRICE_SETTINGS_KEY = "publish_price_settings_v1";
 const TAOBAO_ITEM_URL_PREFIX = "https://item.taobao.com/item.htm";
 
 type PublishStrategy = "warehouse" | "immediate";
+type PublishBrandMode = "none" | "follow_source";
 
 interface PublishSettings {
   floatRatio: number;
   floatAmount: number;
   strategy: PublishStrategy;
+  brandMode: PublishBrandMode;
 }
 
 const DEFAULT_PUBLISH_SETTINGS: PublishSettings = {
   floatRatio: 1.3,
   floatAmount: 0,
   strategy: "warehouse",
+  brandMode: "follow_source",
 };
 
 function formatShopLabel(shop?: Pick<ShopRecord, "id" | "nickname" | "remark" | "name" | "code" | "platform">) {
@@ -110,6 +115,7 @@ function loadPriceSettings(): PublishSettings {
           floatRatio: typeof parsed.floatRatio === "number" ? parsed.floatRatio : DEFAULT_PUBLISH_SETTINGS.floatRatio,
           floatAmount: typeof parsed.floatAmount === "number" ? parsed.floatAmount : DEFAULT_PUBLISH_SETTINGS.floatAmount,
           strategy: parsed.strategy === "immediate" ? "immediate" : DEFAULT_PUBLISH_SETTINGS.strategy,
+          brandMode: parsed.brandMode === "none" ? "none" : DEFAULT_PUBLISH_SETTINGS.brandMode,
         };
       }
     }
@@ -1075,7 +1081,7 @@ export function ProductPublishModal({
             sourceType: sourceType as Parameters<typeof publishApi.createPublishTask>[0]["sourceType"],
             sourceProductId: item.sourceProductId,
             sourceRecordId: item.sourceRecordId,
-            remark: `batch:${item.sourceBatchId};batchName:${encodeURIComponent(selectedBatch.name || `发布批次 #${item.sourceBatchId}`)};record:${item.sourceRecordId};targetShop:${item.shopId};entryScene:${initialEntryScene};publishStrategy:${priceSettings.strategy};priceRatio:${priceSettings.floatRatio};priceAmount:${priceSettings.floatAmount}`,
+            remark: `batch:${item.sourceBatchId};batchName:${encodeURIComponent(selectedBatch.name || `发布批次 #${item.sourceBatchId}`)};record:${item.sourceRecordId};targetShop:${item.shopId};entryScene:${initialEntryScene};publishStrategy:${priceSettings.strategy};priceRatio:${priceSettings.floatRatio};priceAmount:${priceSettings.floatAmount};brandMode:${priceSettings.brandMode}`,
           });
 
           if (publishRunIdRef.current !== runId || stopRequestedRef.current) {
@@ -1290,6 +1296,14 @@ export function ProductPublishModal({
       message.error(error instanceof Error ? error.message : "批量导出发布错误日志失败");
     } finally {
       setExportingBatchLogs(false);
+    }
+  };
+
+  const handleOpenPublishLogDirectory = async () => {
+    try {
+      await getPublishApi().openPublishLogDirectory();
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "打开日志目录失败");
     }
   };
 
@@ -1768,6 +1782,23 @@ export function ProductPublishModal({
                 />
               </div>
 
+              <div style={{ marginBottom: 24 }}>
+                <div className="publish-field-label">品牌配置</div>
+                <Radio.Group
+                  value={priceSettings.brandMode}
+                  onChange={(event) => {
+                    const nextValue = event.target.value as PublishBrandMode;
+                    setPriceSettings((current) => ({ ...current, brandMode: nextValue }));
+                  }}
+                  optionType="button"
+                  buttonStyle="solid"
+                  size="large"
+                >
+                  <Radio.Button value="none">无品牌</Radio.Button>
+                  <Radio.Button value="follow_source">跟随原商品</Radio.Button>
+                </Radio.Group>
+              </div>
+
               <div style={{ display: "flex", gap: 16, marginBottom: 24 }}>
                 <div style={{ flex: 1 }}>
                   <div className="publish-field-label">浮动比例</div>
@@ -1803,6 +1834,9 @@ export function ProductPublishModal({
                 <div style={{ fontSize: 12, color: "var(--manager-text-faint)", marginBottom: 8 }}>配置预览</div>
                 <div style={{ fontSize: 14, fontWeight: 600, color: "var(--manager-text)", marginBottom: 6 }}>
                   发布策略：{priceSettings.strategy === "immediate" ? "立即上架" : "放入仓库"}
+                </div>
+                <div style={{ fontSize: 14, fontWeight: 600, color: "var(--manager-text)", marginBottom: 6 }}>
+                  品牌配置：{priceSettings.brandMode === "none" ? "无品牌" : "跟随原商品"}
                 </div>
                 <div style={{ fontSize: 15, fontWeight: 600, color: "var(--manager-text)", marginBottom: 6 }}>
                   最终价格 = 原价 × {priceSettings.floatRatio} + {priceSettings.floatAmount} 元
@@ -1864,6 +1898,9 @@ export function ProductPublishModal({
                       </Descriptions.Item>
                       <Descriptions.Item label="发布策略">
                         {priceSettings.strategy === "immediate" ? "立即上架" : "放入仓库"}
+                      </Descriptions.Item>
+                      <Descriptions.Item label="品牌配置">
+                        {priceSettings.brandMode === "none" ? "无品牌" : "跟随原商品"}
                       </Descriptions.Item>
                       <Descriptions.Item label="采集总数">
                         {selectedBatchRepublishStatsLoading
@@ -2011,6 +2048,11 @@ export function ProductPublishModal({
                           disabled={runningPublishStats.failedCount === 0}
                           loading={exportingBatchLogs}
                           onClick={() => void handleExportBatchErrorLogs()}
+                        />
+                        <IconOnlyButton
+                          icon={<FolderOpenOutlined />}
+                          tooltip="打开发布日志目录"
+                          onClick={() => void handleOpenPublishLogDirectory()}
                         />
                         <IconOnlyButton danger icon={<StopOutlined />} tooltip="全部停止" onClick={() => void handleStopAllPublish()} loading={stoppingAll} />
                         <IconOnlyButton icon={<ReloadOutlined />} tooltip={selectedTargetShopNotAuthorized ? "店铺未授权，无法重新发布" : "重新发布"} disabled={selectedTargetShopNotAuthorized} onClick={handleRepublishAll} loading={stoppingAll} />

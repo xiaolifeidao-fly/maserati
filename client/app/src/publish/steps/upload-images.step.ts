@@ -5,7 +5,7 @@ import type { StepContext } from '../core/step-context';
 import { PublishError, StepSkippedError } from '../core/errors';
 import { requestBackend } from '@src/impl/shared/backend';
 import { TbEngine } from '@src/browser/tb.engine';
-import { Jimp, JimpMime } from 'jimp';
+import sharp from 'sharp';
 import crypto from 'crypto';
 import axios from 'axios';
 import fs from 'fs';
@@ -22,6 +22,24 @@ import type { TbUploadedImageMeta } from '../types/draft';
 import { parseTaobaoResponseText } from '../utils/tb-publish-api';
 import { setImageCropMeta } from '../core/publish-image-meta-store';
 
+function sanitizeSourceProductId(value: string): string {
+  const sanitized = value.replace(/[^a-zA-Z0-9_-]+/g, '_').replace(/^_+|_+$/g, '');
+  return sanitized || 'unknown';
+}
+
+function getPublishImagesDir(sourceProductId: string): string {
+  return path.join(app.getPath('userData'), 'publish-images', sanitizeSourceProductId(sourceProductId));
+}
+
+export function cleanupPublishImages(sourceProductId: string): void {
+  try {
+    const dir = getPublishImagesDir(sourceProductId);
+    if (fs.existsSync(dir)) {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  } catch { /* cleanup failure should not affect publish result */ }
+}
+
 const TB_UPLOAD_URL =
   'https://stream-upload.taobao.com/api/upload.api?_input_charset=utf-8&appkey=tu&folderId=0&picCompress=true&watermark=false';
 const DOWNLOAD_UA =
@@ -30,6 +48,9 @@ const MAX_RETRIES = 3;
 const RETRY_DELAY_MS = 2000;
 const DEFAULT_IMAGE_EXTENSION = '.jpg';
 const PNG_IMAGE_EXTENSION = '.png';
+const SQUARE_IMAGE_SIZE = 800;
+
+type ImageProcessProfile = 'square800' | 'detail';
 
 interface ProcessedImageResult {
   localPath: string;
@@ -52,13 +73,23 @@ interface UploadFailureResult {
   details?: Record<string, unknown>;
 }
 
+interface ServerCachedFile {
+  tbUrl: string;
+  width?: number;
+  height?: number;
+}
+
+interface ShopCacheIdentity {
+  unionBusinessId: string;
+}
+
 /**
  * UploadImagesStep — 上传商品图片（Step 2）
  *
  * 流程：
- *  1. 服务端幂等检查（bizUniqueId = SHA256(originalUrl)）
- *  2. 下载未缓存图片到本地临时目录，用 Jimp 做尺寸处理
- *     - 主图：缩放至 750×750 内（保持比例，不放大）
+ *  1. 服务端幂等检查（bizUniqueId = SHA256(profile:originalUrl)）
+ *  2. 下载未缓存图片到本地临时目录，用 sharp 做尺寸处理
+ *     - 主图/SKU 图：居中裁剪为 800×800
  *     - 详情图：限制最大 2000×1600（保持比例）
  *  3. 从 TbEngine 获取淘宝会话 Cookie
  *  4. 调用淘宝图片空间 stream-upload API 上传每张图片（3 次重试）
@@ -91,6 +122,10 @@ export class UploadImagesStep extends PublishStep {
     )];
 
     const allImages = [...new Set([...mainImages, ...detailImages, ...skuImages])];
+    const squareImageSet = new Set([...mainImages, ...skuImages]);
+    const imageProfileMap = new Map<string, ImageProcessProfile>(
+      allImages.map(url => [url, squareImageSet.has(url) ? 'square800' : 'detail']),
+    );
     const toUpload = allImages.filter(img => !existingMap[img]);
 
     if (toUpload.length === 0) {
@@ -144,15 +179,55 @@ export class UploadImagesStep extends PublishStep {
     }
 
     // ── 幂等检查：从服务端查询已上传过的图片 ─────────────────────────────────
-    const serverCached = await this.checkServerCache(toUpload);
-    Object.assign(imageUrlMap, serverCached);
+    const sourceProductIdForCache = product.sourceId?.trim() || ctx.get('sourceProductId')?.trim() || '';
+    const shopIdentity = await this.getShopCacheIdentity(ctx.shopId);
+    const serverCached = await this.checkServerCache(
+      toUpload,
+      sourceProductIdForCache,
+      ctx.shopId,
+      shopIdentity.unionBusinessId,
+      imageProfileMap,
+    );
+    const detailImageSet = new Set(detailImages);
+    const skuImageSetForCache = new Set(skuImages);
+    for (const [originalUrl, cached] of Object.entries(serverCached)) {
+      imageUrlMap[originalUrl] = cached.tbUrl;
+      if (cached.width && cached.height) {
+        setImageCropMeta(ctx.taskId, cached.tbUrl, { width: cached.width, height: cached.height });
+      }
+      // 从服务端缓存中恢复详情图和 SKU 图的宽高元数据
+      if (!detailImageMetaMap.has(originalUrl) && (cached.width || cached.height)) {
+        if (detailImageSet.has(originalUrl)) {
+          const meta: TbUploadedImageMeta = {
+            originalUrl,
+            url: cached.tbUrl,
+            width: cached.width,
+            height: cached.height,
+          };
+          detailImageMetaMap.set(originalUrl, meta);
+          detailImageMetaMap.set(cached.tbUrl, meta);
+        } else if (skuImageSetForCache.has(originalUrl)) {
+          const meta: TbUploadedImageMeta = {
+            originalUrl,
+            url: cached.tbUrl,
+            width: cached.width,
+            height: cached.height,
+          };
+          skuImageMetaMap.set(originalUrl, meta);
+          skuImageMetaMap.set(cached.tbUrl, meta);
+        }
+      }
+    }
     const toActuallyUpload = toUpload.filter(img => !imageUrlMap[img]);
 
     if (toActuallyUpload.length > 0) {
-      // ── 准备临时目录 ─────────────────────────────────────────────────────────
-      const tempDir = path.join(app.getPath('userData'), 'publish-temp-images');
-      if (!fs.existsSync(tempDir)) {
-        fs.mkdirSync(tempDir, { recursive: true });
+      // ── 准备图片缓存目录（以原商品ID为子目录，跨任务复用） ───────────────────
+      const sourceProductId = sanitizeSourceProductId(
+        product.sourceId?.trim() || ctx.get('sourceProductId')?.trim() || 'unknown',
+      );
+      const imageDir = getPublishImagesDir(sourceProductId);
+      if (!fs.existsSync(imageDir)) {
+        fs.mkdirSync(imageDir, { recursive: true });
       }
 
       // ── 获取淘宝会话 Cookie ──────────────────────────────────────────────────
@@ -164,28 +239,15 @@ export class UploadImagesStep extends PublishStep {
 
       const mainImageSet = new Set(mainImages);
       const skuImageSet = new Set(skuImages);
-      const batchTimestamp = Date.now();
-      let fileSequence = 0;
-      const sourceProductId = this.sanitizeFileNamePart(
-        product.sourceId?.trim() || ctx.get('sourceProductId')?.trim() || 'unknown',
-      );
 
-      // ── 逐张下载 → 处理 → 上传 ──────────────────────────────────────────────
+      // ── 逐张下载（命中本地缓存则跳过下载） → 上传 ───────────────────────────
       for (const originalUrl of toActuallyUpload) {
         const isMain = mainImageSet.has(originalUrl);
-        const imageType = this.resolveImageType(originalUrl, mainImageSet, skuImageSet);
+        const isSku = skuImageSet.has(originalUrl);
+        const profile = imageProfileMap.get(originalUrl) ?? (isMain || isSku ? 'square800' : 'detail');
         let processedImage: ProcessedImageResult | null = null;
         try {
-          fileSequence += 1;
-          processedImage = await this.downloadAndProcess(
-            originalUrl,
-            isMain,
-            tempDir,
-            sourceProductId,
-            batchTimestamp,
-            fileSequence,
-            imageType,
-          );
+          processedImage = await this.downloadAndProcess(originalUrl, profile, imageDir);
           if (!processedImage) {
             continue;
           }
@@ -198,20 +260,30 @@ export class UploadImagesStep extends PublishStep {
           );
           if ('url' in uploadedImage) {
             imageUrlMap[originalUrl] = uploadedImage.url;
-            await this.storeToServerCache(product.sourceId ?? '', originalUrl, uploadedImage.url);
-            const cropWidth = processedImage.width;
-            const cropHeight = processedImage.height;
-            setImageCropMeta(ctx.taskId, uploadedImage.url, { width: cropWidth, height: cropHeight });
+            // 使用 sharp 处理后的尺寸，不采用淘宝返回值
+            const finalWidth = processedImage.width;
+            const finalHeight = processedImage.height;
+            await this.storeToServerCache(
+              sourceProductIdForCache,
+              originalUrl,
+              uploadedImage.url,
+              ctx.shopId,
+              shopIdentity.unionBusinessId,
+              profile,
+              finalWidth,
+              finalHeight,
+            );
+            setImageCropMeta(ctx.taskId, uploadedImage.url, { width: finalWidth, height: finalHeight });
             if (!isMain) {
               const meta: TbUploadedImageMeta = {
                 originalUrl,
                 url: uploadedImage.url,
-                width: uploadedImage.width ?? cropWidth,
-                height: uploadedImage.height ?? cropHeight,
+                width: finalWidth,
+                height: finalHeight,
                 size: uploadedImage.size ?? processedImage.size,
                 imageId: uploadedImage.imageId,
               };
-              if (skuImageSet.has(originalUrl)) {
+              if (isSku) {
                 skuImageMetaMap.set(originalUrl, meta);
                 skuImageMetaMap.set(uploadedImage.url, meta);
               } else {
@@ -234,11 +306,8 @@ export class UploadImagesStep extends PublishStep {
             isMain,
             error: summarizeForLog(error),
           });
-        } finally {
-          if (processedImage?.localPath) {
-            try { fs.unlinkSync(processedImage.localPath); } catch { /* temp file cleanup, ignore */ }
-          }
         }
+        // 注意：不在此处删除本地缓存文件，等待发布成功后统一清理
       }
     }
 
@@ -297,18 +366,18 @@ export class UploadImagesStep extends PublishStep {
 
   /**
    * 通过 TbEngine 还原已保存的淘宝浏览器会话，提取 Cookie 字符串。
-   * 只打开一个空白页来触发持久化上下文加载，不导航任何页面。
+   * 直接复用已缓存的 BrowserContext，无需创建 Page，避免额外的 Tab 开销。
    */
   private async getTbCookies(taskId: number, shopId: number): Promise<string | null> {
     const engine = new TbEngine(String(shopId), true);
     engine.bindPublishTask(taskId);
     try {
-      const page = await engine.init();
-      if (!page) {
-        return null;
-      }
-
-      const context = engine.getContext();
+      const context = await Promise.race([
+        engine.getContextOnly(),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('getTbCookies: getContextOnly() timed out after 60s')), 60000),
+        ),
+      ]);
       if (!context) {
         return null;
       }
@@ -328,26 +397,41 @@ export class UploadImagesStep extends PublishStep {
       return cookies.map(c => `${c.name}=${c.value}`).join('; ');
     } catch {
       return null;
-    } finally {
-      await engine.closePage().catch(() => null);
     }
   }
 
   // ─── 下载 + 图片处理 ──────────────────────────────────────────────────────────
 
   /**
-   * 下载远程图片并用 Jimp 处理尺寸，写入临时文件后返回本地路径。
-   * 主图缩放至 750×750 内（保持比例），详情图限制 2000×1600（保持比例）。
+   * 下载远程图片并用 sharp 处理尺寸，写入缓存目录后返回本地路径。
+   * 若本地已有缓存文件则直接复用，跳过下载和处理。
+   * 主图/SKU 图居中裁剪为 800×800，详情图限制 2000×1600（保持比例）。
    */
   private async downloadAndProcess(
     url: string,
-    isMain: boolean,
-    tempDir: string,
-    sourceProductId: string,
-    timestamp: number,
-    sequence: number,
-    imageType: 'main' | 'detail' | 'sku',
+    profile: ImageProcessProfile,
+    imageDir: string,
   ): Promise<ProcessedImageResult | null> {
+    // 以 URL hash + 处理档位构成确定性文件名，相同 SKU 图 URL 每次映射到同一文件
+    const urlHash = this.hashUrl(url);
+    const stem = `${urlHash}_${profile}`;
+
+    // 命中本地缓存则直接返回，跳过下载
+    for (const ext of [DEFAULT_IMAGE_EXTENSION, PNG_IMAGE_EXTENSION]) {
+      const cachedPath = path.join(imageDir, stem + ext);
+      if (fs.existsSync(cachedPath)) {
+        try {
+          const stats = fs.statSync(cachedPath);
+          const meta = await sharp(cachedPath).metadata();
+          if (meta.width && meta.height) {
+            return { localPath: cachedPath, width: meta.width, height: meta.height, size: stats.size };
+          }
+        } catch {
+          // 缓存文件损坏，继续下载
+        }
+      }
+    }
+
     let lastError: unknown;
     for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
       try {
@@ -359,12 +443,11 @@ export class UploadImagesStep extends PublishStep {
 
         const buffer = Buffer.from(response.data);
         const extension = this.resolveImageExtension(url, response.headers['content-type']);
-        const fileName = `${sourceProductId}_${timestamp}_${sequence}_${imageType}${extension}`;
-        const tempPath = path.join(tempDir, fileName);
-        const processedImage = await this.processImage(buffer, isMain, extension);
-        fs.writeFileSync(tempPath, processedImage.buffer);
+        const localPath = path.join(imageDir, stem + extension);
+        const processedImage = await this.processImage(buffer, profile, extension);
+        fs.writeFileSync(localPath, processedImage.buffer);
         return {
-          localPath: tempPath,
+          localPath,
           width: processedImage.width,
           height: processedImage.height,
           size: processedImage.buffer.length,
@@ -380,31 +463,33 @@ export class UploadImagesStep extends PublishStep {
   }
 
   /**
-   * 用 Jimp 对图片缩放：
-   *  - 主图：scaleToFit 750×750（保持比例，不超过 750px）
-   *  - 详情图：scaleToFit 2000×1600（保持比例，超出才缩小）
+   * 用 sharp 对图片缩放（native libvips，不阻塞主线程）：
+   *  - 主图/SKU 图：fit cover 800×800（居中裁剪，保证宽高一致）
+   *  - 详情图：fit inside 2000×1600（保持比例，超出才缩小）
    */
   private async processImage(
     buffer: Buffer,
-    isMain: boolean,
+    profile: ImageProcessProfile,
     extension: string,
   ): Promise<{ buffer: Buffer; width: number; height: number }> {
-    const image = await Jimp.read(buffer);
-    const { width, height } = image.bitmap;
-    const [maxW, maxH] = isMain ? [750, 750] : [2000, 1600];
+    const isPng = extension === PNG_IMAGE_EXTENSION;
 
-    if (width > maxW || height > maxH) {
-      image.scaleToFit({ w: maxW, h: maxH });
-    }
+    const instance = profile === 'square800'
+      ? sharp(buffer).resize(SQUARE_IMAGE_SIZE, SQUARE_IMAGE_SIZE, {
+        fit: 'cover',
+        position: 'centre',
+      })
+      : sharp(buffer).resize(2000, 1600, {
+        fit: 'inside',
+        withoutEnlargement: true,
+      });
 
-    const output = extension === PNG_IMAGE_EXTENSION
-      ? await image.getBuffer(JimpMime.png)
-      : await image.getBuffer(JimpMime.jpeg, { quality: 90 });
-    return {
-      buffer: output,
-      width: image.bitmap.width,
-      height: image.bitmap.height,
-    };
+    const { data, info } = await (isPng
+      ? instance.png()
+      : instance.jpeg({ quality: 90 })
+    ).toBuffer({ resolveWithObject: true });
+
+    return { buffer: data, width: info.width, height: info.height };
   }
 
   // ─── 上传到淘宝图片空间 ───────────────────────────────────────────────────────
@@ -544,24 +629,71 @@ export class UploadImagesStep extends PublishStep {
 
   // ─── 服务端幂等缓存 ───────────────────────────────────────────────────────────
 
-  private async checkServerCache(urls: string[]): Promise<Record<string, string>> {
-    const result: Record<string, string> = {};
-    await Promise.all(
-      urls.map(async (url) => {
-        try {
-          const hash = this.hashUrl(url);
-          const file = await requestBackend<{ bizUniqueId: string; filePath: string }>(
-            'GET',
-            `/product-files/biz/${hash}`,
-          );
-          if (file?.filePath) {
-            result[url] = file.filePath;
-          }
-        } catch {
-          // 未命中，忽略
+  private async checkServerCache(
+    urls: string[],
+    sourceProductId: string,
+    shopId: number,
+    unionBusinessId: string,
+    imageProfileMap: ReadonlyMap<string, ImageProcessProfile>,
+  ): Promise<Record<string, ServerCachedFile>> {
+    const result: Record<string, ServerCachedFile> = {};
+    const originalUrlSet = new Set(urls.map(url => url.trim()).filter(Boolean));
+    if (originalUrlSet.size === 0 || !sourceProductId.trim() || !shopId) {
+      return result;
+    }
+
+    try {
+      const files = await requestBackend<Array<{
+        originalUrl: string;
+        tbUrl: string;
+        width?: number;
+        height?: number;
+      }>>('POST', '/product-files/image-cache/match', {
+        data: {
+          sourceProductId,
+          shopId,
+          unionBusinessId,
+        },
+      });
+
+      for (const file of files ?? []) {
+        const originalUrl = file.originalUrl?.trim();
+        const tbUrl = file.tbUrl?.trim();
+        if (!originalUrl || !tbUrl || !originalUrlSet.has(originalUrl)) {
+          continue;
         }
-      }),
-    );
+        result[originalUrl] = {
+          tbUrl,
+          width: file.width && file.width > 0 ? file.width : undefined,
+          height: file.height && file.height > 0 ? file.height : undefined,
+        };
+      }
+    } catch {
+      await Promise.all(
+        [...originalUrlSet].map(async (url) => {
+          try {
+            const hash = this.buildCacheKey(url, imageProfileMap.get(url) ?? 'detail');
+            const params = new URLSearchParams({
+              sourceProductId,
+              shopId: String(shopId),
+            });
+            const file = await requestBackend<{ bizUniqueId: string; filePath: string; width?: number; height?: number }>(
+              'GET',
+              `/product-files/biz/${hash}?${params.toString()}`,
+            );
+            if (file?.filePath) {
+              result[url] = {
+                tbUrl: file.filePath,
+                width: file.width && file.width > 0 ? file.width : undefined,
+                height: file.height && file.height > 0 ? file.height : undefined,
+              };
+            }
+          } catch {
+            // 未命中，忽略
+          }
+        }),
+      );
+    }
     return result;
   }
 
@@ -569,15 +701,24 @@ export class UploadImagesStep extends PublishStep {
     sourceProductId: string,
     originalUrl: string,
     tbUrl: string,
+    shopId: number,
+    unionBusinessId: string,
+    profile: ImageProcessProfile,
+    width?: number,
+    height?: number,
   ): Promise<void> {
     try {
-      const hash = this.hashUrl(originalUrl);
+      const hash = this.buildCacheKey(originalUrl, profile);
       await requestBackend('POST', '/product-files', {
         data: {
           bizUniqueId: hash,
           fileName: originalUrl,
           filePath: tbUrl,
+          width: width ?? 0,
+          height: height ?? 0,
           sourceProductId,
+          shopId,
+          unionBusinessId,
         },
       });
     } catch {
@@ -585,22 +726,23 @@ export class UploadImagesStep extends PublishStep {
     }
   }
 
+  private async getShopCacheIdentity(shopId: number): Promise<ShopCacheIdentity> {
+    try {
+      const shop = await requestBackend<{ businessId?: string }>('GET', `/shops/${shopId}`);
+      return {
+        unionBusinessId: shop?.businessId?.trim() ?? '',
+      };
+    } catch {
+      return { unionBusinessId: '' };
+    }
+  }
+
   private hashUrl(url: string): string {
     return crypto.createHash('sha256').update(url).digest('hex');
   }
 
-  private resolveImageType(
-    originalUrl: string,
-    mainImageSet: Set<string>,
-    skuImageSet: Set<string>,
-  ): 'main' | 'detail' | 'sku' {
-    if (mainImageSet.has(originalUrl)) {
-      return 'main';
-    }
-    if (skuImageSet.has(originalUrl)) {
-      return 'sku';
-    }
-    return 'detail';
+  private buildCacheKey(url: string, profile: ImageProcessProfile): string {
+    return this.hashUrl(`${profile}:${url}`);
   }
 
   private resolveImageExtension(url: string, contentType?: string): string {
@@ -657,8 +799,4 @@ export class UploadImagesStep extends PublishStep {
     }
   }
 
-  private sanitizeFileNamePart(value: string): string {
-    const sanitized = value.replace(/[^a-zA-Z0-9_-]+/g, '_').replace(/^_+|_+$/g, '');
-    return sanitized || 'unknown';
-  }
 }

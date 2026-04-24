@@ -60,6 +60,7 @@ func (h *ProductHandler) RegisterHandler(engine *gin.RouterGroup) {
 	engine.DELETE("/product-drafts/:id", h.deleteProductDraft)
 
 	engine.GET("/product-files", h.listProductFiles)
+	engine.POST("/product-files/image-cache/match", h.matchProductFileImageCache)
 	engine.GET("/product-files/:id", h.getProductFileByID)
 	engine.GET("/product-files/biz/:bizUniqueId", h.getProductFileByBizUniqueID)
 	engine.POST("/product-files", h.createProductFile)
@@ -343,7 +344,15 @@ func (h *ProductHandler) getProductFileByBizUniqueID(c *gin.Context) {
 		commonRouter.ToError(c, "bizUniqueId 参数错误")
 		return
 	}
-	r, e := h.productFileService.GetProductFileByBizUniqueID(bizUniqueID)
+	sourceProductID := c.Query("sourceProductId")
+	shopIDStr := c.Query("shopId")
+	var shopID uint64
+	if shopIDStr != "" {
+		if v, err := strconv.ParseUint(shopIDStr, 10, 64); err == nil {
+			shopID = v
+		}
+	}
+	r, e := h.productFileService.GetProductFileByBizUniqueKey(bizUniqueID, sourceProductID, shopID)
 	if e == gorm.ErrRecordNotFound {
 		commonRouter.ToError(c, "product file not found")
 		return
@@ -358,6 +367,16 @@ func (h *ProductHandler) listProductFiles(c *gin.Context) {
 		return
 	}
 	r, e := h.productFileService.ListProductFiles(q)
+	commonRouter.ToJson(c, r, e)
+}
+
+func (h *ProductHandler) matchProductFileImageCache(c *gin.Context) {
+	var req productDTO.ProductFileImageCacheRequestDTO
+	if c.ShouldBindJSON(&req) != nil {
+		commonRouter.ToError(c, "参数错误")
+		return
+	}
+	r, e := h.productFileService.MatchUploadedImageFiles(&req)
 	commonRouter.ToJson(c, r, e)
 }
 

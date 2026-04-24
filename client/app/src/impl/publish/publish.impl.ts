@@ -7,7 +7,8 @@ import { TbEngine } from '@src/browser/tb.engine';
 import { requestBackend } from '../shared/backend';
 import { PublishRunner } from '@src/publish/core/publish-runner';
 import { HttpPublishPersister } from '@src/publish/core/http-publish-persister';
-import { showCaptchaPanel } from '@src/publish/publish-window';
+import { showCaptchaPanel, getCaptchaBrowserCookies } from '@src/publish/publish-window';
+import { injectCookiesIntoTbContext } from '@src/browser/engine';
 import type {
   PublishCenterState,
   PublishTaskRecord,
@@ -26,6 +27,7 @@ import {
   clearPublishProductLogs,
   exportPublishBatchErrorLogs,
   exportPublishProductLog,
+  openPublishLogDirectory,
   publishError,
   publishInfo,
   registerPublishTaskLogFile,
@@ -44,6 +46,12 @@ import {
   persistPublishStepPayload,
 } from '@src/publish/runtime/publish-step-store';
 import { getPublishRelatedWebContents } from '@src/publish/publish-window';
+
+function mapElectronSameSite(sameSite?: string): 'Strict' | 'Lax' | 'None' {
+  if (sameSite === 'strict') return 'Strict';
+  if (sameSite === 'lax') return 'Lax';
+  return 'None';
+}
 
 /**
  * PublishImpl — 商品发布 Electron 主进程实现
@@ -183,7 +191,24 @@ export class PublishImpl extends PublishApi {
       // 检测到验证码时，自动在发布窗口右侧展示验证码；验证通过后自动继续发布
       if (event.captchaUrl) {
         showCaptchaPanel(event.captchaUrl, () => {
-          void this.resumePublish(taskId);
+          void getCaptchaBrowserCookies()
+            .then(electronCookies => {
+              const playwrightCookies = electronCookies.map(c => ({
+                name: c.name,
+                value: c.value,
+                domain: c.domain ?? '',
+                path: c.path ?? '/',
+                expires: c.expirationDate,
+                httpOnly: c.httpOnly ?? false,
+                secure: c.secure ?? false,
+                sameSite: mapElectronSameSite(c.sameSite),
+              }));
+              return injectCookiesIntoTbContext(String(task.shopId), playwrightCookies);
+            })
+            .catch(err => {
+              publishInfo(`[task:${taskId}] captcha cookie sync failed, resuming anyway`, { error: String(err) });
+            })
+            .then(() => this.resumePublish(taskId));
         });
       }
     });
@@ -320,6 +345,10 @@ export class PublishImpl extends PublishApi {
     } while ((pageIndex - 1) * pageSize < total);
 
     return exportPublishBatchErrorLogs(batchId, failedSourceProductIds);
+  }
+
+  async openPublishLogDirectory(): Promise<{ opened: boolean; path?: string }> {
+    return openPublishLogDirectory();
   }
 
   async getProductDraftBySource(shopId: number, sourceProductId: string): Promise<PublishDraftRecord | null> {

@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { app, dialog } from 'electron';
+import { app, dialog, shell } from 'electron';
 import AdmZip from 'adm-zip';
 
 const KEEP_DAYS = 7;
@@ -147,6 +147,19 @@ class PublishLogWriter {
       filePath,
       count,
       missingCount: missingProductIds.length,
+    };
+  }
+
+  async openLogDirectory(): Promise<{ opened: boolean; path?: string }> {
+    this.ensureInitialized();
+    fs.mkdirSync(this.baseDir, { recursive: true });
+    const result = await shell.openPath(this.baseDir);
+    if (result) {
+      throw new Error(result);
+    }
+    return {
+      opened: true,
+      path: this.baseDir,
     };
   }
 
@@ -311,6 +324,10 @@ export function exportPublishBatchErrorLogs(
   sourceProductIds: Array<string | null | undefined>,
 ): Promise<PublishLogExportResult> {
   return writer.exportBatchErrorLogs(batchId, sourceProductIds);
+}
+
+export function openPublishLogDirectory(): Promise<{ opened: boolean; path?: string }> {
+  return writer.openLogDirectory();
 }
 
 export function publishInfo(message: string, meta?: unknown): void {

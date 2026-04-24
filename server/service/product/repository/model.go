@@ -38,11 +38,15 @@ func (p *ProductDraft) TableName() string { return "product_draft" }
 
 type ProductFile struct {
 	db.BaseEntity
-	BizUniqueID     string `gorm:"column:biz_unique_id;type:varchar(128);index:idx_biz_unique_id" description:"业务唯一ID(原始URL的SHA256 hash)"`
+	BizUniqueID     string `gorm:"column:biz_unique_id;type:varchar(128);index:idx_pf_biz_src_shop" description:"业务唯一ID(原始URL的hashCode)"`
 	FileName        string `gorm:"column:file_name;type:text" description:"原始文件URL/名称"`
 	FilePath        string `gorm:"column:file_path;type:text" description:"云端文件路径/URL"`
+	Width           int    `gorm:"column:width;type:int;default:0" description:"图片宽度(px，处理后≤750)"`
+	Height          int    `gorm:"column:height;type:int;default:0" description:"图片高度(px，处理后≤750)"`
 	Sort            int    `gorm:"column:sort;type:int;default:0" description:"排序"`
-	SourceProductID string `gorm:"column:source_product_id;type:varchar(128);index:idx_source_product_id" description:"源商品ID"`
+	SourceProductID string `gorm:"column:source_product_id;type:varchar(128);index:idx_pf_biz_src_shop" description:"源商品ID"`
+	ShopID          uint64 `gorm:"column:shop_id;type:bigint unsigned;index:idx_pf_biz_src_shop" description:"店铺ID"`
+	UnionBusinessID string `gorm:"column:union_business_id;type:varchar(100);index:idx_pf_union_src_shop" description:"店铺业务ID"`
 	ProductID       uint64 `gorm:"column:product_id;type:bigint unsigned;index:idx_product_id" description:"关联商品ID"`
 }
 

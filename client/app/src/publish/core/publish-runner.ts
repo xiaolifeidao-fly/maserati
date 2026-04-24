@@ -25,17 +25,19 @@ import {
   summarizeForLog,
   unregisterPublishTaskLogFile,
 } from '../utils/publish-logger';
-import { getCollectedProductRawData } from '@src/collect/workspace.manager';
+import { getCollectedProductRawData, saveCollectedProductRawData } from '@src/collect/workspace.manager';
 import { requestBackend } from '@src/impl/shared/backend';
 import type { CollectSourceType } from '@eleapi/collect/collect.platform';
 import type { RawSourceData } from '../types/source-data';
 import { clearPublishStepPayloads } from '../runtime/publish-step-store';
 import { clearImageCropMeta } from './publish-image-meta-store';
-import type { PublishConfig, PublishPriceSettings, PublishStrategy } from '../types/publish-task';
+import { cleanupPublishImages } from '../steps/upload-images.step';
+import type { PublishBrandMode, PublishConfig, PublishPriceSettings, PublishStrategy } from '../types/publish-task';
 
 function parseTaskPublishConfig(remark?: string): PublishConfig {
   const priceSettings: PublishPriceSettings = { floatRatio: 1.3, floatAmount: 0 };
   let strategy: PublishStrategy = 'warehouse';
+  let brandMode: PublishBrandMode = 'follow_source';
 
   for (const part of String(remark ?? '').split(';')) {
     const [rawKey, ...rest] = part.split(':');
@@ -61,12 +63,17 @@ function parseTaskPublishConfig(remark?: string): PublishConfig {
       if (Number.isFinite(numeric)) {
         priceSettings.floatAmount = numeric;
       }
+      continue;
+    }
+    if (key === 'brandMode' && (value === 'none' || value === 'follow_source')) {
+      brandMode = value;
     }
   }
 
   return {
     strategy,
     priceSettings,
+    brandMode,
   };
 }
 
@@ -165,13 +172,21 @@ export class PublishRunner {
     await this.restoreContext(ctx, task);
 
     // 确定断点续跑位置
-    const fromStep = task.currentStepCode ?? undefined;
+    let fromStep = task.currentStepCode ?? undefined;
 
     const chain = this.buildChain();
     try {
       // 预检：加载原始数据和商品 ID（放在 try 内，确保失败时 catch 能将 DB 状态设为 FAILED）
       await this.ensureRawSourceLoaded(ctx, task);
       await this.ensureProductIdLoaded(ctx, task);
+      if (fromStep && fromStep !== StepCode.PARSE_SOURCE && !ctx.get('product')) {
+        publishInfo(`[task:${taskId}] product context missing, resume from parse source`, {
+          taskId,
+          requestedStepCode: fromStep,
+          sourceProductId: task.sourceProductId,
+        });
+        fromStep = StepCode.PARSE_SOURCE;
+      }
 
       // 标记任务为运行中（预检通过后再标记，失败时由 catch 设为 FAILED）
       await this.persister.updateTask(taskId, {
@@ -193,6 +208,11 @@ export class PublishRunner {
         tbDraftId: ctx.get('draftContext')?.draftId,
       });
       clearPublishStepPayloads(taskId);
+      // 发布成功后清理本地缓存图片（失败时保留，供下次重试复用）
+      const successSourceProductId = String(this.getSourceProductId(ctx) ?? task.sourceProductId ?? '').trim();
+      if (successSourceProductId) {
+        cleanupPublishImages(successSourceProductId);
+      }
       publishInfo(`[task:${taskId}] publish runner completed`, {
         publishedItemId: ctx.get('publishedItemId'),
       });
@@ -370,6 +390,7 @@ export class PublishRunner {
 
     const serverRawSource = await fetchRawSourceFromServer(task.sourceRecordId, sourceProductId);
     if (isRawSourceData(serverRawSource)) {
+      saveCollectedProductRawData(sourceProductId, serverRawSource, collectSourceType);
       ctx.set('rawSource', serverRawSource);
       return;
     }

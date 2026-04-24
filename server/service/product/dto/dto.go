@@ -127,8 +127,12 @@ type ProductFileDTO struct {
 	BizUniqueID     string `json:"bizUniqueId"`
 	FileName        string `json:"fileName"`
 	FilePath        string `json:"filePath"`
+	Width           int    `json:"width"`
+	Height          int    `json:"height"`
 	Sort            int    `json:"sort"`
 	SourceProductID string `json:"sourceProductId"`
+	ShopID          uint64 `json:"shopId"`
+	UnionBusinessID string `json:"unionBusinessId"`
 	ProductID       uint64 `json:"productId"`
 }
 
@@ -136,8 +140,12 @@ type CreateProductFileDTO struct {
 	BizUniqueID     string `json:"bizUniqueId"`
 	FileName        string `json:"fileName"`
 	FilePath        string `json:"filePath"`
+	Width           int    `json:"width"`
+	Height          int    `json:"height"`
 	Sort            int    `json:"sort"`
 	SourceProductID string `json:"sourceProductId"`
+	ShopID          uint64 `json:"shopId"`
+	UnionBusinessID string `json:"unionBusinessId"`
 	ProductID       uint64 `json:"productId"`
 }
 
@@ -145,8 +153,12 @@ type UpdateProductFileDTO struct {
 	BizUniqueID     *string `json:"bizUniqueId,omitempty"`
 	FileName        *string `json:"fileName,omitempty"`
 	FilePath        *string `json:"filePath,omitempty"`
+	Width           *int    `json:"width,omitempty"`
+	Height          *int    `json:"height,omitempty"`
 	Sort            *int    `json:"sort,omitempty"`
 	SourceProductID *string `json:"sourceProductId,omitempty"`
+	ShopID          *uint64 `json:"shopId,omitempty"`
+	UnionBusinessID *string `json:"unionBusinessId,omitempty"`
 	ProductID       *uint64 `json:"productId,omitempty"`
 }
 
@@ -156,5 +168,20 @@ type ProductFileQueryDTO struct {
 	PageSize        int    `form:"pageSize"`
 	ProductID       uint64 `form:"productId"`
 	SourceProductID string `form:"sourceProductId"`
+	ShopID          uint64 `form:"shopId"`
+	UnionBusinessID string `form:"unionBusinessId"`
 	BizUniqueID     string `form:"bizUniqueId"`
+}
+
+type ProductFileImageCacheRequestDTO struct {
+	SourceProductID string `json:"sourceProductId"`
+	ShopID          uint64 `json:"shopId"`
+	UnionBusinessID string `json:"unionBusinessId"`
+}
+
+type ProductFileImageCacheDTO struct {
+	OriginalUrl string `json:"originalUrl"`
+	TbUrl       string `json:"tbUrl"`
+	Width       int    `json:"width"`
+	Height      int    `json:"height"`
 }

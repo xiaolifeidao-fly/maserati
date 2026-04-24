@@ -40,6 +40,10 @@
       }
     ],
     "asar": true,
+    "asarUnpack": [
+      "**/node_modules/sharp/**",
+      "**/node_modules/@img/**"
+    ],
     "directories": {
       "output": "package"
     },
@@ -127,7 +131,7 @@
     "graceful-fs": "^4.2.11",
     "hono": "^4.6.13",
     "https-proxy-agent": "^7.0.6",
-    "jimp": "^1.6.0",
+    "sharp": "^0.33.5",
     "js-yaml": "^4.1.0",
     "jsonfile": "^6.1.0",
     "lazy-val": "^1.0.5",

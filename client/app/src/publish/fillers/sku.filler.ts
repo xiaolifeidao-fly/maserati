@@ -283,7 +283,8 @@ function buildSkuPicture(
   const originalUrl = imgUrl?.trim();
   if (!originalUrl) return [];
 
-  const tbUrl = skuImageUrlMap[originalUrl] ?? originalUrl;
+  const tbUrl = skuImageUrlMap[originalUrl];
+  if (!tbUrl) return [];
   return [{ url: tbUrl }];
 }
 
@@ -397,7 +398,7 @@ function resolveSkuImageUrl(
   if (!originalUrl) {
     return undefined;
   }
-  return skuImageUrlMap[originalUrl] ?? originalUrl;
+  return skuImageUrlMap[originalUrl];
 }
 
 function dimensionsRepresentFlattenedCombo(dimension: SkuDimension): boolean {

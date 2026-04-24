@@ -26,6 +26,53 @@ const browserMap = new Map<string, Browser>();
 
 const contextMap = new Map<string, BrowserContext>();
 
+/**
+ * 将 Electron BrowserView session 的 cookie 注入到指定店铺的 Playwright context。
+ * 验证码在 Electron BrowserView 解完后调用，确保新 cookie 同步到 Playwright。
+ */
+export async function injectCookiesIntoTbContext(
+  shopId: string,
+  cookies: Array<{
+    name: string;
+    value: string;
+    domain: string;
+    path?: string;
+    expires?: number;
+    httpOnly?: boolean;
+    secure?: boolean;
+    sameSite?: 'Strict' | 'Lax' | 'None';
+  }>,
+): Promise<void> {
+  if (!cookies.length) return;
+
+  const validCookies = cookies.filter(c => c.domain && c.name && c.value !== undefined);
+  if (!validCookies.length) return;
+
+  let storeBrowserPath: string | undefined;
+  try {
+    storeBrowserPath = await getChromePath();
+  } catch { /* ignore */ }
+
+  const baseKey = `door_engine_tb_${shopId}`;
+  const candidateKeys = [true, false].flatMap((headless) => {
+    const key = `${headless.toString()}_${baseKey}`;
+    return storeBrowserPath ? [`${key}_${storeBrowserPath}`, key] : [key];
+  });
+  const contexts = Array.from(new Set(candidateKeys.map(key => contextMap.get(key)).filter(Boolean))) as BrowserContext[];
+
+  if (!contexts.length) {
+    log.warn('[Engine] injectCookiesIntoTbContext: no context found for shop', shopId);
+    return;
+  }
+
+  try {
+    await Promise.all(contexts.map(context => context.addCookies(validCookies)));
+    log.info('[Engine] injectCookiesIntoTbContext: injected', validCookies.length, 'cookies for shop', shopId, 'contexts:', contexts.length);
+  } catch (error) {
+    log.warn('[Engine] injectCookiesIntoTbContext: failed to inject cookies', error);
+  }
+}
+
 export async function closeAllBrowserContexts(): Promise<void> {
     const tasks: Promise<void>[] = [];
 
@@ -233,7 +280,7 @@ export abstract class DoorEngine<T = any> {
         '--disable-features=TranslateUI' // 禁用翻译UI
       ];
 
-    constructor(resourceId : string, headless: boolean = true, chromePath: string = "", usePersistentContext : boolean = true, browserArgs : string[]|undefined = undefined){
+    constructor(resourceId : string, headless: boolean = false, chromePath: string = "", usePersistentContext : boolean = true, browserArgs : string[]|undefined = undefined){
         this.resourceId = resourceId;
         this.usePersistentContext = usePersistentContext;
         if(chromePath){
@@ -341,10 +388,7 @@ export abstract class DoorEngine<T = any> {
     async createContextByPersistentContext(): Promise<BrowserContext> {
         let storeBrowserPath = await this.getRealChromePath();
 
-        let key = this.getKey();
-        if(storeBrowserPath){
-            key += "_" + storeBrowserPath;
-        }   
+        const key = this.getPersistentContextKey(storeBrowserPath);
         if(contextMap.has(key)){
             const cached = contextMap.get(key) as BrowserContext;
             try {
@@ -445,6 +489,19 @@ export abstract class DoorEngine<T = any> {
     public async closePage(){
         if(this.page){
             await this.page.close();
+        }
+    }
+
+    /**
+     * 仅初始化 BrowserContext（复用缓存），不创建 Page。
+     * 适用于只需读取 cookies 等轻量操作，避免不必要的 Tab 开销。
+     */
+    public async getContextOnly(): Promise<BrowserContext | null> {
+        try {
+            this.context = await this.createContextByPersistentContext();
+            return this.context;
+        } catch {
+            return null;
         }
     }
 
@@ -756,10 +813,7 @@ export abstract class DoorEngine<T = any> {
         if(this.context){
             // 先计算 key 并清理 map / 重置引用，避免 close() 抛错后遗留已关闭的 context
             const storeBrowserPath = await this.getRealChromePath().catch(() => undefined);
-            let key = this.getKey();
-            if(storeBrowserPath){
-                key += "_" + storeBrowserPath;
-            }
+            const key = this.getPersistentContextKey(storeBrowserPath);
             contextMap.delete(key);
             const ctx = this.context;
             this.context = undefined;
@@ -810,9 +864,18 @@ export abstract class DoorEngine<T = any> {
         return sessionDir;
     }
 
+    private getPersistentContextKey(storeBrowserPath?: string){
+        let key = `${this.headless.toString()}_${this.getKey()}`;
+        if(storeBrowserPath){
+            key += "_" + storeBrowserPath;
+        }
+        return key;
+    }
+
     getUserDataDir(){
         const userDataPath = app.getPath('userData');
-        const userDataDir = path.join(userDataPath,'resource','userDataDir',this.getNamespace(), this.resourceId.toString());
+        const profileMode = this.headless ? 'headless' : 'headed';
+        const userDataDir = path.join(userDataPath,'resource','userDataDir',this.getNamespace(), profileMode, this.resourceId.toString());
         log.info("userDataDir is ", userDataDir);
         if(!fs.existsSync(userDataDir)){
             fs.mkdirSync(userDataDir, { recursive: true });
@@ -852,11 +915,8 @@ export abstract class DoorEngine<T = any> {
                 const targetPath = path.join(userDataDir, fileName);
                 fs.copyFileSync(bakPath, targetPath);
             }
-            let key = this.getKey();
             let storeBrowserPath = await this.getRealChromePath();
-            if(storeBrowserPath){
-                key += "_" + storeBrowserPath;
-            }   
+            const key = this.getPersistentContextKey(storeBrowserPath);
             log.info("browser key is ", key);
             if(contextMap.has(key)){
                 const context = contextMap.get(key);

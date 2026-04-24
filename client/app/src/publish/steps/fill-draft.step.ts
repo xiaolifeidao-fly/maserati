@@ -219,7 +219,6 @@ export class FillDraftStep extends PublishStep {
     } else {
       // c) 新建草稿
       log.info('createNewDraft start');
-      await this.ensureDraftSlot(ctx.taskId, shopId, catId);
       draftCtx = await this.createNewDraft(ctx);
       log.info('createNewDraft end');
     }
@@ -376,7 +375,8 @@ export class FillDraftStep extends PublishStep {
 
   /**
    * 通过类别 ID 打开淘宝新建发布页面，提取 window.Json 并保存草稿获取 draftId。
-   * 对应旧逻辑：publish.htm?catId=xxx → 点击"保存草稿" → 捕获 draftOp/add.json 响应
+   * 在同一个 Page 上完成草稿数量检查与清理（原 ensureDraftSlot 逻辑），
+   * 避免对相同 URL 的重复导航。
    */
   private async createNewDraft(ctx: StepContext): Promise<TbDraftContext> {
     const catId = ctx.get('categoryInfo')?.catId;
@@ -393,6 +393,13 @@ export class FillDraftStep extends PublishStep {
       throw new PublishError(this.stepCode, '无法打开淘宝发布页面，请确认店铺登录状态');
     }
     await ensureTbShopLoggedIn(page, this.stepCode, ctx.shopId);
+
+    // 在同一个页面上检查草稿数量，超限则删除，之后 reload 回到干净状态
+    const needsReload = await this.checkAndCleanDraftSlot(ctx.taskId, ctx.shopId, catId, page);
+    if (needsReload) {
+      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+      await ensureTbShopLoggedIn(page, this.stepCode, ctx.shopId);
+    }
 
     // 等待 window.Json 就绪
     try {
@@ -670,20 +677,17 @@ export class FillDraftStep extends PublishStep {
   // ─── 草稿数量管理 ──────────────────────────────────────────────────────────
 
   /**
-   * 新增草稿前，先检查淘宝当前类目草稿数。
-   * 若达到阈值（>= 9），先删除淘宝端该类目下全部草稿，再继续后续保存草稿逻辑。
+   * 在已打开的 Page 上检查淘宝草稿数量。
+   * 若达到阈值（>= 9），删除该类目下全部草稿，并返回 true 表示调用方需要重新导航。
+   * 失败时静默容错，返回 false，不阻塞发布。
    */
-  private async ensureDraftSlot(taskId: number, shopId: number, catId: string): Promise<void> {
-    const engine = new TbEngine(String(shopId), true);
-    engine.bindPublishTask(taskId);
-
+  private async checkAndCleanDraftSlot(
+    taskId: number,
+    shopId: number,
+    catId: string,
+    page: import('playwright').Page,
+  ): Promise<boolean> {
     try {
-      const page = await engine.init(`${TB_PUBLISH_PAGE_URL}?catId=${catId}`);
-      if (!page) {
-        throw new PublishError(this.stepCode, '无法打开淘宝发布页面，无法检查草稿数量');
-      }
-      await ensureTbShopLoggedIn(page, this.stepCode, shopId);
-
       const draftList = await listTaobaoDrafts(taskId, shopId, page, catId);
       const draftCount = typeof draftList.count === 'number'
         ? draftList.count
@@ -698,7 +702,7 @@ export class FillDraftStep extends PublishStep {
       });
 
       if (draftCount < TB_DRAFT_CLEANUP_THRESHOLD) {
-        return;
+        return false;
       }
 
       for (const draft of draftList.list ?? []) {
@@ -710,10 +714,10 @@ export class FillDraftStep extends PublishStep {
       }
 
       await this.cleanupLocalDraftRecords(shopId, catId);
+      return true;
     } catch {
       // 容错：查询/删除失败不阻塞发布
-    } finally {
-      await engine.closePage().catch(() => undefined);
+      return false;
     }
   }
 
