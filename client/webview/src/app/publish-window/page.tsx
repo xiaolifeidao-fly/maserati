@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { ProductPublishModal } from "@/app/(console)/product/components/ProductPublishModal";
 
@@ -18,6 +18,19 @@ function PublishWindowContent() {
   const entryScene = entrySceneParam === "collection" ? "collection" : "product";
   const initialViewParam = searchParams?.get("initialView");
   const initialView = initialViewParam === "progress" ? "progress" : "default";
+  const initialBatch = useMemo(() => {
+    if (batchId <= 0) {
+      return undefined;
+    }
+    return {
+      id: batchId,
+      shopId: Number(searchParams?.get("batchShopId") || 0),
+      platform: searchParams?.get("batchPlatform") || "",
+      name: searchParams?.get("batchName") || "",
+      status: searchParams?.get("batchStatus") || "",
+      collectedCount: Number(searchParams?.get("batchCollectedCount") || 0),
+    };
+  }, [batchId, searchParams]);
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
@@ -35,6 +48,7 @@ function PublishWindowContent() {
             }
           }}
           initialBatchId={batchId}
+          initialBatch={initialBatch}
           initialEntryScene={entryScene}
           initialView={initialView}
         />

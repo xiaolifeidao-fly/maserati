@@ -1,5 +1,21 @@
 import { ElectronApi, InvokeType, Protocols } from '../base';
 
+export interface PublishWindowBatchSnapshot {
+  id: number;
+  shopId?: number;
+  platform?: string;
+  name?: string;
+  status?: string;
+  collectedCount?: number;
+}
+
+export interface PublishWindowOpenOptions {
+  batchId?: number;
+  batch?: PublishWindowBatchSnapshot;
+  entryScene?: 'collection' | 'product';
+  initialView?: 'default' | 'progress';
+}
+
 /**
  * PublishWindowApi — 发布弹窗 Electron IPC API
  *
@@ -16,14 +32,11 @@ export class PublishWindowApi extends ElectronApi {
    * 打开发布窗口（BrowserWindow + BrowserView）。
    * 若窗口已存在则刷新到最新入口参数并聚焦。
    * @param options.batchId 可选，预选的采集批次 ID
+   * @param options.batch 可选，入口页已知的采集批次快照
    * @param options.entryScene 入口场景：collection=采集管理，product=商品管理
    */
   @InvokeType(Protocols.INVOKE)
-  async openPublishWindow(options?: {
-    batchId?: number;
-    entryScene?: 'collection' | 'product';
-    initialView?: 'default' | 'progress';
-  }): Promise<{ opened: boolean }> {
+  async openPublishWindow(options?: PublishWindowOpenOptions): Promise<{ opened: boolean }> {
     return this.invokeApi('openPublishWindow', options);
   }
 

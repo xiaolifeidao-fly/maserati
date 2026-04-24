@@ -1,4 +1,4 @@
-import { PublishWindowApi } from '@eleapi/publish/publish-window.api';
+import { PublishWindowApi, type PublishWindowOpenOptions } from '@eleapi/publish/publish-window.api';
 import {
   openPublishWindow,
   showCaptchaPanel,
@@ -12,11 +12,7 @@ import {
  * 代理渲染进程对发布窗口的操作：打开、展示/隐藏验证码抽屉、关闭。
  */
 export class PublishWindowImpl extends PublishWindowApi {
-  async openPublishWindow(options?: {
-    batchId?: number;
-    entryScene?: 'collection' | 'product';
-    initialView?: 'default' | 'progress';
-  }): Promise<{ opened: boolean }> {
+  async openPublishWindow(options?: PublishWindowOpenOptions): Promise<{ opened: boolean }> {
     openPublishWindow(options);
     return { opened: true };
   }

@@ -25,7 +25,11 @@ import {
   summarizeForLog,
   unregisterPublishTaskLogFile,
 } from '../utils/publish-logger';
-import { getCollectedProductRawData, saveCollectedProductRawData } from '@src/collect/workspace.manager';
+import {
+  getCollectedProductRawData,
+  getCollectedProductRawDataWithFallback,
+  saveCollectedProductRawData,
+} from '@src/collect/workspace.manager';
 import { requestBackend } from '@src/impl/shared/backend';
 import type { CollectSourceType } from '@eleapi/collect/collect.platform';
 import type { RawSourceData } from '../types/source-data';
@@ -382,17 +386,32 @@ export class PublishRunner {
     }
 
     const collectSourceType = publishSourceTypeToCollect(task.sourceType);
-    const localRawSource = getCollectedProductRawData(sourceProductId, collectSourceType);
-    if (isRawSourceData(localRawSource)) {
-      ctx.set('rawSource', localRawSource);
-      return;
-    }
+    const sourceTypeCandidates = collectSourceType === 'unknown'
+      ? (['pxx', 'tb'] as CollectSourceType[])
+      : ([collectSourceType, ...(['pxx', 'tb'] as CollectSourceType[]).filter((item) => item !== collectSourceType)]);
 
-    const serverRawSource = await fetchRawSourceFromServer(task.sourceRecordId, sourceProductId);
-    if (isRawSourceData(serverRawSource)) {
-      saveCollectedProductRawData(sourceProductId, serverRawSource, collectSourceType);
-      ctx.set('rawSource', serverRawSource);
-      return;
+    for (const candidateSourceType of sourceTypeCandidates) {
+      const localRawSource = getCollectedProductRawData(sourceProductId, candidateSourceType);
+      if (isRawSourceData(localRawSource)) {
+        this.applyResolvedSourceType(ctx, task, candidateSourceType);
+        ctx.set('rawSource', localRawSource);
+        return;
+      }
+
+      const fallbackRawSource = await getCollectedProductRawDataWithFallback(sourceProductId, candidateSourceType);
+      if (isRawSourceData(fallbackRawSource)) {
+        this.applyResolvedSourceType(ctx, task, candidateSourceType);
+        ctx.set('rawSource', fallbackRawSource);
+        return;
+      }
+
+      const serverRawSource = await fetchRawSourceFromServer(task.sourceRecordId, sourceProductId, candidateSourceType);
+      if (isRawSourceData(serverRawSource)) {
+        saveCollectedProductRawData(sourceProductId, serverRawSource, candidateSourceType);
+        this.applyResolvedSourceType(ctx, task, candidateSourceType);
+        ctx.set('rawSource', serverRawSource);
+        return;
+      }
     }
 
     const errorMessage = task.sourceRecordId
@@ -406,6 +425,21 @@ export class PublishRunner {
       errorMessage,
     });
     throw new Error(errorMessage);
+  }
+
+  private applyResolvedSourceType(ctx: StepContext, task: PublishTaskRecord, collectSourceType: CollectSourceType): void {
+    switch (collectSourceType) {
+      case 'pxx':
+        task.sourceType = SourceType.PXX;
+        ctx.set('sourceType', SourceType.PXX);
+        return;
+      case 'tb':
+        task.sourceType = SourceType.TB;
+        ctx.set('sourceType', SourceType.TB);
+        return;
+      default:
+        return;
+    }
   }
 
   private async ensureProductIdLoaded(ctx: StepContext, task: PublishTaskRecord): Promise<void> {
@@ -491,30 +525,51 @@ function publishSourceTypeToCollect(sourceType: PublishTaskRecord['sourceType'])
   }
 }
 
-async function fetchRawSourceFromServer(sourceRecordId?: number, sourceProductId?: string): Promise<unknown | null> {
-  if (!sourceRecordId) {
-    return null;
-  }
-
+async function fetchRawSourceFromServer(
+  sourceRecordId?: number,
+  sourceProductId?: string,
+  sourcePlatform?: CollectSourceType,
+): Promise<unknown | null> {
   try {
-    const record = await requestBackend<{ rawDataUrl?: string }>('GET', `/collect-records/${sourceRecordId}`);
-    const rawDataUrl = String(record?.rawDataUrl ?? '').trim();
-    if (!rawDataUrl) {
-      return null;
-    }
-    if (rawDataUrl.startsWith('mock://')) {
-      throw new Error(`原始数据已登记但 OSS 拉取尚未接入：${rawDataUrl}`);
+    const normalizedSourceProductId = String(sourceProductId ?? '').trim();
+    if (normalizedSourceProductId && sourcePlatform && sourcePlatform !== 'unknown') {
+      const result = await requestBackend<{ rawData?: unknown }>('GET', '/collect-records/source/raw-data', {
+        params: {
+          sourceProductId: normalizedSourceProductId,
+          sourcePlatform,
+        },
+      });
+      if (isRawSourceData(result?.rawData)) {
+        return result.rawData;
+      }
     }
 
-    const response = await fetch(rawDataUrl);
-    if (!response.ok) {
-      throw new Error(`拉取原始数据失败: ${response.status}`);
+    if (sourceRecordId) {
+      const record = await requestBackend<{ rawDataUrl?: string }>('GET', `/collect-records/${sourceRecordId}`);
+      const rawDataUrl = String(record?.rawDataUrl ?? '').trim();
+      if (!rawDataUrl) {
+        return null;
+      }
+      if (rawDataUrl.startsWith('mock://')) {
+        throw new Error(`原始数据已登记但 OSS 拉取尚未接入：${rawDataUrl}`);
+      }
+      if (!/^https?:\/\//i.test(rawDataUrl)) {
+        throw new Error(`原始数据地址不是可直接访问的 HTTP URL：${rawDataUrl}`);
+      }
+
+      const response = await fetch(rawDataUrl);
+      if (!response.ok) {
+        throw new Error(`拉取原始数据失败: ${response.status}`);
+      }
+      return await response.json();
     }
-    return await response.json();
+
+    return null;
   } catch (error) {
     publishError('[publish-runner] fetch raw source from server failed', {
       sourceRecordId,
       sourceProductId,
+      sourcePlatform,
       error: summarizeForLog(error),
     });
     return null;

@@ -117,9 +117,20 @@ export default function CollectionSharePage() {
     setDetailOpen(true);
   };
 
-  const openPublishWindow = (record: Pick<CollectBatchRecord, "id">, initialView?: "progress") => {
+  const openPublishWindow = (
+    record: Pick<CollectBatchRecord, "id" | "shopId" | "platform" | "name" | "status" | "collectedCount">,
+    initialView?: "progress",
+  ) => {
     void getPublishWindowApi().openPublishWindow({
       batchId: record.id,
+      batch: {
+        id: record.id,
+        shopId: record.shopId,
+        platform: record.platform,
+        name: record.name,
+        status: record.status,
+        collectedCount: record.collectedCount,
+      },
       entryScene: "collection",
       initialView,
     });

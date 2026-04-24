@@ -182,8 +182,28 @@ interface ProductPublishModalProps {
   onCancel: () => void;
   onPublished?: () => Promise<void> | void;
   initialBatchId?: number;
+  initialBatch?: Pick<CollectBatchRecord, "id" | "shopId" | "platform" | "name" | "status" | "collectedCount">;
   initialEntryScene?: "collection" | "product";
   initialView?: "default" | "progress";
+}
+
+function toInitialCollectBatchRecord(
+  batch?: Pick<CollectBatchRecord, "id" | "shopId" | "platform" | "name" | "status" | "collectedCount">,
+): CollectBatchRecord | null {
+  if (!batch || Number(batch.id) <= 0) {
+    return null;
+  }
+  return {
+    id: Number(batch.id),
+    appUserId: 0,
+    shopId: Number(batch.shopId || 0),
+    platform: batch.platform || "",
+    name: batch.name || `批次 #${batch.id}`,
+    status: batch.status || "",
+    ossUrl: "",
+    collectedCount: Number(batch.collectedCount || 0),
+    active: 1,
+  };
 }
 
 // ─── 状态标签配置 ─────────────────────────────────────────────────────────────
@@ -291,12 +311,14 @@ export function ProductPublishModal({
   onCancel,
   onPublished,
   initialBatchId = 0,
+  initialBatch,
   initialEntryScene = "product",
   initialView = "default",
 }: ProductPublishModalProps) {
   const isCollectionBatchEntry = initialEntryScene === "collection" && initialBatchId > 0;
   const directToProgress = initialView === "progress";
   const shouldRestoreBatchState = isCollectionBatchEntry || directToProgress;
+  const initialBatchRecord = useMemo(() => toInitialCollectBatchRecord(initialBatch), [initialBatch]);
   const initialStep = directToProgress ? 4 : isCollectionBatchEntry ? 2 : 1;
   const [currentStep, setCurrentStep] = useState(initialStep);
   const [collectBatches, setCollectBatches] = useState<CollectBatchRecord[]>([]);
@@ -341,13 +363,19 @@ export function ProductPublishModal({
     let cancelled = false;
 
     void fetchCollectBatchOptions().then((result) => {
-      if (!cancelled) setCollectBatches(Array.isArray(result.data) ? result.data : []);
+      if (cancelled) return;
+      const nextBatches = Array.isArray(result.data) ? result.data : [];
+      if (initialBatchRecord && !nextBatches.some((batch) => batch.id === initialBatchRecord.id)) {
+        setCollectBatches([initialBatchRecord, ...nextBatches]);
+        return;
+      }
+      setCollectBatches(nextBatches);
     }).catch((error) => {
       if (!cancelled) message.error(error instanceof Error ? error.message : "加载采集批次失败");
     });
 
     return () => { cancelled = true; };
-  }, [initialBatchId, open]);
+  }, [initialBatchId, initialBatchRecord, open]);
 
   // 平台切换时重新加载店铺
   useEffect(() => {
@@ -1049,9 +1077,17 @@ export function ProductPublishModal({
       return;
     }
 
-    const sourceType = collectSourceTypeToPublishSourceType(normalizeCollectSourceType(selectedTargetPlatform));
+    let sourceShop: ShopRecord | null = null;
+    try {
+      sourceShop = await fetchShop(selectedBatch.shopId);
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "加载采集店铺失败");
+      return;
+    }
+
+    const sourceType = collectSourceTypeToPublishSourceType(normalizeCollectSourceType(sourceShop?.platform));
     if (!sourceType) {
-      message.error("当前目标平台暂不支持发布");
+      message.error("当前采集批次来源平台暂不支持发布");
       return;
     }
 

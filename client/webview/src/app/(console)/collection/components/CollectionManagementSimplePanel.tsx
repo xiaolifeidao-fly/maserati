@@ -190,6 +190,14 @@ export function CollectionManagementSimplePanel() {
   const openPublishModal = (record: CollectBatchRecord) => {
     void getPublishWindowApi().openPublishWindow({
       batchId: record.id,
+      batch: {
+        id: record.id,
+        shopId: record.shopId,
+        platform: record.platform,
+        name: record.name,
+        status: record.status,
+        collectedCount: record.collectedCount,
+      },
       entryScene: "collection",
     });
   };
@@ -197,6 +205,14 @@ export function CollectionManagementSimplePanel() {
   const openPublishProgressModal = (record: CollectBatchRecord) => {
     void getPublishWindowApi().openPublishWindow({
       batchId: record.id,
+      batch: {
+        id: record.id,
+        shopId: record.shopId,
+        platform: record.platform,
+        name: record.name,
+        status: record.status,
+        collectedCount: record.collectedCount,
+      },
       entryScene: "collection",
       initialView: "progress",
     });

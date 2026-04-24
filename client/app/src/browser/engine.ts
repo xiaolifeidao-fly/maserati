@@ -280,7 +280,7 @@ export abstract class DoorEngine<T = any> {
         '--disable-features=TranslateUI' // 禁用翻译UI
       ];
 
-    constructor(resourceId : string, headless: boolean = false, chromePath: string = "", usePersistentContext : boolean = true, browserArgs : string[]|undefined = undefined){
+    constructor(resourceId : string, headless: boolean = true, chromePath: string = "", usePersistentContext : boolean = true, browserArgs : string[]|undefined = undefined){
         this.resourceId = resourceId;
         this.usePersistentContext = usePersistentContext;
         if(chromePath){

@@ -3,6 +3,7 @@ import { BrowserView, BrowserWindow, shell, type WebContents } from 'electron';
 import log from 'electron-log';
 import { mainWindow } from '@src/kernel/windows';
 import { getLatestCaptchaTask } from './runtime/publish-center';
+import type { PublishWindowOpenOptions } from '@eleapi/publish/publish-window.api';
 
 // ─── 布局常量 ─────────────────────────────────────────────────────────────────
 
@@ -18,12 +19,6 @@ let captchaPanelVisible = false;
 let captchaSolvedCallback: (() => void) | null = null;
 /** 展示验证码前保存的窗口外框宽度，用于恢复 */
 let captchaOriginalBoundsWidth: number | null = null;
-
-type PublishWindowOpenOptions = {
-  batchId?: number;
-  entryScene?: 'collection' | 'product';
-  initialView?: 'default' | 'progress';
-};
 
 // ─── 工具函数 ─────────────────────────────────────────────────────────────────
 
@@ -82,6 +77,25 @@ function buildPublishWindowUrl(options?: PublishWindowOpenOptions): string {
   const pageUrl = new URL('/publish-window', webviewUrl);
   if (Number(options?.batchId) > 0) {
     pageUrl.searchParams.set('batchId', String(options?.batchId));
+  }
+  const batch = options?.batch;
+  if (batch && Number(batch.id) > 0) {
+    pageUrl.searchParams.set('batchId', String(batch.id));
+    if (Number(batch.shopId) > 0) {
+      pageUrl.searchParams.set('batchShopId', String(batch.shopId));
+    }
+    if (batch.platform) {
+      pageUrl.searchParams.set('batchPlatform', batch.platform);
+    }
+    if (batch.name) {
+      pageUrl.searchParams.set('batchName', batch.name);
+    }
+    if (batch.status) {
+      pageUrl.searchParams.set('batchStatus', batch.status);
+    }
+    if (Number.isFinite(Number(batch.collectedCount))) {
+      pageUrl.searchParams.set('batchCollectedCount', String(Number(batch.collectedCount)));
+    }
   }
   if (options?.entryScene) {
     pageUrl.searchParams.set('entryScene', options.entryScene);
