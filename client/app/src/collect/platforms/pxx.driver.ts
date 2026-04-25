@@ -78,13 +78,14 @@ function parsePxxGoodsSummary(rawData: unknown) {
 
   const container = rawData as Record<string, unknown>;
   const initDataObj = (container.store as { initDataObj?: Record<string, unknown> } | undefined)?.initDataObj;
-  const goods = initDataObj?.goods as Record<string, unknown> | undefined;
+  const goods = (initDataObj?.goods as Record<string, unknown> | undefined)
+    ?? (container.goods as Record<string, unknown> | undefined);
   if (!goods) {
     return null;
   }
 
-  const sourceProductId = String(goods.goodsID || goods.goodsId || goods.id || "").trim();
-  const productName = String(goods.goodsName || goods.name || "").trim();
+  const sourceProductId = String(goods.goodsID || goods.goodsId || goods.goods_id || goods.id || "").trim();
+  const productName = String(goods.goodsName || goods.goods_name || goods.name || "").trim();
   if (!sourceProductId || !productName) {
     return null;
   }

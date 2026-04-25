@@ -625,8 +625,16 @@ export abstract class DoorEngine<T = any> {
 
     public async onResponse(page : Page){
         page.on('response', async (response) => {
-            await this.logPublishResponse(response);
-            await this.doAfterResponse(response);
+            try {
+                await this.logPublishResponse(response);
+                await this.doAfterResponse(response);
+            } catch (error) {
+                if (page.isClosed()) {
+                    log.warn('[Engine] response listener skipped after page closed', summarizeForLog(error));
+                    return;
+                }
+                log.warn('[Engine] response listener failed', summarizeForLog(error));
+            }
         });
     }
 
@@ -683,13 +691,20 @@ export abstract class DoorEngine<T = any> {
             body = { readError: summarizeForLog(error) };
         }
 
+        let headers: unknown = {};
+        try {
+            headers = await response.allHeaders();
+        } catch (error) {
+            headers = { readError: summarizeForLog(error) };
+        }
+
         publishTaobaoResponseLog(this.publishTaskId, 'playwright', {
             method: request.method(),
             resourceType: request.resourceType(),
             url,
             status: response.status(),
             ok: response.ok(),
-            headers: summarizeForLog(await response.allHeaders()),
+            headers: summarizeForLog(headers),
             body: summarizeForLog(body),
         });
     }

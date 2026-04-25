@@ -327,6 +327,182 @@ function parsePxxYuanPrice(value: unknown): string {
   return text;
 }
 
+interface ExternalPddGalleryItem {
+  url?: string;
+  width?: number;
+  height?: number;
+}
+
+interface ExternalPddGoodsProperty {
+  key?: string;
+  values?: unknown[];
+  ref_pid?: number | string;
+  reference_id?: number | string;
+}
+
+interface ExternalPddSkuSpec {
+  spec_key?: string;
+  spec_value?: string;
+  spec_key_id?: number | string;
+  spec_value_id?: number | string;
+}
+
+interface ExternalPddSkuItem {
+  sku_id?: number | string;
+  thumb_url?: string;
+  quantity?: number;
+  init_quantity?: number;
+  stock?: number;
+  specs?: ExternalPddSkuSpec[];
+  price?: number;
+  normal_price?: number;
+  group_price?: number;
+}
+
+interface ExternalPddRawData extends Record<string, unknown> {
+  goods?: {
+    goods_id?: number | string;
+    cat_id?: number | string;
+    goods_name?: string;
+    short_name?: string;
+    share_desc?: string;
+    share_link?: string;
+    image_url?: string;
+    thumb_url?: string;
+    hd_url?: string;
+    hd_thumb_url?: string;
+    gallery?: ExternalPddGalleryItem[];
+    goods_property?: ExternalPddGoodsProperty[];
+    shipment_limit_second?: number;
+    warehouse?: string;
+  };
+  sku?: ExternalPddSkuItem[];
+  price?: {
+    min_on_sale_group_price?: number;
+    min_group_price?: number;
+    min_on_sale_normal_price?: number;
+    min_normal_price?: number;
+    line_price?: number;
+  };
+  service_promise?: Array<{
+    type?: string;
+    desc?: string;
+  }>;
+}
+
+function isExternalPddRawData(rawData: Record<string, unknown>): rawData is ExternalPddRawData {
+  const goods = rawData.goods as Record<string, unknown> | undefined;
+  return Boolean(goods && (goods.goods_id || goods.goods_name || rawData.sku));
+}
+
+function secondsToDeliveryTime(value: unknown): string | undefined {
+  const seconds = Number(value);
+  if (!Number.isFinite(seconds) || seconds <= 0) {
+    return undefined;
+  }
+  const days = Math.ceil(seconds / 86400);
+  return `${days} 天内`;
+}
+
+function normalizePddFenPrice(value: unknown): string {
+  const text = String(value ?? "").trim();
+  if (!text) {
+    return "";
+  }
+  const numeric = Number(text);
+  if (Number.isFinite(numeric)) {
+    return (numeric / 100).toFixed(2);
+  }
+  return normalizePrice(value);
+}
+
+function convertExternalPddToStandard(
+  rawData: ExternalPddRawData,
+  meta?: {
+    productName?: string;
+    sourceProductId?: string;
+    sourceUrl?: string;
+  },
+): StandardProductData {
+  const goods = rawData.goods ?? {};
+  const sourceProductId = meta?.sourceProductId ?? String(goods.goods_id ?? "").trim();
+  const galleryImages = tryImageList(goods.gallery ?? []);
+  const leadingImages = [
+    normalizeImageUrl(goods.image_url),
+    normalizeImageUrl(goods.thumb_url),
+    normalizeImageUrl(goods.hd_url),
+    normalizeImageUrl(goods.hd_thumb_url),
+  ].filter(Boolean);
+  const mainImages = Array.from(new Set([...leadingImages, ...galleryImages])).slice(0, 5);
+  const detailImages = galleryImages.length > 0 ? galleryImages : mainImages;
+
+  const attributes = Array.isArray(goods.goods_property)
+    ? goods.goods_property
+        .map((item) => {
+          const values = Array.isArray(item.values)
+            ? item.values.map((value) => String(value ?? "").trim()).filter(Boolean)
+            : [];
+          return {
+            name: String(item.key ?? "").trim(),
+            value: values.join("、"),
+            options: values.length > 1 ? values : undefined,
+            pid: item.ref_pid != null ? String(item.ref_pid) : undefined,
+            vid: item.reference_id != null ? String(item.reference_id) : undefined,
+          };
+        })
+        .filter((item) => item.name && item.value)
+    : [];
+
+  const skuList = Array.isArray(rawData.sku)
+    ? rawData.sku.map((item) => {
+        const specs = Array.isArray(item.specs)
+          ? item.specs
+              .map((spec) => ({
+                propId: spec.spec_key_id != null ? String(spec.spec_key_id) : undefined,
+                name: String(spec.spec_key ?? "").trim() || "规格",
+                valueId: spec.spec_value_id != null ? String(spec.spec_value_id) : undefined,
+                value: String(spec.spec_value ?? "").trim(),
+              }))
+              .filter((spec) => spec.value)
+          : [];
+        return {
+          spec: specs.map((spec) => spec.value).join(" / ") || String(item.sku_id ?? "").trim(),
+          specs: specs.length > 0 ? specs : undefined,
+          price: normalizePddFenPrice(firstNonEmpty(item.group_price, item.price, rawData.price?.min_group_price)),
+          originalPrice: normalizePddFenPrice(firstNonEmpty(item.normal_price, rawData.price?.min_normal_price)) || undefined,
+          stock: Number(item.quantity ?? item.init_quantity ?? item.stock ?? 0),
+          imgUrl: normalizeImageUrl(item.thumb_url) || undefined,
+          skuId: item.sku_id != null ? String(item.sku_id) : undefined,
+        };
+      })
+    : [];
+
+  const refundPolicy = Array.isArray(rawData.service_promise)
+    ? rawData.service_promise
+        .map((item) => String(item.type || item.desc || "").trim())
+        .filter(Boolean)
+        .join("、") || undefined
+    : undefined;
+
+  return {
+    sourceId: sourceProductId,
+    sourceUrl: meta?.sourceUrl || (goods.share_link ? String(goods.share_link) : undefined),
+    title: String(goods.short_name || "").trim() || meta?.productName || String(goods.goods_name || "").trim(),
+    subTitle: undefined,
+    category: goods.cat_id != null ? String(goods.cat_id) : undefined,
+    mainImages,
+    detailImages,
+    attributes,
+    skuList,
+    logistics: {
+      shipping: "包邮",
+      deliveryTime: secondsToDeliveryTime(goods.shipment_limit_second),
+      refundPolicy,
+      shipFrom: String(goods.warehouse || "").trim() || undefined,
+    },
+  };
+}
+
 export function convertPxxToStandard(
   rawData: Record<string, unknown>,
   meta?: {
@@ -335,6 +511,10 @@ export function convertPxxToStandard(
     sourceUrl?: string;
   }
 ): StandardProductData {
+  if (isExternalPddRawData(rawData)) {
+    return convertExternalPddToStandard(rawData, meta);
+  }
+
   const detailRes = ((rawData as { res?: Record<string, unknown> }).res ?? rawData) as Record<string, unknown>;
   const store = rawData.store as Record<string, unknown> | null;
   const initDataObj = store?.initDataObj as Record<string, unknown> | null;

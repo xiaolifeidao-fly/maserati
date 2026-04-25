@@ -6,7 +6,7 @@ import { findLowestPositivePriceInStock, formatPrice } from './price.utils';
  *
  * 填充内容：
  *  - title       商品标题（必填）
- *  - shopping_title 导购标题（可选）
+ *  - shopping_title 导购标题（显式置空）
  *  - mainImagesGroup 1:1 主图
  *  - outerId    商家编码（可选）
  *  - price      一口价
@@ -20,9 +20,7 @@ export class BasicInfoFiller implements IFiller {
     // 标题（淘宝限 60 字）
     draftPayload['title'] = product.title.slice(0, 60);
 
-    if (product.subTitle) {
-      draftPayload['shopping_title'] = product.subTitle.slice(0, 30);
-    }
+    draftPayload['shopping_title'] = '';
 
     // 主图（最少 1 张，最多 12 张，按顺序排列）
     const validMainImages = uploadedMainImages

@@ -42,6 +42,8 @@ func (s *CollectService) ListCollectRecordsByBatch(batchID uint, query collectDT
 		if !shared {
 			return nil, gorm.ErrRecordNotFound
 		}
+		onlyFavorite := true
+		query.IsFavorite = &onlyFavorite
 		query.AppUserID = batch.AppUserID
 	}
 	if query.AppUserID == 0 {
@@ -60,6 +62,30 @@ func (s *CollectService) GetCollectRecordByID(id uint) (*collectDTO.CollectRecor
 		return nil, err
 	}
 	if entity.Active == 0 {
+		return nil, gorm.ErrRecordNotFound
+	}
+	return db.ToDTO[collectDTO.CollectRecordDTO](entity), nil
+}
+
+func (s *CollectService) GetCollectRecordByIDForUser(id uint, appUserID uint64) (*collectDTO.CollectRecordDTO, error) {
+	if appUserID == 0 {
+		return nil, fmt.Errorf("appUserId must be positive")
+	}
+	entity, err := s.collectRecordRepository.FindById(id)
+	if err != nil {
+		return nil, err
+	}
+	if entity.Active == 0 {
+		return nil, gorm.ErrRecordNotFound
+	}
+	if entity.AppUserID == appUserID {
+		return db.ToDTO[collectDTO.CollectRecordDTO](entity), nil
+	}
+	shared, err := s.collectShareRepository.HasActiveShare(entity.CollectBatchID, appUserID)
+	if err != nil {
+		return nil, err
+	}
+	if !shared || !entity.IsFavorite {
 		return nil, gorm.ErrRecordNotFound
 	}
 	return db.ToDTO[collectDTO.CollectRecordDTO](entity), nil
@@ -173,6 +199,34 @@ func (s *CollectService) UpdateCollectRecord(id uint, req *collectDTO.UpdateColl
 	return db.ToDTO[collectDTO.CollectRecordDTO](saved), nil
 }
 
+func (s *CollectService) UpdateCollectRecordForUser(id uint, appUserID uint64, req *collectDTO.UpdateCollectRecordDTO) (*collectDTO.CollectRecordDTO, error) {
+	if req == nil {
+		return nil, fmt.Errorf("request is nil")
+	}
+	if appUserID == 0 {
+		return nil, fmt.Errorf("appUserId must be positive")
+	}
+	entity, err := s.collectRecordRepository.FindById(id)
+	if err != nil {
+		return nil, err
+	}
+	if entity.Active == 0 {
+		return nil, gorm.ErrRecordNotFound
+	}
+	if entity.AppUserID == appUserID {
+		req.AppUserID = &appUserID
+		return s.UpdateCollectRecord(id, req)
+	}
+	shared, err := s.collectShareRepository.HasActiveShare(entity.CollectBatchID, appUserID)
+	if err != nil {
+		return nil, err
+	}
+	if shared {
+		return nil, fmt.Errorf("shared collect record is read-only")
+	}
+	return nil, gorm.ErrRecordNotFound
+}
+
 func (s *CollectService) GetCollectRecordRawDataBySource(query collectDTO.CollectRecordQueryDTO) (*collectDTO.CollectRecordRawDataDTO, error) {
 	sourceProductID := strings.TrimSpace(query.SourceProductID)
 	if sourceProductID == "" {
@@ -191,6 +245,9 @@ func (s *CollectService) GetCollectRecordRawDataBySource(query collectDTO.Collec
 		return nil, err
 	}
 	if strings.TrimSpace(entity.RawDataURL) == "" {
+		return nil, gorm.ErrRecordNotFound
+	}
+	if query.AppUserID > 0 && entity.AppUserID != query.AppUserID && !entity.IsFavorite {
 		return nil, gorm.ErrRecordNotFound
 	}
 	rawBytes, err := oss.Get(entity.RawDataURL)

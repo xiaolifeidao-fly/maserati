@@ -242,7 +242,7 @@ export function CollectionManagementSimplePanel() {
   };
 
   const uploadProps: UploadProps = {
-    accept: ".zip,application/zip",
+    accept: ".zip,.json,.txt,application/zip,application/json,text/plain",
     beforeUpload: (file) => {
       setImportFileList([file]);
       return false;
@@ -258,18 +258,22 @@ export function CollectionManagementSimplePanel() {
     if (!importingRecord?.id) {
       return;
     }
-    const values = await importForm.validateFields();
-    const currentFile = importFileList[0]?.originFileObj as (File & { path?: string }) | undefined;
+    await importForm.validateFields();
+    const currentFile = (importFileList[0] as unknown as (File & { path?: string }) | undefined)
+      ?? importFileList[0]?.originFileObj as (File & { path?: string }) | undefined;
     const filePath = String(currentFile?.path || "").trim();
     if (!filePath) {
-      message.error("请先选择 zip 文件");
+      message.error("请先选择 zip/json/txt 文件");
       return;
     }
+
+    const importShop = shopMap.get(importingRecord.shopId);
+    const importShopType = normalizeCollectSourceType(importShop?.platform) === "tb" ? "tb" : "pdd";
 
     setImportSubmitting(true);
     try {
       const result = await importCollectBatchZip(importingRecord.id, {
-        shopType: values.shopType,
+        shopType: importShopType,
         filePath,
       });
       const successParts = [`新增 ${result.importedCount || 0} 条`, `更新 ${result.updatedCount || 0} 条`];
@@ -577,20 +581,17 @@ export function CollectionManagementSimplePanel() {
         destroyOnClose
       >
         <Form<ImportFormValues> form={importForm} layout="vertical" preserve={false}>
-          <Form.Item name="shopType" label="店铺类型" rules={[{ required: true, message: "请选择店铺类型" }]}>
-            <Select
-              options={[
-                { label: "tb", value: "tb" },
-                { label: "pdd", value: "pdd" },
-              ]}
-            />
+          <Form.Item label="采集平台">
+            <span style={{ color: "var(--manager-text)" }}>
+              {normalizeCollectSourceType(shopMap.get(importingRecord?.shopId ?? 0)?.platform) === "tb" ? "淘宝" : "拼多多"}
+            </span>
           </Form.Item>
-          <Form.Item label="zip 文件" required>
+          <Form.Item label="导入文件" required>
             <Upload {...uploadProps}>
-              <Button icon={<UploadOutlined />}>选择 zip 文件</Button>
+              <Button icon={<UploadOutlined />}>选择文件</Button>
             </Upload>
             <div className="manager-muted" style={{ marginTop: 8 }}>
-              zip 解压后应为多个 JSON 文件，文件名格式为 {"{原商品ID}.json"}。
+              支持 zip/json/txt。zip 解压后可包含多个 JSON/TXT 文件；商品 ID 优先从文件内容读取。
             </div>
           </Form.Item>
           {importSubmitting || importProgress ? (

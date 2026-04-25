@@ -14,14 +14,16 @@ sh "$SCRIPT_DIR/package.sh"
 cd "$APP_DIR"
 
 case "$ARCH" in
-  x64|arm64)
+  x64)
+    node scripts/ensure-sharp-platform.js --platform=win32 --arch=x64
     npx electron-builder --win "--$ARCH"
     ;;
   all)
-    npx electron-builder --win --x64 --arm64
+    node scripts/ensure-sharp-platform.js --platform=win32 --arch=x64
+    npx electron-builder --win --x64
     ;;
   *)
-    echo "Unsupported win arch: $ARCH. Use x86/x64, arm/arm64, or all." >&2
+    echo "Unsupported win arch: $ARCH. Use x86/x64 or all." >&2
     exit 1
     ;;
 esac

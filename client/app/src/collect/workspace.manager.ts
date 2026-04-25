@@ -641,7 +641,7 @@ async function handleCenterDebuggerMessage(view: BrowserView, method: string, pa
       capturedCount: capturedGoodsSummaryById.size,
     });
 
-    // Save parsed goods data to electron-store
+    // Save parsed goods data to store
     saveCollectedProductToStore(parsed.sourceProductId, {
       sourceProductId: parsed.sourceProductId,
       productName: parsed.productName,

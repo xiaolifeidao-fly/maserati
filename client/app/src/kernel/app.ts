@@ -1,5 +1,5 @@
 // require('module-alias/register');
-import { app, BrowserWindow, protocol, Menu, MenuItem, screen as electronScreen, shell } from 'electron';
+import { app, BrowserWindow, protocol, Menu, screen as electronScreen, shell } from 'electron';
 const path = require('path');
 const { spawn, exec } = require('child_process');
 const fs = require('fs');
@@ -259,6 +259,7 @@ export async function createWindow(windowId : string, url : string) {
   const windowInstance = new BrowserWindow({
     width: 1600,
     height: 1000,
+    autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -319,6 +320,7 @@ export const start = () => {
 
     app.on('ready', async ()=> {
       try {
+        Menu.setApplicationMenu(null);
         
         registerRpc();
         registerFileProtocol();

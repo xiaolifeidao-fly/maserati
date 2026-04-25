@@ -62,6 +62,7 @@ export interface CollectRecordListQuery extends Record<string, string | number |
   source?: "file" | "manual";
   productName?: string;
   status?: string;
+  isFavorite?: number;
 }
 
 export interface CollectRecordUpdatePayload {

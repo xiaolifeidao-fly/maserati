@@ -106,7 +106,7 @@ export async function saveCollectedToServer(
         sourceProductId: summary.sourceProductId,
         sourceSnapshotUrl: sourceUrl,
         rawSourceData: ctx.rawSourceData ? JSON.stringify(ctx.rawSourceData) : undefined,
-        isFavorite: false,
+        isFavorite: source === "file",
         status: summary.status,
       },
     });

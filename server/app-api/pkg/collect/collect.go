@@ -156,7 +156,12 @@ func (h *CollectHandler) getCollectRecordByID(c *gin.Context) {
 	if !ok {
 		return
 	}
-	r, e := h.collectService.GetCollectRecordByID(id)
+	appUserID, ok := currentCollectUserID(c)
+	if !ok {
+		commonRouter.ToError(c, "用户未登录")
+		return
+	}
+	r, e := h.collectService.GetCollectRecordByIDForUser(id, appUserID)
 	if e == gorm.ErrRecordNotFound {
 		commonRouter.ToError(c, "collect record not found")
 		return
@@ -185,8 +190,12 @@ func (h *CollectHandler) updateCollectRecord(c *gin.Context) {
 		commonRouter.ToError(c, "参数错误")
 		return
 	}
-	applyCollectAppUserIDPtr(c, &req.AppUserID)
-	r, e := h.collectService.UpdateCollectRecord(id, &req)
+	appUserID, ok := currentCollectUserID(c)
+	if !ok {
+		commonRouter.ToError(c, "用户未登录")
+		return
+	}
+	r, e := h.collectService.UpdateCollectRecordForUser(id, appUserID, &req)
 	if e == gorm.ErrRecordNotFound {
 		commonRouter.ToError(c, "collect record not found")
 		return
@@ -243,5 +252,24 @@ func applyCollectAppUserIDPtr(c *gin.Context, target **uint64) {
 	applyCollectAppUserID(c, &userID)
 	if userID > 0 {
 		*target = &userID
+	}
+}
+
+func currentCollectUserID(c *gin.Context) (uint64, bool) {
+	userID, ok := c.Get(webAuth.ContextUserIDKey)
+	if !ok {
+		return 0, false
+	}
+	switch value := userID.(type) {
+	case uint64:
+		return value, value > 0
+	case uint:
+		return uint64(value), value > 0
+	case int:
+		return uint64(value), value > 0
+	case int64:
+		return uint64(value), value > 0
+	default:
+		return 0, false
 	}
 }

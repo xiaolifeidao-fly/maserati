@@ -9,7 +9,8 @@ import {
 } from '@src/publish/batch/publish-batch-job.center';
 import { HttpPublishPersister } from '@src/publish/core/http-publish-persister';
 import { PublishRunner } from '@src/publish/core/publish-runner';
-import { showCaptchaPanel } from '@src/publish/publish-window';
+import { showCaptchaPanel, getCaptchaBrowserCookies } from '@src/publish/publish-window';
+import { injectCookiesIntoTbContext } from '@src/browser/engine';
 import {
   getPublishCenterState,
   syncPublishProgressEvent,
@@ -51,16 +52,8 @@ export class PublishBatchJobImpl extends PublishBatchJobApi {
     // 注入单任务执行器
     publishBatchJobCenter.setTaskRunner(async (taskId, onProgress) => {
       const persister = new HttpPublishPersister();
-      const runner = new PublishRunner(persister);
-
-      runner.onProgress((event: PublishProgressEvent) => {
-        onProgress(event);
-        if (event.captchaUrl) {
-          showCaptchaPanel(event.captchaUrl);
-        }
-      });
-
       const task = await persister.getTask(taskId);
+
       if (task.status === TaskStatus.SUCCESS) {
         publishInfo(`[batch-task:${taskId}] already published, skipping`);
         syncPublishTaskRecord(task, {
@@ -77,7 +70,10 @@ export class PublishBatchJobImpl extends PublishBatchJobApi {
       publishInfo(`[batch-task:${taskId}] task started`);
 
       try {
-        await runner.run(taskId);
+        // 持续执行当前商品，直到 成功 或 失败 才退出，进入下一个商品
+        // 遇到验证码时挂起（不跳下一个），等验证通过后继续当前商品
+        await this.runUntilDone(taskId, task.shopId, persister, onProgress);
+
         const latestTask = await persister.getTask(taskId);
         syncPublishTaskRecord(latestTask, {
           statusText: latestTask.outerItemId
@@ -85,6 +81,7 @@ export class PublishBatchJobImpl extends PublishBatchJobApi {
             : '发布流程已完成',
         });
       } catch (err) {
+        // 当前商品发布失败 → 记录错误，让批次中心将此商品标记为失败并继续下一个
         publishError(`[batch-task:${taskId}] task error`, summarizeForLog(err));
         syncPublishProgressEvent(taskId, {
           taskId,
@@ -111,6 +108,76 @@ export class PublishBatchJobImpl extends PublishBatchJobApi {
         this.broadcastBatchJobState(state);
       }).catch(() => { /* ignore */ });
     });
+  }
+
+  // ─── 单商品执行循环 ──────────────────────────────────────────────────────
+
+  /**
+   * 执行单个商品的发布，直到 成功 或 失败 才返回：
+   *  - runner.run() 正常返回 + 无验证码 → SUCCESS → break
+   *  - runner.run() 正常返回 + 有验证码 → PENDING → 等待验证码通过 → continue（继续当前商品）
+   *  - runner.run() 抛出异常          → FAILED  → 透传异常，批次中心将此商品标为失败后继续下一个
+   */
+  private async runUntilDone(
+    taskId: number,
+    shopId: number,
+    persister: HttpPublishPersister,
+    onProgress: (event: PublishProgressEvent) => void,
+  ): Promise<void> {
+    while (true) {
+      const runner = new PublishRunner(persister);
+      let captchaGate: Promise<void> | null = null;
+
+      runner.onProgress((event: PublishProgressEvent) => {
+        onProgress(event);
+
+        // 检测到验证码：挂起 gate，等待用户通过后才放行
+        if (event.captchaUrl) {
+          captchaGate = new Promise<void>((resolve) => {
+            showCaptchaPanel(event.captchaUrl!, () => {
+              // 验证码通过后同步 cookies，然后放行 gate
+              void getCaptchaBrowserCookies()
+                .then((electronCookies) => {
+                  const playwrightCookies = electronCookies.map((c) => ({
+                    name: c.name,
+                    value: c.value,
+                    domain: c.domain ?? '',
+                    path: c.path ?? '/',
+                    expires: c.expirationDate,
+                    httpOnly: c.httpOnly ?? false,
+                    secure: c.secure ?? false,
+                    sameSite: (
+                      c.sameSite === 'strict' ? 'Strict'
+                      : c.sameSite === 'lax' ? 'Lax'
+                      : 'None'
+                    ) as 'Strict' | 'Lax' | 'None',
+                  }));
+                  return injectCookiesIntoTbContext(String(shopId), playwrightCookies);
+                })
+                .catch((err) => {
+                  publishInfo(`[batch-task:${taskId}] captcha cookie sync failed, resuming anyway`, { error: String(err) });
+                })
+                .then(() => resolve());
+            });
+          });
+        }
+      });
+
+      // FAILED 时 runner.run() 会抛出异常，透传给调用方，当前商品标为失败，继续下一个商品
+      await runner.run(taskId);
+
+      if (captchaGate !== null) {
+        // 当前商品遇到验证码（PENDING），整个批次在此挂起，不跳下一个商品
+        publishInfo(`[batch-task:${taskId}] captcha required, batch paused`);
+        await captchaGate;
+        // 验证码通过后，继续执行当前商品（从断点步骤恢复）
+        publishInfo(`[batch-task:${taskId}] captcha passed, continue current product`);
+        continue;
+      }
+
+      // 无异常 + 无验证码 → 当前商品发布成功，退出循环，由调用方进入下一个商品
+      break;
+    }
   }
 
   // ─── 广播工具 ────────────────────────────────────────────────────────────

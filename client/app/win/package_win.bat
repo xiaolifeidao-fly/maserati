@@ -18,19 +18,23 @@ if /i "%ARCH%"=="x86" set ARCH=x64
 if /i "%ARCH%"=="arm" set ARCH=arm64
 
 if /i "%ARCH%"=="x64" (
+  call node scripts\ensure-sharp-platform.js --platform=win32 --arch=x64
+  if errorlevel 1 exit /b %errorlevel%
   call npx electron-builder --win --x64
   exit /b %errorlevel%
 )
 
 if /i "%ARCH%"=="arm64" (
-  call npx electron-builder --win --arm64
-  exit /b %errorlevel%
+  echo Unsupported win arch: arm64. sharp 0.33.5 does not provide win32-arm64 prebuilt binaries. Use x86/x64. 1>&2
+  exit /b 1
 )
 
 if /i "%ARCH%"=="all" (
-  call npx electron-builder --win --x64 --arm64
+  call node scripts\ensure-sharp-platform.js --platform=win32 --arch=x64
+  if errorlevel 1 exit /b %errorlevel%
+  call npx electron-builder --win --x64
   exit /b %errorlevel%
 )
 
-echo Unsupported win arch: %ARCH%. Use x86/x64, arm/arm64, or all. 1>&2
+echo Unsupported win arch: %ARCH%. Use x86/x64 or all. 1>&2
 exit /b 1

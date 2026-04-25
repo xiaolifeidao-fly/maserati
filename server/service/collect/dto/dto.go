@@ -101,4 +101,5 @@ type CollectRecordQueryDTO struct {
 	Source          string `form:"source"`
 	ProductName     string `form:"productName"`
 	Status          string `form:"status"`
+	IsFavorite      *bool  `form:"isFavorite"`
 }

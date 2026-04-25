@@ -48,7 +48,8 @@
       "output": "package"
     },
     "productName": "maserati",
-    "npmRebuild": true,
+    "npmRebuild": false,
+    "beforeBuild": "./scripts/rebuild-native.js",
     "mac": {
       "target": [
         {
@@ -67,8 +68,7 @@
         {
           "target": "nsis",
           "arch": [
-            "x64",
-            "arm64"
+            "x64"
           ]
         }
       ],
@@ -121,7 +121,6 @@
     "detect-libc": "^2.0.3",
     "dotenv": "^16.4.5",
     "electron-log": "^5.2.4",
-    "electron-store": "8.1.0",
     "electron-updater": "^5.3.0",
     "express": "^5.1.0",
     "extract-zip": "^2.0.1",
@@ -131,7 +130,6 @@
     "graceful-fs": "^4.2.11",
     "hono": "^4.6.13",
     "https-proxy-agent": "^7.0.6",
-    "sharp": "^0.33.5",
     "js-yaml": "^4.1.0",
     "jsonfile": "^6.1.0",
     "lazy-val": "^1.0.5",
@@ -152,6 +150,7 @@
     "reflect-metadata": "^0.2.2",
     "sax": "^1.4.1",
     "semver": "^7.6.3",
+    "sharp": "^0.33.5",
     "sql.js": "^1.14.0",
     "typed-emitter": "^2.1.0",
     "universalify": "^2.0.1",

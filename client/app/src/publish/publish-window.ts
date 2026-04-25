@@ -147,6 +147,7 @@ export function openPublishWindow(options?: PublishWindowOpenOptions): void {
     parent: parent ?? undefined,
     modal: false,
     show: false,
+    autoHideMenuBar: true,
     title: '商品发布',
     titleBarStyle: 'default',
     webPreferences: {

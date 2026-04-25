@@ -238,6 +238,7 @@ export function CollectionWorkspaceLeftPanel({
   onToggleFavorite: propOnToggleFavorite,
   onPreviewRecord: propOnPreviewRecord,
   fallbackBatchId,
+  readOnly = false,
 }: {
   workspaceState?: CollectionWorkspaceState;
   loading?: boolean;
@@ -245,6 +246,7 @@ export function CollectionWorkspaceLeftPanel({
   onToggleFavorite?: (record: CollectRecordPreview) => Promise<void> | void;
   onPreviewRecord?: (record: CollectRecordPreview) => Promise<void> | void;
   fallbackBatchId?: number;
+  readOnly?: boolean;
 } = {}) {
   const isControlled = propState !== undefined;
   const { workspaceState: hookState, loading: hookLoading } = useCollectionWorkspaceState({
@@ -615,33 +617,35 @@ export function CollectionWorkspaceLeftPanel({
                         bottom: 8,
                       }}
                     >
-                      <button
-                        type="button"
-                        onClick={(e) => void handleToggleFavorite(record, e)}
-                        disabled={isToggling}
-                        style={{
-                          width: 28,
-                          height: 28,
-                          borderRadius: 7,
-                          border: "1px solid rgba(226,232,240,0.8)",
-                          background: record.isFavorite ? "rgba(255,237,213,0.9)" : "rgba(248,250,252,0.9)",
-                          cursor: isToggling ? "default" : "pointer",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          fontSize: 13,
-                          transition: "all 0.15s",
-                        }}
-                        title={record.isFavorite ? "取消收藏" : "收藏"}
-                      >
-                        {isToggling ? (
-                          <Spin size="small" />
-                        ) : record.isFavorite ? (
-                          <HeartFilled style={{ color: "#f97316" }} />
-                        ) : (
-                          <HeartOutlined style={{ color: "#cbd5e1" }} />
-                        )}
-                      </button>
+                      {!readOnly ? (
+                        <button
+                          type="button"
+                          onClick={(e) => void handleToggleFavorite(record, e)}
+                          disabled={isToggling}
+                          style={{
+                            width: 28,
+                            height: 28,
+                            borderRadius: 7,
+                            border: "1px solid rgba(226,232,240,0.8)",
+                            background: record.isFavorite ? "rgba(255,237,213,0.9)" : "rgba(248,250,252,0.9)",
+                            cursor: isToggling ? "default" : "pointer",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            fontSize: 13,
+                            transition: "all 0.15s",
+                          }}
+                          title={record.isFavorite ? "取消收藏" : "收藏"}
+                        >
+                          {isToggling ? (
+                            <Spin size="small" />
+                          ) : record.isFavorite ? (
+                            <HeartFilled style={{ color: "#f97316" }} />
+                          ) : (
+                            <HeartOutlined style={{ color: "#cbd5e1" }} />
+                          )}
+                        </button>
+                      ) : null}
                       <button
                         type="button"
                         onClick={(e) => void handlePreviewRecord(record, e)}
@@ -685,11 +689,13 @@ export function CollectionWorkspaceRightPanel({
   loading: propLoading,
   onToggleFavorite: propOnToggleFavorite,
   fallbackBatchId,
+  readOnly = false,
 }: {
   workspaceState?: CollectionWorkspaceState;
   loading?: boolean;
   onToggleFavorite?: (record: CollectRecordPreview) => Promise<void> | void;
   fallbackBatchId?: number;
+  readOnly?: boolean;
 } = {}) {
   const isControlled = propState !== undefined;
   const { workspaceState: hookState, loading: hookLoading } = useCollectionWorkspaceState({
@@ -850,46 +856,50 @@ export function CollectionWorkspaceRightPanel({
                 }}
               />
             )}
-            <IconOnlyButton
-              type="primary"
-              size="small"
-              icon={<InboxOutlined />}
-              tooltip="保存商品详情"
-              onClick={() => void handleSave()}
-              loading={saving}
-              disabled={dataLoading || !editedData}
-              style={{
-                border: "none",
-                boxShadow: "0 8px 24px rgba(47,111,236,0.14)",
-              }}
-            />
+            {!readOnly ? (
+              <IconOnlyButton
+                type="primary"
+                size="small"
+                icon={<InboxOutlined />}
+                tooltip="保存商品详情"
+                onClick={() => void handleSave()}
+                loading={saving}
+                disabled={dataLoading || !editedData}
+                style={{
+                  border: "none",
+                  boxShadow: "0 8px 24px rgba(47,111,236,0.14)",
+                }}
+              />
+            ) : null}
 
             {/* 收藏按钮 */}
-            <button
-              type="button"
-              onClick={() => void handleToggleFavorite()}
-              disabled={togglingFavorite || selectedRecord.isLoading}
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 4,
-                fontSize: 16,
-                color: selectedRecord.isFavorite ? "#fb923c" : "rgba(255,255,255,0.5)",
-                background: "transparent",
-                border: "none",
-                cursor: togglingFavorite || selectedRecord.isLoading ? "default" : "pointer",
-                padding: 0,
-                transition: "color 0.15s",
-              }}
-            >
-              {togglingFavorite ? (
-                <Spin size="small" />
-              ) : selectedRecord.isFavorite ? (
-                <HeartFilled />
-              ) : (
-                <HeartOutlined />
-              )}
-            </button>
+            {!readOnly ? (
+              <button
+                type="button"
+                onClick={() => void handleToggleFavorite()}
+                disabled={togglingFavorite || selectedRecord.isLoading}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 4,
+                  fontSize: 16,
+                  color: selectedRecord.isFavorite ? "#fb923c" : "rgba(255,255,255,0.5)",
+                  background: "transparent",
+                  border: "none",
+                  cursor: togglingFavorite || selectedRecord.isLoading ? "default" : "pointer",
+                  padding: 0,
+                  transition: "color 0.15s",
+                }}
+              >
+                {togglingFavorite ? (
+                  <Spin size="small" />
+                ) : selectedRecord.isFavorite ? (
+                  <HeartFilled />
+                ) : (
+                  <HeartOutlined />
+                )}
+              </button>
+            ) : null}
           </div>
         )}
       </div>

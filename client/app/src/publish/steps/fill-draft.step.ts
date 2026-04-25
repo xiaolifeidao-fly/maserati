@@ -64,7 +64,26 @@ export interface PublishPageEntry {
 const publishPageMap = new Map<number, PublishPageEntry>();
 
 export function getPublishPage(taskId: number): PublishPageEntry | undefined {
-  return publishPageMap.get(taskId);
+  const entry = publishPageMap.get(taskId);
+  if (!entry) {
+    return undefined;
+  }
+  if (entry.page.isClosed()) {
+    publishPageMap.delete(taskId);
+    return undefined;
+  }
+  return entry;
+}
+
+function setPublishPage(taskId: number, entry: PublishPageEntry): void {
+  publishPageMap.set(taskId, entry);
+  entry.page.once('close', () => {
+    const current = publishPageMap.get(taskId);
+    if (current?.page === entry.page) {
+      publishPageMap.delete(taskId);
+      publishWarn(`[task:${taskId}] [TB] publish page closed, cache cleared`, { taskId });
+    }
+  });
 }
 
 export async function closePublishPage(taskId: number): Promise<void> {
@@ -72,6 +91,38 @@ export async function closePublishPage(taskId: number): Promise<void> {
   if (!entry) return;
   publishPageMap.delete(taskId);
   await entry.engine.closePage().catch(() => undefined);
+}
+
+export async function ensurePublishPageForDraft(
+  taskId: number,
+  shopId: number,
+  tbDraftId: string,
+  stepCode: StepCode,
+): Promise<PublishPageEntry> {
+  const existing = getPublishPage(taskId);
+  if (existing) {
+    return existing;
+  }
+
+  const draftId = String(tbDraftId || '').trim();
+  if (!draftId) {
+    throw new PublishError(stepCode, '草稿 ID 为空，无法恢复淘宝发布页面');
+  }
+
+  publishWarn(`[task:${taskId}] [TB] publish page missing or closed, reopening draft page`, {
+    taskId,
+    draftId,
+  });
+
+  const engine = new TbEngine(String(shopId), true);
+  engine.bindPublishTask(taskId);
+  const page = await engine.init(`${TB_DRAFT_PAGE_URL}?dbDraftId=${draftId}`);
+  if (!page) {
+    throw new PublishError(stepCode, '无法重新打开淘宝草稿页面，请确认店铺登录状态');
+  }
+  await ensureTbShopLoggedIn(page, stepCode, shopId);
+  setPublishPage(taskId, { page, engine });
+  return { page, engine };
 }
 
 /** 通过内部 shopId 查询店铺，返回 platformShopId */
@@ -101,6 +152,8 @@ const TB_SAVE_DRAFT_TEXT = '保存草稿';
 const TB_PROTOCOL_BTN_SELECTOR = '.next-dialog-btn';
 /** 等待 window.Json 就绪的超时时间（ms） */
 const TB_WINDOW_JSON_TIMEOUT = 20_000;
+/** 淘宝草稿已删除或不可用时，草稿页 HTML 中展示的错误文案 */
+const TB_INVALID_DRAFT_DETAIL_TEXT = '获取草稿商品详情失败';
 /** 保存草稿接口特征 */
 const TB_DRAFT_ADD_API = 'draftOp/add.json';
 /** 编辑已有草稿时的保存接口特征 */
@@ -109,6 +162,20 @@ const TB_DRAFT_UPDATE_API = 'draftOp/update.json';
 interface TbSaleSpecUiState {
   mode: TbSaleSpecUiMode;
   text: string;
+}
+
+class InvalidTaobaoDraftError extends Error {
+  constructor(
+    readonly draftId: string,
+    readonly catId: string,
+  ) {
+    super('淘宝草稿已删除或不可用');
+    this.name = 'InvalidTaobaoDraftError';
+  }
+}
+
+function isInvalidTaobaoDraftError(error: unknown): error is InvalidTaobaoDraftError {
+  return error instanceof InvalidTaobaoDraftError;
 }
 
 function parseRequestForm(postData: string): Record<string, string> {
@@ -215,7 +282,20 @@ export class FillDraftStep extends PublishStep {
       draftCtx = existingCtx;
     } else if (serverDraft?.tbDraftId?.trim()) {
       // b) 有已有草稿：通过 draftId 打开草稿页面，获取 window.Json
-      draftCtx = await this.loadExistingDraft(ctx, serverDraft.tbDraftId.trim());
+      try {
+        draftCtx = await this.loadExistingDraft(ctx, serverDraft.tbDraftId.trim());
+      } catch (error) {
+        if (!isInvalidTaobaoDraftError(error)) {
+          throw error;
+        }
+        publishWarn(`[task:${ctx.taskId}] [TB] [draft-open] invalid draft, fallback to create by catId`, {
+          taskId: ctx.taskId,
+          draftId: error.draftId,
+          catId: error.catId,
+          reason: TB_INVALID_DRAFT_DETAIL_TEXT,
+        });
+        draftCtx = await this.createNewDraft(ctx);
+      }
     } else {
       // c) 新建草稿
       log.info('createNewDraft start');
@@ -514,7 +594,7 @@ export class FillDraftStep extends PublishStep {
     });
 
     // page 保留供后续步骤（EditDraft / Publish）复用，不在此处关闭
-    publishPageMap.set(ctx.taskId, { page, engine });
+    setPublishPage(ctx.taskId, { page, engine });
 
     return {
       catId: resolvedCatId,
@@ -551,9 +631,44 @@ export class FillDraftStep extends PublishStep {
     await ensureTbShopLoggedIn(page, this.stepCode, ctx.shopId);
 
     try {
-      await page.waitForFunction(() => Boolean(window?.Json), { timeout: TB_WINDOW_JSON_TIMEOUT });
-    } catch {
+      const loadStateHandle = await page.waitForFunction(
+        (invalidText) => {
+          const pageGlobal = globalThis as {
+            window?: { Json?: unknown };
+            document?: { body?: { innerText?: string }; documentElement?: { innerHTML?: string } };
+          };
+          const text = pageGlobal.document?.body?.innerText
+            ?? pageGlobal.document?.documentElement?.innerHTML
+            ?? '';
+          if (text.includes(invalidText)) {
+            return 'invalid-draft';
+          }
+          if (pageGlobal.window?.Json) {
+            return 'ready';
+          }
+          return '';
+        },
+        TB_INVALID_DRAFT_DETAIL_TEXT,
+        { timeout: TB_WINDOW_JSON_TIMEOUT },
+      );
+      const loadState = await loadStateHandle.jsonValue();
+      if (loadState === 'invalid-draft') {
+        await engine.closePage().catch(() => undefined);
+        throw new InvalidTaobaoDraftError(tbDraftId, fallbackCatId);
+      }
+    } catch (error) {
+      if (isInvalidTaobaoDraftError(error)) {
+        throw error;
+      }
       await ensureTbShopLoggedIn(page, this.stepCode, ctx.shopId);
+      const pageText = await page.evaluate(() => {
+        const doc = (globalThis as { document?: { body?: { innerText?: string }; documentElement?: { innerHTML?: string } } }).document;
+        return doc?.body?.innerText ?? doc?.documentElement?.innerHTML ?? '';
+      }).catch(() => '');
+      if (pageText.includes(TB_INVALID_DRAFT_DETAIL_TEXT)) {
+        await engine.closePage().catch(() => undefined);
+        throw new InvalidTaobaoDraftError(tbDraftId, fallbackCatId);
+      }
       throw new PublishError(this.stepCode, '无法打开淘宝草稿页面，请确认店铺登录状态');
     }
 
@@ -655,7 +770,7 @@ export class FillDraftStep extends PublishStep {
     });
 
     // page 保留供后续步骤（EditDraft / Publish）复用，不在此处关闭
-    publishPageMap.set(ctx.taskId, { page, engine });
+    setPublishPage(ctx.taskId, { page, engine });
 
     return {
       catId: resolvedCatId,

@@ -23,10 +23,20 @@ interface BatchDetailModalProps {
   batch: CollectBatchRecord | null;
   sourceType: CollectSourceType;
   focusRecordId?: number;
+  readOnly?: boolean;
+  favoritesOnly?: boolean;
   onClose: () => void;
 }
 
-export function BatchDetailModal({ open, batch, sourceType, focusRecordId = 0, onClose }: BatchDetailModalProps) {
+export function BatchDetailModal({
+  open,
+  batch,
+  sourceType,
+  focusRecordId = 0,
+  readOnly = false,
+  favoritesOnly = false,
+  onClose,
+}: BatchDetailModalProps) {
   const [records, setRecords] = useState<CollectRecordPreview[]>([]);
   const [loading, setLoading] = useState(false);
   const [selectedRecordId, setSelectedRecordId] = useState(0);
@@ -82,7 +92,12 @@ export function BatchDetailModal({ open, batch, sourceType, focusRecordId = 0, o
     }
 
     setLoading(true);
-    void fetchCollectBatchRecords(batch.id, { pageIndex: 1, pageSize: 200, source: activeSource })
+    void fetchCollectBatchRecords(batch.id, {
+      pageIndex: 1,
+      pageSize: 200,
+      source: activeSource,
+      isFavorite: favoritesOnly ? 1 : undefined,
+    })
       .then((result) => {
         const rawItems = Array.isArray(result.data) ? result.data : [];
         const normalizedItems = rawItems.map((item) =>
@@ -96,7 +111,7 @@ export function BatchDetailModal({ open, batch, sourceType, focusRecordId = 0, o
         message.error(error instanceof Error ? error.message : "加载采集记录失败");
       })
       .finally(() => setLoading(false));
-  }, [open, batch?.id, focusRecordId, activeSource]);
+  }, [open, batch?.id, focusRecordId, activeSource, favoritesOnly]);
 
   const workspaceState: CollectionWorkspaceState = {
     batch: batch ?? new CollectBatchRecord(),
@@ -155,7 +170,8 @@ export function BatchDetailModal({ open, batch, sourceType, focusRecordId = 0, o
           workspaceState={workspaceState}
           loading={loading}
           onSelectRecord={setSelectedRecordId}
-          onToggleFavorite={(record) => void handleToggleFavorite(record)}
+          readOnly={readOnly}
+          onToggleFavorite={readOnly ? undefined : (record) => void handleToggleFavorite(record)}
           onPreviewRecord={(record) => void syncElectronPreview(record)}
         />
       </div>
@@ -177,7 +193,8 @@ export function BatchDetailModal({ open, batch, sourceType, focusRecordId = 0, o
         <CollectionWorkspaceRightPanel
           workspaceState={workspaceState}
           loading={loading}
-          onToggleFavorite={(record) => void handleToggleFavorite(record)}
+          readOnly={readOnly}
+          onToggleFavorite={readOnly ? undefined : (record) => void handleToggleFavorite(record)}
         />
       </div>
       </Modal>

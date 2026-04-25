@@ -123,6 +123,9 @@ func (r *CollectRecordRepository) CountByQuery(query collectDTO.CollectRecordQue
 	if value := strings.TrimSpace(query.SourceProductID); value != "" {
 		dbQuery = dbQuery.Where("source_product_id = ?", value)
 	}
+	if query.IsFavorite != nil {
+		dbQuery = dbQuery.Where("is_favorite = ?", *query.IsFavorite)
+	}
 	dbQuery = applyCollectRecordSourceFilter(dbQuery, query.Source)
 	if value := strings.TrimSpace(query.ProductName); value != "" {
 		dbQuery = dbQuery.Where("product_name LIKE ?", "%"+value+"%")
@@ -150,6 +153,9 @@ func (r *CollectRecordRepository) ListByQuery(query collectDTO.CollectRecordQuer
 	}
 	if value := strings.TrimSpace(query.SourceProductID); value != "" {
 		dbQuery = dbQuery.Where("source_product_id = ?", value)
+	}
+	if query.IsFavorite != nil {
+		dbQuery = dbQuery.Where("is_favorite = ?", *query.IsFavorite)
 	}
 	dbQuery = applyCollectRecordSourceFilter(dbQuery, query.Source)
 	if value := strings.TrimSpace(query.ProductName); value != "" {

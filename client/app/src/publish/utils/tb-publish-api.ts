@@ -354,6 +354,8 @@ export function buildDraftJsonBody(
     merged.id = globalValue.id;
   }
 
+  merged.shopping_title = '';
+
   return merged;
 }
 

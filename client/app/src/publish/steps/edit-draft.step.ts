@@ -5,7 +5,7 @@ import { PublishStep } from '../core/publish-step';
 import type { StepContext } from '../core/step-context';
 import { PublishError } from '../core/errors';
 import { CaptchaChecker } from './captcha.step';
-import { getPublishPage, fetchPlatformShopId, detectTbSaleSpecUiState } from './fill-draft.step';
+import { ensurePublishPageForDraft, fetchPlatformShopId, detectTbSaleSpecUiState } from './fill-draft.step';
 import { parseTbWindowJsonForDraft } from '../parsers/tb-window-json.parser';
 import { ComponentDefaultsFiller } from '../fillers/component-defaults.filler';
 import { PropsFiller } from '../fillers/props.filler';
@@ -59,10 +59,7 @@ export class EditDraftStep extends PublishStep {
     }
 
     // ── Step 1: 重新加载草稿页面，获取最新 window.Json ────────────────────────
-    const pageEntry = getPublishPage(ctx.taskId);
-    if (!pageEntry) {
-      throw new PublishError(this.stepCode, '草稿页面未找到，请重新执行草稿填充步骤');
-    }
+    const pageEntry = await ensurePublishPageForDraft(ctx.taskId, ctx.shopId, draftCtx.draftId ?? '', this.stepCode);
     const { page } = pageEntry;
     pageEntry.engine.bindPublishTask(ctx.taskId);
 

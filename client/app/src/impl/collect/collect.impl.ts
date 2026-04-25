@@ -1,4 +1,6 @@
 import type { CookiesSetDetails } from "electron";
+import fs from "fs";
+import path from "path";
 import AdmZip from "adm-zip";
 import log from "electron-log";
 import {
@@ -30,6 +32,12 @@ import { importCollectedRecordToStore, navigateCollectionWorkspace, openCollecti
 import { saveCollectedToServer } from "@src/collect/collect.saver";
 import { collectBatchStatsDb } from "@src/collect/collect-batch-stats.db";
 import { requestBackend } from "../shared/backend";
+
+interface ImportJsonFile {
+  entryName: string;
+  name: string;
+  readText(): string;
+}
 
 function mapCookieSameSite(value?: "Strict" | "Lax" | "None") {
   switch (value) {
@@ -88,33 +96,26 @@ export class CollectImpl extends CollectApi {
     }
   }
 
-  private resolveImportSummary(
-    rawData: unknown,
-    sourceProductId: string,
-    driver: ReturnType<typeof getCollectionPlatformDriver>,
-  ): CollectedGoodsSummary {
-    const parsed = driver.parseGoodsSummary(rawData);
-    if (parsed?.sourceProductId && parsed.productName) {
-      return {
-        productName: parsed.productName,
-        sourceProductId: parsed.sourceProductId,
-        status: parsed.status || "COLLECTED",
-      };
+  private readImportJsonFiles(filePath: string): ImportJsonFile[] {
+    if (filePath.toLowerCase().endsWith(".zip")) {
+      const zip = new AdmZip(filePath);
+      return zip
+        .getEntries()
+        .filter((entry) => !entry.isDirectory)
+        .map((entry) => ({
+          entryName: entry.entryName,
+          name: entry.name,
+          readText: () => zip.readAsText(entry, "utf8"),
+        }));
     }
 
-    const payload = rawData && typeof rawData === "object" ? (rawData as Record<string, unknown>) : {};
-    const candidates = ["title", "itemTitle", "auctionTitle", "goods_name", "goodsName", "name"];
-    const productName =
-      candidates
-        .map((key) => String(payload[key] || "").trim())
-        .find(Boolean) || `导入商品 ${sourceProductId}`;
-
-    return {
-      productName,
-      sourceProductId,
-      status: "COLLECTED",
-    };
+    return [{
+      entryName: path.basename(filePath),
+      name: path.basename(filePath),
+      readText: () => fs.readFileSync(filePath, "utf8"),
+    }];
   }
+
 
   async getCollectBatch(id: number): Promise<CollectBatchRecord> {
     return requestBackend("GET", `/collect-batches/${id}`);
@@ -335,15 +336,14 @@ export class CollectImpl extends CollectApi {
         params: {
           pageIndex: 1,
           pageSize: 1000,
-          source: "file",
         },
       });
-      const existingSourceProductIds = new Set(
-        (Array.isArray(existingPage.data) ? existingPage.data : []).map((item) => String(item.sourceProductId || "").trim()),
+      const existingRecordKeys = new Set(
+        (Array.isArray(existingPage.data) ? existingPage.data : []).map(
+          (item) => String(item.sourceProductId || "").trim(),
+        ),
       );
-      const zip = new AdmZip(filePath);
-      const entries = zip.getEntries();
-      const jsonEntries = entries.filter((entry) => !entry.isDirectory && entry.entryName.toLowerCase().endsWith(".json"));
+      const jsonEntries = this.readImportJsonFiles(filePath);
       const total = jsonEntries.length;
 
       let importedCount = 0;
@@ -360,29 +360,78 @@ export class CollectImpl extends CollectApi {
         percent: total > 0 ? 0 : 100,
         currentFile: "",
         status: "running",
-        message: total > 0 ? "开始解析 zip 文件" : "zip 中没有可导入的 json 文件",
+        message: total > 0 ? "开始解析文件" : "文件中没有可导入的内容",
       });
 
       for (const [index, entry] of jsonEntries.entries()) {
         const processedBefore = index;
 
-        const sourceProductId = String(entry.name || "").replace(/\.json$/i, "").trim();
-        if (!sourceProductId) {
-          skippedCount += 1;
-          errors.push(`文件 ${entry.entryName} 缺少商品ID`);
-          this.pushImportProgress({
-            batchId,
-            total,
-            processed: processedBefore + 1,
-            percent: total > 0 ? Math.round(((processedBefore + 1) / total) * 100) : 100,
-            currentFile: entry.entryName,
-            status: "running",
-            message: "文件名缺少商品ID，已跳过",
-          });
-          continue;
-        }
-
         try {
+          const rawText = entry.readText();
+          let rawData: unknown;
+          try {
+            rawData = JSON.parse(rawText);
+          } catch (_parseError) {
+            log.debug("[collect.import] skipping non-JSON entry", { batchId, entryName: entry.entryName });
+            skippedCount += 1;
+            this.pushImportProgress({
+              batchId,
+              total,
+              processed: processedBefore + 1,
+              percent: total > 0 ? Math.round(((processedBefore + 1) / total) * 100) : 100,
+              currentFile: entry.entryName,
+              status: "running",
+              message: "非JSON内容，已跳过",
+            });
+            continue;
+          }
+
+          const parsedSummary = driver.parseGoodsSummary(rawData);
+          if (!parsedSummary?.sourceProductId) {
+            log.debug("[collect.import] skipping unrecognized entry", { batchId, entryName: entry.entryName });
+            skippedCount += 1;
+            this.pushImportProgress({
+              batchId,
+              total,
+              processed: processedBefore + 1,
+              percent: total > 0 ? Math.round(((processedBefore + 1) / total) * 100) : 100,
+              currentFile: entry.entryName,
+              status: "running",
+              message: "无法识别商品数据，已跳过",
+            });
+            continue;
+          }
+
+          let productName = parsedSummary.productName;
+          if (driver.sourceType === "pxx") {
+            const rawGoods = (rawData as Record<string, unknown>)?.goods as Record<string, unknown> | undefined;
+            const shortName = String(rawGoods?.short_name || "").trim();
+            if (shortName) {
+              productName = shortName;
+            }
+          }
+
+          const summary: CollectedGoodsSummary = {
+            productName,
+            sourceProductId: parsedSummary.sourceProductId,
+            status: parsedSummary.status || "COLLECTED",
+          };
+          const recordKey = summary.sourceProductId;
+
+          if (existingRecordKeys.has(recordKey)) {
+            skippedCount += 1;
+            this.pushImportProgress({
+              batchId,
+              total,
+              processed: processedBefore + 1,
+              percent: total > 0 ? Math.round(((processedBefore + 1) / total) * 100) : 100,
+              currentFile: entry.entryName,
+              status: "running",
+              message: "已采集，跳过",
+            });
+            continue;
+          }
+
           this.pushImportProgress({
             batchId,
             total,
@@ -392,11 +441,8 @@ export class CollectImpl extends CollectApi {
             status: "running",
             message: `正在导入 ${entry.entryName}`,
           });
-          const rawText = zip.readAsText(entry, "utf8");
-          const rawData = JSON.parse(rawText);
-          const summary = this.resolveImportSummary(rawData, sourceProductId, driver);
+
           importCollectedRecordToStore(summary, rawData, driver.sourceType);
-          const existedBeforeImport = existingSourceProductIds.has(String(summary.sourceProductId || "").trim());
 
           const result = await saveCollectedToServer(summary, {
             batchId,
@@ -412,14 +458,11 @@ export class CollectImpl extends CollectApi {
           if (result.updatedBatch) {
             currentBatch = result.updatedBatch;
           }
-          if (!existedBeforeImport) {
-            existingSourceProductIds.add(String(summary.sourceProductId || "").trim());
-            importedCount += 1;
-            const existingCount = Number(currentBatch.collectedCount || currentRecordsCount);
-            currentRecordsCount = Math.max(existingCount, currentRecordsCount + 1);
-          } else {
-            updatedCount += 1;
-          }
+          existingRecordKeys.add(recordKey);
+          importedCount += 1;
+          const existingCount = Number(currentBatch.collectedCount || currentRecordsCount);
+          currentRecordsCount = Math.max(existingCount, currentRecordsCount + 1);
+
           this.pushImportProgress({
             batchId,
             total,
@@ -427,7 +470,7 @@ export class CollectImpl extends CollectApi {
             percent: total > 0 ? Math.round(((processedBefore + 1) / total) * 100) : 100,
             currentFile: entry.entryName,
             status: "running",
-            message: existedBeforeImport ? "已更新商品数据" : "已新增商品数据",
+            message: "已新增商品数据",
           });
         } catch (error) {
           skippedCount += 1;
@@ -453,7 +496,7 @@ export class CollectImpl extends CollectApi {
         percent: 100,
         currentFile: "",
         status: "completed",
-        message: `导入完成，新增 ${importedCount} 条，更新 ${updatedCount} 条`,
+        message: `导入完成，新增 ${importedCount} 条，跳过 ${skippedCount} 条`,
       });
 
       // 导入完成后同步本地统计数据（覆盖 saveCollectedToServer 逐条累计的偏差）

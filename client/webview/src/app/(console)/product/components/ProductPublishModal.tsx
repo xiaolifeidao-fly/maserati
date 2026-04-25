@@ -1142,10 +1142,10 @@ export function ProductPublishModal({
           );
 
           await publishApi.startPublish(createdTask.id);
-          const finalTask = await waitForPublishTaskFinish(publishApi, createdTask.id, (event) => {
-            if (publishRunIdRef.current !== runId) {
-              return;
-            }
+
+          // 进度回调（供多次等待复用）
+          const onTaskProgress = (event: PublishProgressEvent) => {
+            if (publishRunIdRef.current !== runId) return;
             setPublishQueue((cur) =>
               cur.map((q) =>
                 q.key === item.key
@@ -1154,7 +1154,7 @@ export function ProductPublishModal({
                       status: event.status === "FAILED" ? "FAILED" : event.status === "SUCCESS" ? "SUCCESS" : "PUBLISHING",
                       currentStepCode: event.stepCode,
                       statusText: event.status === PublishStepStatus.PENDING
-                        ? "等待验证码，完成右侧校验后点击继续发布"
+                        ? "等待验证码，完成右侧校验后继续发布"
                         : event.message || q.statusText,
                       waitingForCaptcha: event.status === PublishStepStatus.PENDING,
                       error: event.status === "FAILED" ? event.message || "发布失败" : undefined,
@@ -1162,54 +1162,58 @@ export function ProductPublishModal({
                   : q,
               ),
             );
-          });
+          };
+
+          let finalTask = await waitForPublishTaskFinish(publishApi, createdTask.id, onTaskProgress);
+
+          // 遇到验证码（PENDING）时：挂起，等验证码通过后继续当前商品，不跳下一个商品
+          while (
+            finalTask.status === PublishTaskStatus.PENDING &&
+            publishRunIdRef.current === runId &&
+            !stopRequestedRef.current
+          ) {
+            setPublishQueue((cur) =>
+              cur.map((q) =>
+                q.key === item.key
+                  ? { ...q, status: "PUBLISHING", waitingForCaptcha: true, statusText: "等待验证码，完成右侧校验后继续发布" }
+                  : q,
+              ),
+            );
+            // 验证码通过后主进程会自动 resumePublish，任务重回 RUNNING → SUCCESS/FAILED
+            finalTask = await waitForPublishTaskFinish(publishApi, createdTask.id, onTaskProgress);
+          }
 
           if (publishRunIdRef.current !== runId) {
             break;
           }
 
-          if (finalTask.status === PublishTaskStatus.PENDING) {
-            // 验证码等待：保留 waitingForCaptcha 状态，继续处理下一个商品
-            setPublishQueue((cur) =>
-              cur.map((q) =>
-                q.key === item.key
-                  ? {
-                      ...q,
-                      status: "PUBLISHING",
-                      waitingForCaptcha: true,
-                      statusText: "等待验证码，完成右侧校验后点击继续发布",
-                    }
-                  : q,
-              ),
-            );
-          } else {
-            setPublishQueue((cur) =>
-              cur.map((q) =>
-                q.key === item.key
-                  ? {
-                      ...q,
-                      status: finalTask.status === PublishTaskStatus.SUCCESS ? "SUCCESS" : "FAILED",
-                      publishedItemId: finalTask.outerItemId || undefined,
-                      publishedTime: finalTask.updatedTime || finalTask.createdTime || q.publishedTime,
-                      currentStepCode: finalTask.currentStepCode,
-                      statusText: finalTask.status === PublishTaskStatus.CANCELLED
+          // 当前商品已成功或失败，更新状态后进入下一个商品
+          setPublishQueue((cur) =>
+            cur.map((q) =>
+              q.key === item.key
+                ? {
+                    ...q,
+                    status: finalTask.status === PublishTaskStatus.SUCCESS ? "SUCCESS" : "FAILED",
+                    publishedItemId: finalTask.outerItemId || undefined,
+                    publishedTime: finalTask.updatedTime || finalTask.createdTime || q.publishedTime,
+                    currentStepCode: finalTask.currentStepCode,
+                    statusText: finalTask.status === PublishTaskStatus.CANCELLED
+                      ? "任务已取消"
+                      : finalTask.outerItemId
+                        ? `淘宝商品 #${finalTask.outerItemId}`
+                        : q.statusText,
+                    waitingForCaptcha: false,
+                    error: finalTask.status === PublishTaskStatus.SUCCESS
+                      ? undefined
+                      : finalTask.status === PublishTaskStatus.CANCELLED
                         ? "任务已取消"
-                        : finalTask.outerItemId
-                          ? `淘宝商品 #${finalTask.outerItemId}`
-                          : q.statusText,
-                      waitingForCaptcha: false,
-                      error: finalTask.status === PublishTaskStatus.SUCCESS
-                        ? undefined
-                        : finalTask.status === PublishTaskStatus.CANCELLED
-                          ? "任务已取消"
-                          : finalTask.errorMessage || q.error || "发布失败",
-                    }
-                  : q,
-              ),
-            );
-            if (finalTask.status !== PublishTaskStatus.SUCCESS && isUnauthenticatedPublishMessage(finalTask.errorMessage)) {
-              markSelectedShopLoggedOut(item.shopId);
-            }
+                        : finalTask.errorMessage || q.error || "发布失败",
+                  }
+                : q,
+            ),
+          );
+          if (finalTask.status !== PublishTaskStatus.SUCCESS && isUnauthenticatedPublishMessage(finalTask.errorMessage)) {
+            markSelectedShopLoggedOut(item.shopId);
           }
         } catch (error) {
           if (isUnauthenticatedPublishMessage(error instanceof Error ? error.message : error)) {

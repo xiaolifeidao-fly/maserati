@@ -5,7 +5,7 @@ import type { StepContext } from '../core/step-context';
 import { PublishError } from '../core/errors';
 import { CaptchaChecker } from './captcha.step';
 import { publishInfo, summarizeForLog } from '../utils/publish-logger';
-import { getPublishPage } from './fill-draft.step';
+import { ensurePublishPageForDraft } from './fill-draft.step';
 import type { NormalizedTbResponse } from '../utils/tb-publish-api';
 import { deleteTaobaoDraft, publishToTaobao, summarizeTbFailureForResult } from '../utils/tb-publish-api';
 
@@ -37,10 +37,7 @@ export class PublishFinalStep extends PublishStep {
     //  - 解析 globalMessage.type (success/error/warning)
     //  - 提取 successUrl 中的 primaryId
     //  - 成功后删除草稿
-    const pageEntry = getPublishPage(ctx.taskId);
-    if (!pageEntry) {
-      throw new PublishError(this.stepCode, '发布页面未找到，无法提交最终发布');
-    }
+    const pageEntry = await ensurePublishPageForDraft(ctx.taskId, ctx.shopId, draftCtx.draftId ?? '', this.stepCode);
     pageEntry.engine.bindPublishTask(ctx.taskId);
     const result = await publishToTaobao(
       ctx.taskId,

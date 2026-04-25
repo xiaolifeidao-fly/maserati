@@ -113,7 +113,9 @@ function getActivePath(pathname: string) {
     return "/workspace";
   }
 
-  const matchedItem = navigationItems.find((item) => pathname.startsWith(item.key));
+  const matchedItem = [...navigationItems]
+    .sort((a, b) => b.key.length - a.key.length)
+    .find((item) => pathname.startsWith(item.key));
   if (matchedItem) {
     return matchedItem.key;
   }

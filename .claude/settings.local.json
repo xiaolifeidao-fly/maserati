@@ -28,7 +28,10 @@
       "Bash(grep -E \"\\\\.\\(tsx?|jsx?\\)$\")",
       "Bash(grep -E \"\\(\\\\.ts|\\\\.tsx\\)$\")",
       "Bash(grep -E \"types|\\\\.ts$\")",
-      "Bash(grep -E \"\\\\.tsx?$\")"
+      "Bash(grep -E \"\\\\.tsx?$\")",
+      "Bash(find /Users/fly/Documents/develop/private/maserati/client/webview -maxdepth 1 -name \"package.json\" -exec cat {} \\\\;)",
+      "Bash(npm uninstall *)",
+      "Bash(npm run *)"
     ]
   }
 }

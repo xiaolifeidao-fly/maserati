@@ -39,9 +39,7 @@ const mainConfig = {
     path: path.resolve(__dirname, 'dist'),
     filename: '[name].js'
   },
-  externals: [nodeExternals({
-    allowlist: [/^electron-store$/],
-  })],
+  externals: [nodeExternals()],
 };
 
 const preloadConfig = {

@@ -1,7 +1,6 @@
 import { app } from 'electron';
 import fs from 'fs';
 import path from 'path';
-import Store from 'electron-store';
 import { initStore, type StoreAdapter } from '../../../common/utils/store/electron';
 
 type SqlJsModule = {
@@ -14,36 +13,8 @@ type SqlJsDatabase = {
     export(): Uint8Array;
 };
 
-const DEFAULT_STORAGE_DRIVER = 'store';
 const SQLITE_STORAGE_DIR = 'storage';
 const SQLITE_STORAGE_FILE = 'app-storage.sqlite';
-
-function resolveStorageDriver(): string {
-    return String(process.env.ELECTRON_STORAGE_DRIVER ?? DEFAULT_STORAGE_DRIVER)
-        .trim()
-        .toLowerCase();
-}
-
-function createElectronStoreAdapter(): StoreAdapter {
-    const store = new Store();
-    return {
-        get(key: string): any {
-            return store.get(key);
-        },
-        set(key: string, value: any): void {
-            store.set(key, value);
-        },
-        delete(key: string): void {
-            store.delete(key);
-        },
-        clear(): void {
-            store.clear();
-        },
-        keys(): string[] {
-            return Object.keys(store.store);
-        },
-    };
-}
 
 async function loadSqlJsModule(): Promise<SqlJsModule> {
     const sqlJsFactory = require('sql.js/dist/sql-asm.js');
@@ -125,18 +96,10 @@ function createSqliteStoreAdapter(db: SqlJsDatabase, filePath: string): StoreAda
     };
 }
 
-async function createSqliteAdapter(): Promise<StoreAdapter> {
+export async function init(): Promise<void> {
     const SQL = await loadSqlJsModule();
     const filePath = path.join(app.getPath('userData'), SQLITE_STORAGE_DIR, SQLITE_STORAGE_FILE);
     const database = new SQL.Database(readDatabaseFile(filePath));
-    return createSqliteStoreAdapter(database, filePath);
-}
-
-export async function init(): Promise<void> {
-    const storageDriver = resolveStorageDriver();
-    const adapter = storageDriver === 'sqlite'
-        ? await createSqliteAdapter()
-        : createElectronStoreAdapter();
-
+    const adapter = createSqliteStoreAdapter(database, filePath);
     initStore(adapter);
 }
