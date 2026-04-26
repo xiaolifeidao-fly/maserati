@@ -17,6 +17,7 @@ import { buildPlaceholderRecord, prependPlaceholder, applyRecordUpdate } from ".
 import { saveCollectedToServer } from "./collect.saver";
 import { requestBackend } from "@src/impl/shared/backend";
 import { setGlobal, getGlobal } from "../../../common/utils/store/electron";
+import { normalizePlatform, getSecChUa } from "@src/browser/engine";
 
 interface OpenCollectionWorkspaceOptions {
   batch: CollectBatchRecord;
@@ -273,6 +274,63 @@ function createUtilityView(backgroundColor: string) {
   });
   view.setBackgroundColor(backgroundColor);
   return view;
+}
+
+function getCenterViewBrowserEnv() {
+  const chromeVersion = process.env.CHROME_VERSION || "1169";
+  const stored = getGlobal("tbk_browserPlatform_" + chromeVersion);
+  if (stored) {
+    try {
+      const platform = normalizePlatform(JSON.parse(stored));
+      if (platform?.userAgent) {
+        return {
+          ua: platform.userAgent as string,
+          secChUa: getSecChUa(platform),
+          secChUaPlatform: (platform.userAgentData?.platform as string) || "macOS",
+        };
+      }
+    } catch (_) {}
+  }
+  // Playwright platform not yet initialized — build fallback from Electron's bundled Chrome version
+  const chrome = process.versions.chrome || "136.0.0.0";
+  const major = chrome.split(".")[0];
+  return {
+    ua: `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chrome} Safari/537.36`,
+    secChUa: `"Chromium";v="${major}", "Not.A/Brand";v="24", "Google Chrome";v="${major}"`,
+    secChUaPlatform: "macOS",
+  };
+}
+
+function setupCenterViewBrowserEnvironment(center: BrowserView) {
+  const { ua, secChUa, secChUaPlatform } = getCenterViewBrowserEnv();
+
+  center.webContents.setUserAgent(ua);
+
+  // Override sec-ch-ua headers for PDD domains to remove Electron brand
+  center.webContents.session.webRequest.onBeforeSendHeaders(
+    { urls: ["*://*.yangkeduo.com/*", "*://yangkeduo.com/*"] },
+    (details, callback) => {
+      const headers = { ...details.requestHeaders };
+      headers["sec-ch-ua"] = secChUa;
+      headers["sec-ch-ua-mobile"] = "?0";
+      headers["sec-ch-ua-platform"] = `"${secChUaPlatform}"`;
+      headers["User-Agent"] = ua;
+      callback({ requestHeaders: headers });
+    },
+  );
+
+  // Inject anti-detection overrides before page scripts run
+  center.webContents.on("dom-ready", () => {
+    void center.webContents.executeJavaScript(
+      `(function(){
+        try {
+          Object.defineProperty(navigator,'webdriver',{get:()=>false,configurable:true});
+          if(!window.chrome){window.chrome={runtime:{}};}
+        } catch(_){}
+      })();`,
+      true,
+    ).catch(() => {});
+  });
 }
 
 function getWorkspaceBounds(windowInstance: BrowserWindow) {
@@ -971,6 +1029,7 @@ export async function openCollectionWorkspace(options: OpenCollectionWorkspaceOp
     const right = createUtilityView("#eef2f6");
 
     workspaceViews = { left, center, right };
+    setupCenterViewBrowserEnvironment(center);
     bindCenterViewEvents(center);
     bindCenterWindowOpenHandler(center);
 

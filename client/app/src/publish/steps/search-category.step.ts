@@ -3,6 +3,7 @@ import type { StepResult } from '../core/publish-step';
 import { PublishStep } from '../core/publish-step';
 import type { StepContext } from '../core/step-context';
 import { PublishError, StepSkippedError } from '../core/errors';
+import { CaptchaChecker } from './captcha.step';
 import { requestBackend } from '@src/impl/shared/backend';
 import type { TbCategoryInfo } from '../types/draft';
 import type { RawSourceData } from '../types/source-data';
@@ -471,8 +472,8 @@ export class SearchCategoryStep extends PublishStep {
       status: response.status,
       output: summarizeForLog(payload),
     });
-    if (payload?.rgv587_flag === 'sm' && payload.url) {
-      throw new PublishError(this.stepCode, `淘宝类目搜索出现验证码: ${payload.url}`);
+    if (payload?.rgv587_flag === 'sm') {
+      CaptchaChecker.require(this.stepCode, String(payload.url ?? ''));
     }
     if (!payload?.success) {
       return [];

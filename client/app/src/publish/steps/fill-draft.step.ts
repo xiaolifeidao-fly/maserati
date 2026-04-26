@@ -3,7 +3,7 @@ import type { PublishStrategy } from '../types/publish-task';
 import type { StepResult } from '../core/publish-step';
 import { PublishStep } from '../core/publish-step';
 import type { StepContext } from '../core/step-context';
-import { PublishError } from '../core/errors';
+import { PublishError, CaptchaRequiredError } from '../core/errors';
 import { CaptchaChecker } from './captcha.step';
 import { BasicInfoFiller } from '../fillers/basic-info.filler';
 import { ComponentDefaultsFiller } from '../fillers/component-defaults.filler';
@@ -804,6 +804,7 @@ export class FillDraftStep extends PublishStep {
   ): Promise<boolean> {
     try {
       const draftList = await listTaobaoDrafts(taskId, shopId, page, catId);
+      CaptchaChecker.check(this.stepCode, draftList);
       const draftCount = typeof draftList.count === 'number'
         ? draftList.count
         : Array.isArray(draftList.list) ? draftList.list.length : 0;
@@ -825,12 +826,14 @@ export class FillDraftStep extends PublishStep {
         if (!tbDraftId) {
           continue;
         }
-        await deleteTaobaoDraftById(taskId, shopId, page, catId, tbDraftId);
+        const deleteResult = await deleteTaobaoDraftById(taskId, shopId, page, catId, tbDraftId);
+        CaptchaChecker.check(this.stepCode, deleteResult);
       }
 
       await this.cleanupLocalDraftRecords(shopId, catId);
       return true;
-    } catch {
+    } catch (err) {
+      if (err instanceof CaptchaRequiredError) throw err;
       // 容错：查询/删除失败不阻塞发布
       return false;
     }

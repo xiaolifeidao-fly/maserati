@@ -2,7 +2,8 @@ import { StepCode, StepStatus, STEP_ORDER } from '../types/publish-task';
 import type { StepResult } from '../core/publish-step';
 import { PublishStep } from '../core/publish-step';
 import type { StepContext } from '../core/step-context';
-import { PublishError, StepSkippedError } from '../core/errors';
+import { PublishError, StepSkippedError, CaptchaRequiredError } from '../core/errors';
+import { CaptchaChecker } from './captcha.step';
 import { requestBackend } from '@src/impl/shared/backend';
 import { TbEngine } from '@src/browser/tb.engine';
 import sharp from 'sharp';
@@ -566,20 +567,14 @@ export class UploadImagesStep extends PublishStep {
 
         // 验证拦截（需要滑块验证）
         if ('ret' in data && Array.isArray(data.ret) && data.ret[0] === 'FAIL_SYS_USER_VALIDATE') {
-          return {
-            filePath,
-            message: '淘宝上传图片需要验证码',
-            details: summarizeForLog(data) as Record<string, unknown>,
-          };
+          const captchaUrl = String((data as Record<string, unknown> & { data?: { url?: string } }).data?.url ?? '');
+          CaptchaChecker.require(this.stepCode, captchaUrl);
         }
 
         // 安全拦截
         if (data.rgv587_flag === 'sm') {
-          return {
-            filePath,
-            message: '淘宝上传图片被安全校验拦截',
-            details: summarizeForLog(data) as Record<string, unknown>,
-          };
+          const captchaUrl = String((data as Record<string, unknown> & { url?: string }).url ?? '');
+          CaptchaChecker.require(this.stepCode, captchaUrl);
         }
 
         if (!data.success) {
@@ -609,6 +604,7 @@ export class UploadImagesStep extends PublishStep {
           size: typeof fileData.size === 'number' ? fileData.size : undefined,
         };
       } catch (error) {
+        if (error instanceof CaptchaRequiredError) throw error;
         publishTaobaoResponseLog(taskId, 'upload-image-error', {
           url: TB_UPLOAD_URL,
           method: 'POST',

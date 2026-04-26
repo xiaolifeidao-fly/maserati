@@ -392,7 +392,8 @@ interface ExternalPddRawData extends Record<string, unknown> {
 
 function isExternalPddRawData(rawData: Record<string, unknown>): rawData is ExternalPddRawData {
   const goods = rawData.goods as Record<string, unknown> | undefined;
-  return Boolean(goods && (goods.goods_id || goods.goods_name || rawData.sku));
+  // External pdd zip data uses snake_case exclusively; normal pxx app data uses camelCase (goodsId/goodsName)
+  return Boolean(goods && (goods.goods_id != null || goods.goods_name != null));
 }
 
 function secondsToDeliveryTime(value: unknown): string | undefined {
@@ -518,7 +519,8 @@ export function convertPxxToStandard(
   const detailRes = ((rawData as { res?: Record<string, unknown> }).res ?? rawData) as Record<string, unknown>;
   const store = rawData.store as Record<string, unknown> | null;
   const initDataObj = store?.initDataObj as Record<string, unknown> | null;
-  const goods = (initDataObj?.goods as Record<string, unknown> | null) ?? {};
+  const containerGoods = rawData.goods as Record<string, unknown> | null;
+  const goods = (initDataObj?.goods as Record<string, unknown> | null) ?? containerGoods ?? {};
 
   const viewImageDataRaw = goods.viewImageData;
   const allViewImages: string[] = Array.isArray(viewImageDataRaw)

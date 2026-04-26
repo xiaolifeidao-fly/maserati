@@ -180,26 +180,8 @@ export class CollectImpl extends CollectApi {
       }
 
       const context = engine.getContext();
-      const cookies = context ? await context.cookies() : [];
-      const cookieDetails = cookies
-        .map((cookie) => {
-          const host = cookie.domain.replace(/^\./, "");
-          if (!host) {
-            return null;
-          }
-          return {
-            url: `${cookie.secure ? "https" : "http"}://${host}${cookie.path || "/"}`,
-            name: cookie.name,
-            value: cookie.value,
-            domain: cookie.domain,
-            path: cookie.path,
-            secure: cookie.secure,
-            httpOnly: cookie.httpOnly,
-            sameSite: mapCookieSameSite(cookie.sameSite),
-            expirationDate: cookie.expires > 0 ? cookie.expires : undefined,
-          };
-        })
-        .filter((item): item is NonNullable<typeof item> => Boolean(item));
+      const storageState = context ? await context.storageState() : { cookies: [], origins: [] };
+      const cookieDetails = toElectronCookies(Array.isArray(storageState.cookies) ? storageState.cookies : []);
 
       workspaceUrl = await openCollectionWorkspace({
         batch,
@@ -207,6 +189,7 @@ export class CollectImpl extends CollectApi {
         sourceType,
         initialUrl: driver.homeUrl,
         cookies: cookieDetails,
+        originStorage: Array.isArray(storageState.origins) ? storageState.origins : [],
       });
 
       if (!openedPage.isClosed()) {
