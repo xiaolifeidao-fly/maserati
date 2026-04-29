@@ -2,7 +2,7 @@ import { StepCode, StepStatus, STEP_ORDER, SourceType } from '../types/publish-t
 import type { StepResult } from '../core/publish-step';
 import { PublishStep } from '../core/publish-step';
 import type { StepContext } from '../core/step-context';
-import { PublishError, StepSkippedError } from '../core/errors';
+import { PublishError, StepSkippedError, CaptchaRequiredError } from '../core/errors';
 import { CaptchaChecker } from './captcha.step';
 import { requestBackend } from '@src/impl/shared/backend';
 import type { TbCategoryInfo } from '../types/draft';
@@ -18,9 +18,9 @@ import {
   summarizeForLog,
 } from '../utils/publish-logger';
 import { ensureTbShopLoggedIn, handleTbMaybeLoginRequired } from '../utils/tb-login-state';
+import { getTaskWindowJson, interceptWindowJson, setTaskWindowJson } from '../utils/window-json.memory';
 
 declare const navigator: any;
-declare const window: any;
 
 const TB_CATEGORY_SEARCH_PAGE_URL = 'https://item.upload.taobao.com/sell/ai/category.htm?type=category';
 const TB_CATEGORY_SEARCH_API_URL = 'https://item.upload.taobao.com/sell/ai/asyncOpt.htm';
@@ -316,23 +316,20 @@ export class SearchCategoryStep extends PublishStep {
         throw new PublishError(this.stepCode, `未能找到匹配的淘宝类目，商品标题: ${params.title}`);
       }
 
+      // 先注册响应拦截，再 goto，确保捕获 HTML 中的 window.Json
+      const capturePromise = interceptWindowJson(page, ctx.taskId, 15000);
       await page.goto(`${TB_PUBLISH_PAGE_URL}?catId=${matchedCategory.id}`, {
         waitUntil: 'domcontentloaded',
         timeout: 30000,
       });
       await ensureTbShopLoggedIn(page, this.stepCode, ctx.shopId);
-      try {
-        await page.waitForFunction(() => Boolean(window?.Json), {
-          timeout: 15000,
-        });
-      } catch {
-        await ensureTbShopLoggedIn(page, this.stepCode, ctx.shopId);
-        throw new PublishError(this.stepCode, '无法打开淘宝发布页面，请确认店铺登录状态');
-      }
+      await capturePromise;
 
-      const rawWindowJson = await page.evaluate(() => {
-        return window?.Json;
-      });
+      const rawWindowJson = getTaskWindowJson(ctx.taskId);
+      if (!rawWindowJson) {
+        await ensureTbShopLoggedIn(page, this.stepCode, ctx.shopId);
+        throw new PublishError(this.stepCode, '无法获取淘宝发布页面数据，请确认店铺登录状态');
+      }
       const tbWindowJson = parseTbWindowJsonForDraft(rawWindowJson);
       const categoryInfo = buildCategoryInfoFromTbWindowJson(tbWindowJson, {
         catId: String(matchedCategory.id),
@@ -357,6 +354,7 @@ export class SearchCategoryStep extends PublishStep {
 
       return categoryInfo;
     } catch (error) {
+      if (error instanceof CaptchaRequiredError) throw error;
       if (error instanceof PublishError) {
         throw error;
       }

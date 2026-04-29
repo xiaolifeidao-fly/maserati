@@ -7,7 +7,7 @@ import { TbEngine } from '@src/browser/tb.engine';
 import { requestBackend } from '../shared/backend';
 import { PublishRunner } from '@src/publish/core/publish-runner';
 import { HttpPublishPersister } from '@src/publish/core/http-publish-persister';
-import { showCaptchaPanel, getCaptchaBrowserCookies } from '@src/publish/publish-window';
+import { showCaptchaPanel, showScreenshotCaptchaPanel, getCaptchaBrowserCookies } from '@src/publish/publish-window';
 import { injectCookiesIntoTbContext } from '@src/browser/engine';
 import type {
   PublishCenterState,
@@ -190,26 +190,38 @@ export class PublishImpl extends PublishApi {
       PublishImpl.syncProgress(taskId, event);
       // 检测到验证码时，自动在发布窗口右侧展示验证码；验证通过后自动继续发布
       if (event.captchaUrl) {
-        showCaptchaPanel(event.captchaUrl, () => {
-          void getCaptchaBrowserCookies()
-            .then(electronCookies => {
-              const playwrightCookies = electronCookies.map(c => ({
-                name: c.name,
-                value: c.value,
-                domain: c.domain ?? '',
-                path: c.path ?? '/',
-                expires: c.expirationDate,
-                httpOnly: c.httpOnly ?? false,
-                secure: c.secure ?? false,
-                sameSite: mapElectronSameSite(c.sameSite),
-              }));
-              return injectCookiesIntoTbContext(String(task.shopId), playwrightCookies);
-            })
-            .catch(err => {
-              publishInfo(`[task:${taskId}] captcha cookie sync failed, resuming anyway`, { error: String(err) });
-            })
-            .then(() => this.resumePublish(taskId));
-        });
+        if (event.captchaMode === 'screenshot') {
+          // 图片上传验证码：通过 Playwright 截屏流呈现，验证码直接在 headless 会话中完成，
+          // 无需将 Electron BrowserView cookie 注入 Playwright
+          void showScreenshotCaptchaPanel(event.captchaUrl, task.shopId, taskId, () => {
+            // 重置 validateAutoTag，让上传步骤恢复后直接使用 Playwright 会话 cookie
+            const engine = new TbEngine(String(task.shopId), true);
+            engine.setValidateAutoTag(true);
+            void this.resumePublish(taskId);
+          });
+        } else {
+          // 其他步骤验证码：Electron BrowserView 加载验证码 URL，通过后同步 cookie 到 Playwright
+          showCaptchaPanel(event.captchaUrl, () => {
+            void getCaptchaBrowserCookies()
+              .then(electronCookies => {
+                const playwrightCookies = electronCookies.map(c => ({
+                  name: c.name,
+                  value: c.value,
+                  domain: c.domain ?? '',
+                  path: c.path ?? '/',
+                  expires: c.expirationDate,
+                  httpOnly: c.httpOnly ?? false,
+                  secure: c.secure ?? false,
+                  sameSite: mapElectronSameSite(c.sameSite),
+                }));
+                return injectCookiesIntoTbContext(String(task.shopId), playwrightCookies);
+              })
+              .catch(err => {
+                publishInfo(`[task:${taskId}] captcha cookie sync failed, resuming anyway`, { error: String(err) });
+              })
+              .then(() => this.resumePublish(taskId));
+          });
+        }
       }
     });
 

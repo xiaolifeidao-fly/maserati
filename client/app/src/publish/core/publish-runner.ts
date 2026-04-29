@@ -36,6 +36,7 @@ import type { RawSourceData } from '../types/source-data';
 import { clearPublishStepPayloads } from '../runtime/publish-step-store';
 import { clearImageCropMeta } from './publish-image-meta-store';
 import { cleanupPublishImages } from '../steps/upload-images.step';
+import { clearTaskWindowJson } from '../utils/window-json.memory';
 import type { PublishBrandMode, PublishConfig, PublishPriceSettings, PublishStrategy } from '../types/publish-task';
 
 function parseTaskPublishConfig(remark?: string): PublishConfig {
@@ -278,6 +279,7 @@ export class PublishRunner {
     } finally {
       this.taskStartTimeMap.delete(taskId);
       clearImageCropMeta(taskId);
+      clearTaskWindowJson(taskId);
     }
   }
 

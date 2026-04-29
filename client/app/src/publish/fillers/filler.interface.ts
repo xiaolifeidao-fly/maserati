@@ -1,3 +1,4 @@
+import type { Page } from 'playwright';
 import type { NormalizedProduct } from '../types/source-data';
 import type { TbCategoryInfo, TbDraftContext, TbUploadedImageMeta } from '../types/draft';
 import type { TbWindowJsonDraftData } from '../types/tb-window-json';
@@ -37,6 +38,8 @@ export interface FillerContext {
   readonly publishConfig?: PublishConfig;
   /** 发布页面 window.Json 解析结果（含实际表单字段、类目属性、SKU 选项等） */
   readonly tbWindowJson?: TbWindowJsonDraftData;
+  /** 当前发布任务的 Playwright Page（用于需要访问浏览器 Cookie/CSRF 的特殊填充逻辑） */
+  readonly page?: Page;
   /**
    * 草稿提交载荷（可写）
    * 各填充器向此对象追加需要提交给淘宝的字段

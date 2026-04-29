@@ -1146,6 +1146,7 @@ export function ProductPublishModal({
           // 进度回调（供多次等待复用）
           const onTaskProgress = (event: PublishProgressEvent) => {
             if (publishRunIdRef.current !== runId) return;
+            const waitingForCaptcha = event.status === PublishStepStatus.PENDING && isCaptchaPendingMessage(event.message);
             setPublishQueue((cur) =>
               cur.map((q) =>
                 q.key === item.key
@@ -1153,10 +1154,10 @@ export function ProductPublishModal({
                       ...q,
                       status: event.status === "FAILED" ? "FAILED" : event.status === "SUCCESS" ? "SUCCESS" : "PUBLISHING",
                       currentStepCode: event.stepCode,
-                      statusText: event.status === PublishStepStatus.PENDING
+                      statusText: waitingForCaptcha
                         ? "等待验证码，完成右侧校验后继续发布"
                         : event.message || q.statusText,
-                      waitingForCaptcha: event.status === PublishStepStatus.PENDING,
+                      waitingForCaptcha,
                       error: event.status === "FAILED" ? event.message || "发布失败" : undefined,
                     }
                   : q,
@@ -2404,6 +2405,11 @@ function buildRuntimeTaskStatusText(task: PublishRuntimeTaskSnapshot): string {
   );
 }
 
+function isCaptchaPendingMessage(message?: string): boolean {
+  const text = String(message || "").trim();
+  return text.includes("等待验证码") || text.includes("需要验证码");
+}
+
 function localizePublishStepText(text?: string): string | undefined {
   if (!text) {
     return undefined;
@@ -2454,11 +2460,12 @@ async function waitForPublishTaskFinish(
 
   while (Date.now() - startedAt < 10 * 60 * 1000) {
     const task = await publishApi.getPublishTask(taskId);
+    const initialPending = task.status === PublishTaskStatus.PENDING && !seenRunning && !isCaptchaPendingMessage(task.errorMessage);
     const event: PublishProgressEvent = {
       taskId,
       stepCode: task.currentStepCode || PublishStepCode.UNKNOWN,
-      status: mapTaskStatusToStepStatus(task.status),
-      message: task.errorMessage || localizePublishStepCode(task.currentStepCode) || task.status,
+      status: initialPending ? PublishStepStatus.RUNNING : mapTaskStatusToStepStatus(task.status),
+      message: initialPending ? "准备发布" : task.errorMessage || localizePublishStepCode(task.currentStepCode) || task.status,
     };
     onProgress?.(event);
 
@@ -2471,7 +2478,7 @@ async function waitForPublishTaskFinish(
       task.status === PublishTaskStatus.FAILED ||
       task.status === PublishTaskStatus.CANCELLED ||
       // 只有曾经进入 RUNNING 之后再变为 PENDING，才是验证码等待，此时应退出轮询
-      (task.status === PublishTaskStatus.PENDING && seenRunning)
+      (task.status === PublishTaskStatus.PENDING && (seenRunning || isCaptchaPendingMessage(task.errorMessage)))
     ) {
       return task;
     }

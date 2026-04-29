@@ -2,10 +2,13 @@ import { StepCode, StepStatus, STEP_ORDER } from '../types/publish-task';
 import type { StepResult } from '../core/publish-step';
 import { PublishStep } from '../core/publish-step';
 import type { StepContext } from '../core/step-context';
-import { PublishError, StepSkippedError, CaptchaRequiredError } from '../core/errors';
+import { PublishError, StepSkippedError, CaptchaRequiredError, ScreenshotCaptchaRequiredError } from '../core/errors';
 import { CaptchaChecker } from './captcha.step';
 import { requestBackend } from '@src/impl/shared/backend';
 import { TbEngine } from '@src/browser/tb.engine';
+import { MonitorResponse } from '@src/browser/monitor/monitor';
+import { DoorEntity } from '@src/browser/entity';
+import type { Response } from 'playwright';
 import sharp from 'sharp';
 import crypto from 'crypto';
 import axios from 'axios';
@@ -22,6 +25,27 @@ import { handleTbLoginRequired, handleTbMaybeLoginRequired } from '../utils/tb-l
 import type { TbUploadedImageMeta } from '../types/draft';
 import { parseTaobaoResponseText } from '../utils/tb-publish-api';
 import { setImageCropMeta } from '../core/publish-image-meta-store';
+
+/**
+ * 拦截淘宝图片空间的文件列表查询请求，提取真实浏览器发出的完整 request headers（含最新 cookie）。
+ * 验证码通过后图片上传前，通过此 Monitor 刷新 headers，避免上传时再次触发验证码。
+ */
+class PictureCenterFileQueryMonitor extends MonitorResponse<unknown> {
+  // 3 分钟超时，给用户在有头浏览器中手动解决验证码留出足够时间
+  constructor() { super(180000); }
+
+  getType(): string { return 'tb'; }
+  getKey(): string { return 'picture-center-file-query'; }
+  needHeaderData(): boolean { return true; }
+
+  async isMatch(url: string): Promise<boolean> {
+    return url.includes('mtop.taobao.picturecenter.console.file.query');
+  }
+
+  override async getResponseData(_response: Response): Promise<DoorEntity<unknown>> {
+    return new DoorEntity(true, {});
+  }
+}
 
 function sanitizeSourceProductId(value: string): string {
   const sanitized = value.replace(/[^a-zA-Z0-9_-]+/g, '_').replace(/^_+|_+$/g, '');
@@ -231,10 +255,12 @@ export class UploadImagesStep extends PublishStep {
         fs.mkdirSync(imageDir, { recursive: true });
       }
 
-      // ── 获取淘宝会话 Cookie ──────────────────────────────────────────────────
-      const cookieStr = await this.getTbCookies(ctx.taskId, ctx.shopId);
-      const resolvedCookieStr = cookieStr ?? '';
-      if (!resolvedCookieStr) {
+      // ── 获取上传所需 headers（验证码通过后走有头浏览器刷新路径）──────────────
+      const tbEngine = new TbEngine(String(ctx.shopId), true);
+      tbEngine.bindPublishTask(ctx.taskId);
+      const uploadHeaders = await this.getHeadersForUpload(ctx.taskId, ctx.shopId, tbEngine);
+      const cookieInHeaders = uploadHeaders['Cookie'] ?? uploadHeaders['cookie'] ?? '';
+      if (!cookieInHeaders) {
         await handleTbLoginRequired(this.stepCode, ctx.shopId);
       }
 
@@ -242,74 +268,92 @@ export class UploadImagesStep extends PublishStep {
       const skuImageSet = new Set(skuImages);
 
       // ── 逐张下载（命中本地缓存则跳过下载） → 上传 ───────────────────────────
-      for (const originalUrl of toActuallyUpload) {
-        const isMain = mainImageSet.has(originalUrl);
-        const isSku = skuImageSet.has(originalUrl);
-        const profile = imageProfileMap.get(originalUrl) ?? (isMain || isSku ? 'square800' : 'detail');
-        let processedImage: ProcessedImageResult | null = null;
-        try {
-          processedImage = await this.downloadAndProcess(originalUrl, profile, imageDir);
-          if (!processedImage) {
-            continue;
-          }
-
-          const uploadedImage = await this.uploadToTb(
-            ctx.taskId,
-            ctx.shopId,
-            processedImage.localPath,
-            resolvedCookieStr,
-          );
-          if ('url' in uploadedImage) {
-            imageUrlMap[originalUrl] = uploadedImage.url;
-            // 使用 sharp 处理后的尺寸，不采用淘宝返回值
-            const finalWidth = processedImage.width;
-            const finalHeight = processedImage.height;
-            await this.storeToServerCache(
-              sourceProductIdForCache,
-              originalUrl,
-              uploadedImage.url,
-              ctx.shopId,
-              shopIdentity.unionBusinessId,
-              profile,
-              finalWidth,
-              finalHeight,
-            );
-            setImageCropMeta(ctx.taskId, uploadedImage.url, { width: finalWidth, height: finalHeight });
-            if (!isMain) {
-              const meta: TbUploadedImageMeta = {
-                originalUrl,
-                url: uploadedImage.url,
-                width: finalWidth,
-                height: finalHeight,
-                size: uploadedImage.size ?? processedImage.size,
-                imageId: uploadedImage.imageId,
-              };
-              if (isSku) {
-                skuImageMetaMap.set(originalUrl, meta);
-                skuImageMetaMap.set(uploadedImage.url, meta);
-              } else {
-                detailImageMetaMap.set(originalUrl, meta);
-                detailImageMetaMap.set(uploadedImage.url, meta);
-              }
+      try {
+        for (const originalUrl of toActuallyUpload) {
+          const isMain = mainImageSet.has(originalUrl);
+          const isSku = skuImageSet.has(originalUrl);
+          const profile = imageProfileMap.get(originalUrl) ?? (isMain || isSku ? 'square800' : 'detail');
+          let processedImage: ProcessedImageResult | null = null;
+          try {
+            processedImage = await this.downloadAndProcess(originalUrl, profile, imageDir);
+            if (!processedImage) {
+              continue;
             }
-          } else {
+
+            const uploadedImage = await this.uploadToTb(
+              ctx.taskId,
+              ctx.shopId,
+              processedImage.localPath,
+              uploadHeaders,
+            );
+            if ('url' in uploadedImage) {
+              imageUrlMap[originalUrl] = uploadedImage.url;
+              // 使用 sharp 处理后的尺寸，不采用淘宝返回值
+              const finalWidth = processedImage.width;
+              const finalHeight = processedImage.height;
+              await this.storeToServerCache(
+                sourceProductIdForCache,
+                originalUrl,
+                uploadedImage.url,
+                ctx.shopId,
+                shopIdentity.unionBusinessId,
+                profile,
+                finalWidth,
+                finalHeight,
+              );
+              setImageCropMeta(ctx.taskId, uploadedImage.url, { width: finalWidth, height: finalHeight });
+              if (!isMain) {
+                const meta: TbUploadedImageMeta = {
+                  originalUrl,
+                  url: uploadedImage.url,
+                  width: finalWidth,
+                  height: finalHeight,
+                  size: uploadedImage.size ?? processedImage.size,
+                  imageId: uploadedImage.imageId,
+                };
+                if (isSku) {
+                  skuImageMetaMap.set(originalUrl, meta);
+                  skuImageMetaMap.set(uploadedImage.url, meta);
+                } else {
+                  detailImageMetaMap.set(originalUrl, meta);
+                  detailImageMetaMap.set(uploadedImage.url, meta);
+                }
+              }
+            } else {
+              tbUploadFailures.push({
+                originalUrl,
+                isMain,
+                filePath: uploadedImage.filePath,
+                message: uploadedImage.message,
+                details: uploadedImage.details,
+              });
+            }
+          } catch (error) {
+            if (error instanceof CaptchaRequiredError) throw error;
             tbUploadFailures.push({
               originalUrl,
               isMain,
-              filePath: uploadedImage.filePath,
-              message: uploadedImage.message,
-              details: uploadedImage.details,
+              error: summarizeForLog(error),
             });
           }
-        } catch (error) {
-          tbUploadFailures.push({
-            originalUrl,
-            isMain,
-            error: summarizeForLog(error),
-          });
+          // 注意：不在此处删除本地缓存文件，等待发布成功后统一清理
         }
-        // 注意：不在此处删除本地缓存文件，等待发布成功后统一清理
+      } catch (captchaError) {
+        if (captchaError instanceof CaptchaRequiredError) {
+          // 标记验证码已触发：下次恢复时从 Playwright 直接提取 cookie（截屏流模式已在验证码页完成）
+          tbEngine.setValidateAutoTag(false);
+          tbEngine.clearHeader();
+          // 图片上传的验证码通过截屏流呈现（而非 Electron BrowserView），以便直接在 Playwright 会话中完成
+          throw new ScreenshotCaptchaRequiredError(
+            captchaError.stepCode,
+            captchaError.captchaUrl,
+            ctx.shopId,
+          );
+        }
+        throw captchaError;
       }
+      // 上传全部成功，重置验证码标记
+      tbEngine.setValidateAutoTag(true);
     }
 
     // 任意图片下载或上传失败，直接终止发布流程
@@ -363,7 +407,100 @@ export class UploadImagesStep extends PublishStep {
     };
   }
 
-  // ─── 获取淘宝会话 Cookie ──────────────────────────────────────────────────────
+  // ─── 获取上传所需 headers ─────────────────────────────────────────────────────
+
+  /**
+   * 根据当前状态决定获取 upload headers 的方式：
+   *  - 正常首次：优先用 engine 缓存的 headers，否则从 Playwright 会话提取 cookie
+   *  - 验证码触发后恢复：打开有头浏览器，拦截图片空间 file.query 请求，提取完整浏览器 headers
+   */
+  private async getHeadersForUpload(
+    taskId: number,
+    shopId: number,
+    engine: TbEngine,
+  ): Promise<Record<string, string>> {
+    const needHeadedBrowser = !engine.getValidateAutoTag();
+    if (needHeadedBrowser) {
+      return this.getHeadersViaHeadedBrowser(taskId, shopId, engine);
+    }
+
+    // 尝试命中上次浏览器抓取缓存的完整 headers
+    const cached = engine.getHeader() as Record<string, string> | undefined;
+    if (cached && (cached['cookie'] || cached['Cookie'])) {
+      return cached;
+    }
+
+    // 回退到从 Playwright 无头会话提取 cookie
+    const cookieStr = await this.getTbCookies(taskId, shopId);
+    return cookieStr ? { 'Cookie': cookieStr } : {};
+  }
+
+  /**
+   * 打开有头浏览器，导航到淘宝图片空间，拦截 file.query 请求，
+   * 提取其完整 request headers（含最新 cookie），用于后续上传。
+   *
+   * 有头模式原因：验证码通过后无头会话仍可能被拦截；有头浏览器行为特征更接近真实用户，
+   * 且若图片空间再次弹出验证码用户可直接在可见窗口中完成。
+   */
+  private async getHeadersViaHeadedBrowser(
+    taskId: number,
+    shopId: number,
+    headlessEngine: TbEngine,
+  ): Promise<Record<string, string>> {
+    const TB_PICTURE_SPACE_URL = 'https://qn.taobao.com/home.htm/sucai-tu/home';
+    const headedEngine = new TbEngine(String(shopId), false);
+    headedEngine.bindPublishTask(taskId);
+
+    try {
+      const page = await headedEngine.init();
+      if (!page) {
+        return this.fallbackToCookieHeaders(taskId, shopId);
+      }
+
+      // 将无头浏览器会话中的淘宝 cookie 同步到有头浏览器，确保有头窗口处于已登录状态
+      try {
+        const headlessContext = await headlessEngine.getContextOnly();
+        const headedContext = await headedEngine.getContextOnly();
+        if (headlessContext && headedContext) {
+          const allCookies = await headlessContext.cookies();
+          const tbCookies = allCookies.filter(c => {
+            const d = c.domain ?? '';
+            return d.endsWith('.taobao.com') || d === 'taobao.com'
+              || d.endsWith('.tmall.com') || d === 'tmall.com'
+              || d.endsWith('.aliyun.com') || d === 'aliyun.com';
+          });
+          if (tbCookies.length > 0) {
+            await headedContext.addCookies(tbCookies);
+          }
+        }
+      } catch { /* cookie 同步失败不影响后续流程 */ }
+
+      // 添加监听，导航后等待 file.query 请求触发
+      const monitor = new PictureCenterFileQueryMonitor();
+      const doorEntity = await headedEngine.openWaitMonitor(page, TB_PICTURE_SPACE_URL, monitor);
+
+      if (!doorEntity.code) {
+        return this.fallbackToCookieHeaders(taskId, shopId);
+      }
+
+      const capturedHeaders = doorEntity.getHeaderData() as Record<string, string>;
+      if (!capturedHeaders || !(capturedHeaders['cookie'] || capturedHeaders['Cookie'])) {
+        return this.fallbackToCookieHeaders(taskId, shopId);
+      }
+
+      // 缓存抓取到的 headers 供后续复用，同时重置验证码标记
+      headlessEngine.setHeader(capturedHeaders);
+      headlessEngine.setValidateAutoTag(true);
+
+      return capturedHeaders;
+    } catch {
+      return this.fallbackToCookieHeaders(taskId, shopId);
+    } finally {
+      try {
+        await headedEngine.closePage();
+      } catch { /* ignore */ }
+    }
+  }
 
   /**
    * 通过 TbEngine 还原已保存的淘宝浏览器会话，提取 Cookie 字符串。
@@ -383,22 +520,40 @@ export class UploadImagesStep extends PublishStep {
         return null;
       }
 
-      const cookies = await context.cookies([
-        'https://taobao.com',
-        'https://www.taobao.com',
-        'https://myseller.taobao.com',
-        'https://qn.taobao.com',
-        'https://stream-upload.taobao.com',
-      ]);
+      // 取全部 taobao 相关 cookie，不按 URL 过滤
+      // 原因：验证码通过后 captcha-pass cookie 可能被设置在 turing.taobao.com 等子域名上，
+      // 按 URL 过滤只返回 .taobao.com 域名的 cookie，导致验证凭证丢失，上传仍被拦截
+      const allCookies = await context.cookies();
+      const cookies = allCookies.filter(c => {
+        const d = c.domain ?? '';
+        return d.endsWith('.taobao.com') || d === 'taobao.com'
+          || d.endsWith('.tmall.com') || d === 'tmall.com'
+          || d.endsWith('.aliyun.com') || d === 'aliyun.com';
+      });
 
       if (!cookies.length) {
         return null;
       }
 
-      return cookies.map(c => `${c.name}=${c.value}`).join('; ');
+      // 同名 cookie 按 domain 精确度降序去重（越具体越靠前），优先保留通用域的值
+      const seen = new Set<string>();
+      const deduped = cookies
+        .sort((a, b) => (a.domain ?? '').length - (b.domain ?? '').length)
+        .filter(c => {
+          if (seen.has(c.name)) return false;
+          seen.add(c.name);
+          return true;
+        });
+
+      return deduped.map(c => `${c.name}=${c.value}`).join('; ');
     } catch {
       return null;
     }
+  }
+
+  private async fallbackToCookieHeaders(taskId: number, shopId: number): Promise<Record<string, string>> {
+    const cookieStr = await this.getTbCookies(taskId, shopId);
+    return cookieStr ? { 'Cookie': cookieStr } : {};
   }
 
   // ─── 下载 + 图片处理 ──────────────────────────────────────────────────────────
@@ -498,26 +653,39 @@ export class UploadImagesStep extends PublishStep {
   /**
    * 调用淘宝 stream-upload API 上传本地图片文件。
    * 最多重试 3 次，返回淘宝图片空间 URL 或 null（失败）。
+   *
+   * baseHeaders 来源有两种：
+   *  - 正常模式：{ 'Cookie': cookieStr }
+   *  - 验证码后模式：有头浏览器拦截的完整 request headers（含 cookie、sec-* 等）
    */
   private async uploadToTb(
     taskId: number,
     shopId: number,
     filePath: string,
-    cookieStr: string,
+    baseHeaders: Record<string, string>,
   ): Promise<UploadedImageResult | UploadFailureResult> {
     const stats = fs.statSync(filePath);
     // 动态超时：至少 30s，每 MB 增加 5s
     const dynamicTimeout = Math.max(30000, (stats.size / 1024 / 1024) * 5000);
+
+    // 将 baseHeaders 的 key 全部转小写，方便统一提取
+    const normalizedBase: Record<string, string> = {};
+    for (const [k, v] of Object.entries(baseHeaders)) {
+      normalizedBase[k.toLowerCase()] = v;
+    }
 
     for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
       try {
         const form = new FormData();
         form.append('file', fs.createReadStream(filePath), path.basename(filePath));
 
+        // baseHeaders 可能包含浏览器抓取的 sec-* 等原生 headers，先整体铺底
         const headers: Record<string, string> = {
           ...form.getHeaders(),
-          'Cookie': cookieStr,
-          'User-Agent': DOWNLOAD_UA,
+          ...normalizedBase,
+          // 以下为上传接口必须的 headers，显式设置覆盖 baseHeaders 中可能存在的同名字段
+          'Cookie': normalizedBase['cookie'] ?? '',
+          'User-Agent': normalizedBase['user-agent'] ?? DOWNLOAD_UA,
           'Accept': 'application/json, text/plain, */*',
           'Accept-Language': 'zh-CN,zh;q=0.9',
           'Cache-Control': 'no-cache',
@@ -527,6 +695,16 @@ export class UploadImagesStep extends PublishStep {
           'Host': 'stream-upload.taobao.com',
           'x-requested-with': 'XMLHttpRequest',
         };
+        // 清除已由大写版本接管的小写副本，避免重复发送
+        delete headers['cookie'];
+        delete headers['user-agent'];
+        delete headers['accept'];
+        delete headers['accept-language'];
+        delete headers['cache-control'];
+        delete headers['pragma'];
+        delete headers['origin'];
+        delete headers['referer'];
+        delete headers['host'];
         publishTaobaoRequestLog(taskId, 'upload-image', {
           url: TB_UPLOAD_URL,
           method: 'POST',

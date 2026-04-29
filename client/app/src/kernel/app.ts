@@ -313,9 +313,16 @@ export const start = () => {
       if (isQuitting) return;
       isQuitting = true;
       event.preventDefault();
+      const forceExit = setTimeout(() => {
+        log.warn('Force exit: closeAllBrowserContexts timed out after 5s');
+        app.exit(0);
+      }, 5000);
       closeAllBrowserContexts()
         .catch((e) => log.error('Error closing browsers on quit:', e))
-        .finally(() => app.exit(0));
+        .finally(() => {
+          clearTimeout(forceExit);
+          app.exit(0);
+        });
     });
 
     app.on('ready', async ()=> {

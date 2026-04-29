@@ -1,12 +1,14 @@
 import path from "path";
 import fs from "fs";
-import { BrowserView, BrowserWindow, shell, screen as electronScreen, app } from "electron";
+import { BrowserView, BrowserWindow, shell, screen as electronScreen, app, Notification } from "electron";
 import type { CookiesGetFilter, CookiesSetDetails } from "electron";
+import type { Page, Response } from "playwright";
 import log from "electron-log";
 import { mainWindow } from "@src/kernel/windows";
 import {
   CollectionWorkspaceState,
   type CollectedProductData,
+  type PlaywrightViewerInputEvent,
 } from "@eleapi/collection-workspace/collection-workspace.api";
 import type { StandardProductData } from "@product/standard-product";
 import { CollectBatchRecord, CollectRecordPreview } from "@eleapi/collect/collect.api";
@@ -18,6 +20,8 @@ import { saveCollectedToServer } from "./collect.saver";
 import { requestBackend } from "@src/impl/shared/backend";
 import { setGlobal, getGlobal } from "../../../common/utils/store/electron";
 import { normalizePlatform, getSecChUa } from "@src/browser/engine";
+import { TbEngine } from "@src/browser/tb.engine";
+import { PxxEngine } from "@src/browser/pxx.engine";
 
 interface OpenCollectionWorkspaceOptions {
   batch: CollectBatchRecord;
@@ -192,6 +196,30 @@ async function safeLoadWorkspaceUrl(webContents: Electron.WebContents, url: stri
   }
 }
 
+async function safeLoadPane(view: BrowserView, url: string, pane: "left" | "right" | "center") {
+  try {
+    await view.webContents.loadURL(url);
+  } catch (error) {
+    if (isNavigationAbortedError(error)) {
+      log.info("[collection workspace] pane navigation aborted", { pane, url, error: String(error) });
+      return;
+    }
+    log.warn("[collection workspace] pane load failed", { pane, url, error });
+    throw error;
+  }
+}
+
+async function ensureRightPaneLoaded(batchId?: number) {
+  if (!workspaceViews?.right || workspaceViews.right.webContents.isDestroyed()) {
+    return;
+  }
+  const rightPaneUrl = buildPaneUrl("right", batchId);
+  if (workspaceViews.right.webContents.getURL() === rightPaneUrl) {
+    return;
+  }
+  await safeLoadPane(workspaceViews.right, rightPaneUrl, "right");
+}
+
 export function saveStandardProductToStore(sourceProductId: string, data: StandardProductData, sourceType: CollectSourceType): void {
   try {
     const filePath = getCollectedProductDataPath(sourceProductId, sourceType, "standard");
@@ -222,6 +250,10 @@ let workspaceWindow: BrowserWindow | null = null;
 let workspaceViews: CollectionWorkspaceViews | null = null;
 let workspaceState = new CollectionWorkspaceState();
 let workspaceRightPanelVisible = true;
+let workspacePlaywrightEngine: TbEngine | PxxEngine | null = null;
+let workspacePlaywrightPage: Page | null = null;
+let playwrightFrameTimer: NodeJS.Timeout | null = null;
+let playwrightFrameBusy = false;
 let isScrapingRecord = false;
 let lastScrapedSourceProductId = "";
 let centerDebuggerBoundViewId = 0;
@@ -232,6 +264,23 @@ let currentScrapingContext: {
 } | null = null;
 const pendingGoodsResponses = new Map<string, { url: string; resourceType: string; mimeType: string }>();
 const capturedGoodsSummaryById = new Map<string, { productName: string; sourceProductId: string; status: string }>();
+
+interface PlaywrightStorageState {
+  cookies?: Array<{
+    name: string;
+    value: string;
+    domain: string;
+    path?: string;
+    expires?: number;
+    httpOnly?: boolean;
+    secure?: boolean;
+    sameSite?: "Strict" | "Lax" | "None";
+  }>;
+  origins?: Array<{
+    origin: string;
+    localStorage?: Array<{ name: string; value: string }>;
+  }>;
+}
 
 function getPreloadPath() {
   return path.join(__dirname, 'preload.js');
@@ -258,6 +307,197 @@ function buildPaneUrl(pane: "left" | "right", batchId?: number) {
     url.searchParams.set("batchId", String(batchId));
   }
   return url.toString();
+}
+
+function buildPlaywrightViewerHtml() {
+  return `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' data: 'unsafe-inline'; img-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline';" />
+  <style>
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: #f8fafc; }
+    #stage { position: fixed; inset: 0; width: 100vw; height: 100vh; cursor: default; outline: none; }
+    #empty { position: fixed; inset: 0; display: grid; place-items: center; color: #64748b; font: 13px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; pointer-events: none; }
+    #ime-trap { position: fixed; top: 0; left: 0; width: 1px; height: 1px; opacity: 0; border: 0; padding: 0; margin: 0; outline: none; resize: none; overflow: hidden; font-size: 1px; color: transparent; background: transparent; z-index: 1; }
+  </style>
+</head>
+<body>
+  <canvas id="stage" tabindex="0"></canvas>
+  <textarea id="ime-trap" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" aria-hidden="true"></textarea>
+  <div id="empty">正在连接采集浏览器...</div>
+  <script>
+    const canvas = document.getElementById("stage");
+    const ctx = canvas.getContext("2d", { alpha: false });
+    const empty = document.getElementById("empty");
+    const imeTrap = document.getElementById("ime-trap");
+    let frameWidth = 1;
+    let frameHeight = 1;
+    let hasFrame = false;
+    let compositionText = "";
+    let isComposing = false;
+    // Map of key → timer id for deferred printable keydown events.
+    // compositionstart clears all pending timers so the key that triggered
+    // IME composition is never forwarded to playwright.
+    const pendingKeyDownTimers = new Map();
+
+    function resizeCanvas() {
+      const ratio = window.devicePixelRatio || 1;
+      const width = Math.max(1, Math.floor(window.innerWidth * ratio));
+      const height = Math.max(1, Math.floor(window.innerHeight * ratio));
+      if (canvas.width !== width || canvas.height !== height) {
+        canvas.width = width;
+        canvas.height = height;
+        ctx.fillStyle = "#f8fafc";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+      }
+    }
+
+    function normalizePoint(event) {
+      const rect = canvas.getBoundingClientRect();
+      return {
+        x: Math.max(0, Math.min(frameWidth, (event.clientX - rect.left) * frameWidth / Math.max(rect.width, 1))),
+        y: Math.max(0, Math.min(frameHeight, (event.clientY - rect.top) * frameHeight / Math.max(rect.height, 1))),
+      };
+    }
+
+    function mapButton(button) {
+      if (button === 1) return "middle";
+      if (button === 2) return "right";
+      return "left";
+    }
+
+    async function send(input) {
+      try {
+        await window.collectionWorkspace?.dispatchPlaywrightInput?.(input);
+      } catch (error) {
+        console.warn("[playwright-viewer] input dispatch failed", error);
+      }
+    }
+
+    window.__PLAYWRIGHT_VIEWER_FRAME__ = (dataUrl, width, height) => {
+      resizeCanvas();
+      frameWidth = Math.max(1, Number(width) || canvas.width);
+      frameHeight = Math.max(1, Number(height) || canvas.height);
+      const image = new Image();
+      image.onload = () => {
+        hasFrame = true;
+        empty.style.display = "none";
+        ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+      };
+      image.src = dataUrl;
+    };
+
+    window.addEventListener("resize", resizeCanvas);
+    resizeCanvas();
+
+    canvas.addEventListener("pointerdown", (event) => {
+      // Focus imeTrap (not canvas) so the OS IME can attach to a real text
+      // field and show the candidate popup for Chinese / Japanese input.
+      imeTrap.focus();
+      canvas.setPointerCapture(event.pointerId);
+      const point = normalizePoint(event);
+      event.preventDefault();
+      send({ type: "mouse-down", x: point.x, y: point.y, button: mapButton(event.button) });
+    });
+    canvas.addEventListener("pointerup", (event) => {
+      const point = normalizePoint(event);
+      event.preventDefault();
+      send({ type: "mouse-up", x: point.x, y: point.y, button: mapButton(event.button) });
+    });
+    canvas.addEventListener("pointermove", (event) => {
+      if (!hasFrame) return;
+      const point = normalizePoint(event);
+      send({ type: "mouse-move", x: point.x, y: point.y });
+    });
+    canvas.addEventListener("wheel", (event) => {
+      event.preventDefault();
+      send({ type: "wheel", deltaX: event.deltaX, deltaY: event.deltaY });
+    }, { passive: false });
+    canvas.addEventListener("contextmenu", (event) => event.preventDefault());
+
+    // compositionstart fires synchronously within the keydown event that
+    // triggered IME.  By the time our setTimeout(0) callback runs,
+    // isComposing will already be true, so we can cancel the deferred
+    // keydown safely.
+    imeTrap.addEventListener("compositionstart", () => {
+      isComposing = true;
+      for (const timer of pendingKeyDownTimers.values()) {
+        clearTimeout(timer);
+      }
+      pendingKeyDownTimers.clear();
+    });
+    imeTrap.addEventListener("compositionupdate", (event) => {
+      compositionText = event.data || "";
+    });
+    imeTrap.addEventListener("compositionend", (event) => {
+      isComposing = false;
+      const text = event.data || compositionText || "";
+      compositionText = "";
+      imeTrap.value = "";
+      if (text) {
+        send({ type: "type", text });
+      }
+    });
+
+    imeTrap.addEventListener("keydown", (event) => {
+      if (isComposing || event.isComposing) return;
+      const key = event.key;
+      event.preventDefault();
+      if (key.length === 1) {
+        // Defer single-character keydown by one tick.  If compositionstart
+        // fires before the callback runs (IME activated), the timer is
+        // cancelled and the key is never forwarded.
+        const timer = setTimeout(() => {
+          pendingKeyDownTimers.delete(key);
+          if (!isComposing) {
+            send({ type: "key-down", key });
+          }
+        }, 0);
+        pendingKeyDownTimers.set(key, timer);
+      } else {
+        send({ type: "key-down", key });
+      }
+    });
+    imeTrap.addEventListener("keyup", (event) => {
+      if (isComposing || event.isComposing) return;
+      event.preventDefault();
+      send({ type: "key-up", key: event.key });
+    });
+    imeTrap.addEventListener("beforeinput", (event) => {
+      if (isComposing || event.isComposing) return;
+      const text = event.data || "";
+      if (!text) return;
+      event.preventDefault();
+      send({ type: "type", text });
+    });
+  </script>
+</body>
+</html>`;
+}
+
+function getPlaywrightViewerUrl() {
+  return `data:text/html;charset=utf-8,${encodeURIComponent(buildPlaywrightViewerHtml())}`;
+}
+
+function getCenterLoadingUrl(message = "正在打开采集页面...") {
+  const safeMessage = String(message || "正在打开采集页面...").replace(/[<>&"]/g, (char) => ({
+    "<": "&lt;",
+    ">": "&gt;",
+    "&": "&amp;",
+    "\"": "&quot;",
+  }[char] || char));
+  return `data:text/html;charset=utf-8,${encodeURIComponent(`<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <style>
+    html, body { width: 100%; height: 100%; margin: 0; background: #fff; }
+    body { display: grid; place-items: center; color: #64748b; font: 14px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  </style>
+</head>
+<body>${safeMessage}</body>
+</html>`)}`;
 }
 
 function createUtilityView(backgroundColor: string) {
@@ -306,9 +546,19 @@ function setupCenterViewBrowserEnvironment(center: BrowserView) {
 
   center.webContents.setUserAgent(ua);
 
-  // Override sec-ch-ua headers for PDD domains to remove Electron brand
+  // Override sec-ch-ua headers for marketplace domains to remove Electron brand
   center.webContents.session.webRequest.onBeforeSendHeaders(
-    { urls: ["*://*.yangkeduo.com/*", "*://yangkeduo.com/*"] },
+    {
+      urls: [
+        "*://*.yangkeduo.com/*",
+        "*://yangkeduo.com/*",
+        "*://*.taobao.com/*",
+        "*://taobao.com/*",
+        "*://*.tmall.com/*",
+        "*://tmall.com/*",
+        "*://*.alicdn.com/*",
+      ],
+    },
     (details, callback) => {
       const headers = { ...details.requestHeaders };
       headers["sec-ch-ua"] = secChUa;
@@ -370,6 +620,7 @@ function syncViewBounds() {
   workspaceViews.left.setBounds(bounds.left);
   workspaceViews.center.setBounds(bounds.center);
   workspaceViews.right.setBounds(bounds.right);
+  void resizePlaywrightViewport();
 }
 
 async function renderPane(view: BrowserView | null, pane: "left" | "right") {
@@ -463,6 +714,106 @@ async function applyOriginStorage(
   }
 }
 
+function toElectronCookieUrl(cookie: { domain: string; path?: string; secure?: boolean }) {
+  const hostname = String(cookie.domain || "").replace(/^\./, "").trim();
+  if (!hostname) {
+    return "";
+  }
+  const pathname = String(cookie.path || "/").startsWith("/") ? String(cookie.path || "/") : `/${cookie.path}`;
+  return `${cookie.secure === false ? "http" : "https"}://${hostname}${pathname}`;
+}
+
+function toElectronSameSite(sameSite?: "Strict" | "Lax" | "None"): CookiesSetDetails["sameSite"] | undefined {
+  if (sameSite === "Strict") return "strict";
+  if (sameSite === "Lax") return "lax";
+  if (sameSite === "None") return "no_restriction";
+  return undefined;
+}
+
+function convertStorageCookies(cookies: PlaywrightStorageState["cookies"]): CookiesSetDetails[] {
+  return (cookies || [])
+    .map((cookie) => {
+      const url = toElectronCookieUrl(cookie);
+      if (!url || !cookie.name) {
+        return null;
+      }
+      const details: CookiesSetDetails = {
+        url,
+        name: cookie.name,
+        value: String(cookie.value ?? ""),
+        domain: cookie.domain,
+        path: cookie.path || "/",
+        secure: cookie.secure,
+        httpOnly: cookie.httpOnly,
+        sameSite: toElectronSameSite(cookie.sameSite),
+      };
+      if (Number.isFinite(cookie.expires) && Number(cookie.expires) > 0) {
+        details.expirationDate = Number(cookie.expires);
+      }
+      return details;
+    })
+    .filter((cookie): cookie is CookiesSetDetails => Boolean(cookie));
+}
+
+async function readTbStorageState(resourceId: string): Promise<PlaywrightStorageState | null> {
+  const engine = new TbEngine(resourceId, false);
+  const sessionPath = await engine.getSessionPath().catch(() => undefined);
+  if (!sessionPath) {
+    return null;
+  }
+
+  try {
+    const raw = fs.readFileSync(sessionPath, "utf8");
+    const parsed = JSON.parse(raw) as PlaywrightStorageState;
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch (error) {
+    log.warn("[collection workspace] failed to read tb storage state", { resourceId, sessionPath, error });
+    return null;
+  }
+}
+
+async function applyTbSharedStorage(view: BrowserView, resourceId: string) {
+  const storageState = await readTbStorageState(resourceId);
+  if (!storageState) {
+    log.warn("[collection workspace] tb storage state not found, center view will load without shared login state", { resourceId });
+    return;
+  }
+
+  const cookies = convertStorageCookies(storageState.cookies);
+  if (cookies.length > 0) {
+    await applyCookies(view, cookies);
+  }
+
+  const origins = (storageState.origins || [])
+    .map((origin) => ({
+      origin: origin.origin,
+      localStorage: Array.isArray(origin.localStorage) ? origin.localStorage : [],
+    }))
+    .filter((origin) => origin.origin && origin.localStorage.length > 0);
+  if (origins.length > 0) {
+    await applyOriginStorage(view, origins);
+  }
+
+  try {
+    const verifyCookies = await view.webContents.session.cookies.get({ url: "https://s.taobao.com/" });
+    const verifyNames = new Set(verifyCookies.map((cookie) => cookie.name));
+    const keyNames = ["cookie2", "cookie1", "sgcookie", "unb", "_nk_", "tracknick"];
+    log.info("[collection workspace] verified tb cookies in electron session", {
+      resourceId,
+      matchedKeyCookies: keyNames.filter((name) => verifyNames.has(name)),
+      taobaoCookieCount: verifyCookies.length,
+    });
+  } catch (error) {
+    log.warn("[collection workspace] failed to verify tb cookies in electron session", { resourceId, error });
+  }
+
+  log.info("[collection workspace] applied tb shared storage to electron center view", {
+    resourceId,
+    cookieCount: cookies.length,
+    originCount: origins.length,
+  });
+}
+
 function getCurrentDriver() {
   return getCollectionPlatformDriver(workspaceState.sourceType);
 }
@@ -473,6 +824,18 @@ function isTbRawPayload(value: unknown): value is Record<string, unknown> {
 
 function mergeCollectedRawData(sourceProductId: string, nextRawData: unknown, sourceType: CollectSourceType) {
   if (!isTbRawPayload(nextRawData)) {
+    const driver = getCollectionPlatformDriver(sourceType);
+    const newSummary = driver.parseGoodsSummary(nextRawData);
+    if (!newSummary) {
+      const existing = getCollectedProductRawData(sourceProductId, sourceType);
+      if (existing && driver.parseGoodsSummary(existing)) {
+        log.info("[collection workspace] skipping rawdata overwrite — new response has no product info but existing data is valid", {
+          sourceProductId,
+          sourceType,
+        });
+        return;
+      }
+    }
     saveCollectedProductRawData(sourceProductId, nextRawData, sourceType);
     return;
   }
@@ -540,6 +903,299 @@ function normalizeWorkspaceUrl(url: string | undefined) {
     log.warn("[collection workspace] invalid initial url, fallback to home", { url: normalized, error });
     return homeUrl;
   }
+}
+
+function normalizePlaywrightResourceType(resourceType: string) {
+  const value = String(resourceType || "").toLowerCase();
+  if (value === "document") return "Document";
+  if (value === "xhr") return "XHR";
+  if (value === "fetch") return "Fetch";
+  if (value === "script") return "Script";
+  return resourceType;
+}
+
+function getCenterBounds() {
+  if (!workspaceWindow) {
+    return { width: 1280, height: 720 };
+  }
+  const bounds = getWorkspaceBounds(workspaceWindow).center;
+  return {
+    width: Math.max(320, Math.floor(bounds.width)),
+    height: Math.max(240, Math.floor(bounds.height)),
+  };
+}
+
+async function resizePlaywrightViewport() {
+  if (!workspacePlaywrightPage || workspacePlaywrightPage.isClosed()) {
+    return;
+  }
+  const bounds = getCenterBounds();
+  try {
+    await workspacePlaywrightPage.setViewportSize(bounds);
+  } catch (error) {
+    log.warn("[collection workspace] failed to resize playwright viewport", { bounds, error });
+  }
+}
+
+async function emitPlaywrightFrame() {
+  if (playwrightFrameBusy || !workspaceViews?.center || !workspacePlaywrightPage || workspacePlaywrightPage.isClosed()) {
+    return;
+  }
+  playwrightFrameBusy = true;
+  try {
+    const bounds = getCenterBounds();
+    const image = await workspacePlaywrightPage.screenshot({
+      type: "jpeg",
+      quality: 68,
+      timeout: 5000,
+      animations: "disabled",
+    });
+    const dataUrl = `data:image/jpeg;base64,${image.toString("base64")}`;
+    await workspaceViews.center.webContents.executeJavaScript(
+      `window.__PLAYWRIGHT_VIEWER_FRAME__ && window.__PLAYWRIGHT_VIEWER_FRAME__(${JSON.stringify(dataUrl)}, ${bounds.width}, ${bounds.height});`,
+      true,
+    );
+  } catch (error) {
+    log.warn("[collection workspace] failed to emit playwright frame", error);
+  } finally {
+    playwrightFrameBusy = false;
+  }
+}
+
+function startPlaywrightFrameStream() {
+  if (playwrightFrameTimer) {
+    clearInterval(playwrightFrameTimer);
+    playwrightFrameTimer = null;
+  }
+  playwrightFrameTimer = setInterval(() => {
+    void emitPlaywrightFrame();
+  }, 180);
+  void emitPlaywrightFrame();
+}
+
+function stopPlaywrightFrameStream() {
+  if (playwrightFrameTimer) {
+    clearInterval(playwrightFrameTimer);
+    playwrightFrameTimer = null;
+  }
+  playwrightFrameBusy = false;
+}
+
+async function closeWorkspacePlaywright() {
+  stopPlaywrightFrameStream();
+  const engine = workspacePlaywrightEngine;
+  const page = workspacePlaywrightPage;
+  workspacePlaywrightEngine = null;
+  workspacePlaywrightPage = null;
+
+  try {
+    if (page && !page.isClosed()) {
+      await page.close().catch(() => null);
+    }
+  } catch (error) {
+    log.warn("[collection workspace] failed to close playwright page", error);
+  }
+  try {
+    await engine?.closeContext().catch(() => null);
+  } catch (error) {
+    log.warn("[collection workspace] failed to close playwright context", error);
+  }
+  try {
+    await engine?.closeBrowser().catch(() => null);
+  } catch (error) {
+    log.warn("[collection workspace] failed to close playwright browser", error);
+  }
+}
+
+async function handlePlaywrightResponse(response: Response) {
+  const url = response.url();
+  const resourceType = normalizePlaywrightResourceType(response.request().resourceType());
+  if (!isGoodsResponseCandidate(url, resourceType)) {
+    if (shouldLogFilteredGoodsResponse(url, resourceType)) {
+      log.info("[collection workspace] playwright filtered non-candidate response while scraping", {
+        responseUrl: url,
+        resourceType,
+        currentScrapingSourceProductId: currentScrapingContext?.sourceProductId,
+        extractedSourceProductId: getCurrentDriver().extractSourceProductId(url),
+      });
+    }
+    return;
+  }
+
+  const mimeType = String(response.headers()["content-type"] || "");
+  log.info("[collection workspace] playwright tracked candidate response", {
+    resourceType,
+    responseUrl: url,
+    mimeType,
+  });
+
+  try {
+    const body = await response.text();
+    const sourceProductIdFromUrl = getCurrentDriver().extractSourceProductId(url);
+    const rawData = getCurrentDriver().extractRawDataFromResponse(url, mimeType, body);
+    if (sourceProductIdFromUrl && rawData) {
+      mergeCollectedRawData(sourceProductIdFromUrl, rawData, workspaceState.sourceType);
+      writeDebugRawDataFile(sourceProductIdFromUrl, workspaceState.sourceType);
+      await renderSidePanes();
+    }
+
+    const parsed = getCurrentDriver().parseGoodsSummaryFromResponse(url, mimeType, body);
+    if (!parsed?.sourceProductId) {
+      log.info("[collection workspace] playwright response parsed without goods summary", {
+        url,
+        mimeType,
+        sourceProductIdFromUrl,
+        hasRawData: Boolean(rawData),
+      });
+      return;
+    }
+
+    capturedGoodsSummaryById.set(parsed.sourceProductId, parsed);
+    saveCollectedProductToStore(parsed.sourceProductId, {
+      sourceProductId: parsed.sourceProductId,
+      productName: parsed.productName,
+      status: parsed.status,
+      sourceUrl: url,
+      capturedAt: new Date().toISOString(),
+    }, workspaceState.sourceType);
+
+    if (workspaceState.sourceType !== "tb" && resourceType === "Document" && body.trim()) {
+      const dir = getCollectedHtmlDir();
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      fs.writeFile(getCollectedHtmlPath(parsed.sourceProductId, workspaceState.sourceType), body, "utf8", (err) => {
+        if (err) {
+          log.warn("[collection workspace] failed to save product html to file", {
+            sourceProductId: parsed.sourceProductId,
+            error: err,
+          });
+        } else {
+          log.info("[collection workspace] saved product html to file", { sourceProductId: parsed.sourceProductId });
+        }
+      });
+    }
+
+    if (rawData && parsed.sourceProductId !== sourceProductIdFromUrl) {
+      mergeCollectedRawData(parsed.sourceProductId, rawData, workspaceState.sourceType);
+      writeDebugRawDataFile(parsed.sourceProductId, workspaceState.sourceType);
+    }
+
+    void collectCurrentGoods(url);
+  } catch (error) {
+    log.warn("[collection workspace] failed to parse playwright response", { url, error });
+  }
+}
+
+function bindPlaywrightPageEvents(page: Page) {
+  page.on("response", (response) => {
+    void handlePlaywrightResponse(response);
+  });
+  page.on("framenavigated", (frame) => {
+    if (frame === page.mainFrame()) {
+      void handleCenterNavigation(frame.url());
+    }
+  });
+  page.on("popup", (popup) => {
+    const openedUrl = popup.url();
+    void (async () => {
+      try {
+        if (!openedUrl || openedUrl === "about:blank") {
+          await popup.waitForLoadState("domcontentloaded", { timeout: 3000 }).catch(() => null);
+        }
+        const targetUrl = openedUrl && openedUrl !== "about:blank" ? openedUrl : popup.url();
+        if (targetUrl) {
+          await page.goto(targetUrl, { waitUntil: "domcontentloaded" }).catch(() => null);
+        }
+      } finally {
+        await popup.close().catch(() => null);
+        // Chrome may have brought the window on-screen when the popup
+        // activated.  Move it back off-screen immediately after closing.
+        await movePlaywrightBrowserOffScreen(page);
+      }
+    })();
+  });
+}
+
+async function movePlaywrightBrowserOffScreen(page: Page): Promise<void> {
+  try {
+    const client = await page.context().newCDPSession(page);
+    try {
+      const { windowId } = await client.send("Browser.getWindowForTarget", {}) as { windowId: number };
+      // Find the rightmost edge across all displays so the window is
+      // guaranteed to be off-screen even in multi-monitor setups.
+      const allDisplays = electronScreen.getAllDisplays();
+      const rightEdge = allDisplays.reduce((max, d) => Math.max(max, d.bounds.x + d.bounds.width), 0);
+      const offX = rightEdge + 10;
+      await client.send("Browser.setWindowBounds", {
+        windowId,
+        bounds: { left: offX, top: 0, width: 1280, height: 800 },
+      });
+    } finally {
+      await client.detach();
+    }
+    log.info("[collection workspace] playwright browser window moved off-screen");
+  } catch (error) {
+    log.warn("[collection workspace] failed to minimize playwright browser", { error });
+  }
+}
+
+async function ensureWorkspacePlaywrightPage(initialUrl: string) {
+  const desiredUrl = normalizeWorkspaceUrl(initialUrl);
+  await closeWorkspacePlaywright();
+
+  if (workspaceState.sourceType === "tb") {
+    throw new Error("淘宝采集工作台使用 Electron BrowserView，不应初始化 Playwright 截屏流");
+  }
+
+  const resourceId = String(workspaceState.batch?.shopId || workspaceState.batch?.id || "default");
+  // 拼多多截屏流必须使用有头浏览器；false = headless disabled.
+  const engine = new PxxEngine(resourceId, false);
+  workspacePlaywrightEngine = engine;
+
+  // Tell Chrome to open off-screen from the very first frame by injecting
+  // --window-position into the launch args before the context is created.
+  // Use the rightmost edge across all displays so multi-monitor setups are covered.
+  const allDisplays = electronScreen.getAllDisplays();
+  const rightEdge = allDisplays.reduce((max, d) => Math.max(max, d.bounds.x + d.bounds.width), 0);
+  engine.browserArgs = [
+    ...engine.browserArgs,
+    `--window-position=${rightEdge + 10},0`,
+  ];
+
+  const page = await engine.init(desiredUrl);
+  if (!page) {
+    throw new Error("Playwright 采集浏览器初始化失败");
+  }
+
+  workspacePlaywrightPage = page;
+  await resizePlaywrightViewport();
+  bindPlaywrightPageEvents(page);
+  await page.bringToFront().catch(() => null);
+  // Ensure the Chrome window is off-screen even when reusing a cached context
+  // (--window-position only takes effect on first launch).
+  await movePlaywrightBrowserOffScreen(page);
+  startPlaywrightFrameStream();
+
+  return page.url() || desiredUrl;
+}
+
+async function navigatePlaywrightPage(url: string) {
+  if (!workspacePlaywrightPage || workspacePlaywrightPage.isClosed()) {
+    throw new Error("Playwright 采集浏览器尚未打开");
+  }
+  await workspacePlaywrightPage.goto(url, { waitUntil: "domcontentloaded" });
+  await emitPlaywrightFrame();
+  return workspacePlaywrightPage.url();
+}
+
+async function navigateCenterView(url: string) {
+  const center = workspaceViews?.center;
+  if (!center || center.webContents.isDestroyed()) {
+    throw new Error("采集工作台中间视图尚未打开");
+  }
+  await safeLoadWorkspaceUrl(center.webContents, url);
+  return center.webContents.getURL() || url;
 }
 
 async function waitForCapturedGoodsSummary(sourceProductId: string, timeoutMs = 10000) {
@@ -777,6 +1433,25 @@ async function pushRecordToTestingBridge(record: CollectRecordPreview) {
   }
 }
 
+function notifyCollectFailed(sourceProductId: string) {
+  try {
+    new Notification({
+      title: "采集失败",
+      body: `商品 ${sourceProductId} 未能获取到数据，请刷新页面后重试`,
+    }).show();
+  } catch (error) {
+    log.warn("[collection workspace] failed to show collect failure notification", { sourceProductId, error });
+  }
+
+  if (!workspaceViews?.left || workspaceViews.left.webContents.isDestroyed()) {
+    return;
+  }
+  workspaceViews.left.webContents.executeJavaScript(
+    `window.__COLLECTION_WORKSPACE_NOTIFY__ && window.__COLLECTION_WORKSPACE_NOTIFY__({ type: "error", message: "商品 ${sourceProductId} 采集失败，未能获取到数据，请刷新页面重试" });`,
+    true,
+  ).catch(() => undefined);
+}
+
 async function collectCurrentGoods(url: string) {
   if (isScrapingRecord) {
     log.info("[collection workspace] collectCurrentGoods skipped: already scraping", {
@@ -822,6 +1497,7 @@ async function collectCurrentGoods(url: string) {
         sourceProductId,
         url,
       });
+      notifyCollectFailed(sourceProductId);
       return;
     }
 
@@ -942,10 +1618,25 @@ function bindCenterViewEvents(view: BrowserView) {
 
   view.webContents.removeAllListeners("did-navigate");
   view.webContents.removeAllListeners("did-navigate-in-page");
+  view.webContents.removeAllListeners("did-start-loading");
+  view.webContents.removeAllListeners("did-finish-load");
   view.webContents.removeAllListeners("did-fail-load");
   view.webContents.removeAllListeners("render-process-gone");
   view.webContents.on("did-navigate", onNavigation);
   view.webContents.on("did-navigate-in-page", onNavigation);
+  view.webContents.on("did-start-loading", () => {
+    log.info("[collection workspace] center view did-start-loading", {
+      sourceType: workspaceState.sourceType,
+      url: view.webContents.getURL(),
+    });
+  });
+  view.webContents.on("did-finish-load", () => {
+    log.info("[collection workspace] center view did-finish-load", {
+      sourceType: workspaceState.sourceType,
+      url: view.webContents.getURL(),
+      title: view.webContents.getTitle(),
+    });
+  });
   view.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL) => {
     if (errorCode === -3) {
       log.info("[collection workspace] center view navigation aborted", {
@@ -986,6 +1677,7 @@ function bindCenterWindowOpenHandler(view: BrowserView) {
 
 export async function openCollectionWorkspace(options: OpenCollectionWorkspaceOptions) {
   const display = electronScreen.getPrimaryDisplay();
+  const isTbWorkspace = options.sourceType === "tb";
   isScrapingRecord = false;
   lastScrapedSourceProductId = "";
   clearCapturedGoodsState();
@@ -1006,6 +1698,7 @@ export async function openCollectionWorkspace(options: OpenCollectionWorkspaceOp
       minHeight: 720,
       backgroundColor: "#eef2f6",
       autoHideMenuBar: true,
+      show: false,
       title: `采集工作台 - ${options.batch.name || `批次 #${options.batch.id}`}`,
       webPreferences: {
         preload: getPreloadPath(),
@@ -1015,6 +1708,8 @@ export async function openCollectionWorkspace(options: OpenCollectionWorkspaceOp
         webSecurity: true,
       },
     });
+    workspaceWindow.maximize();
+    workspaceWindow.show();
 
     const left = createUtilityView("#eef2f6");
     const center = new BrowserView({
@@ -1026,12 +1721,10 @@ export async function openCollectionWorkspace(options: OpenCollectionWorkspaceOp
         webSecurity: true,
       },
     });
+    center.setBackgroundColor("#ffffff");
     const right = createUtilityView("#eef2f6");
 
     workspaceViews = { left, center, right };
-    setupCenterViewBrowserEnvironment(center);
-    bindCenterViewEvents(center);
-    bindCenterWindowOpenHandler(center);
 
     workspaceWindow.addBrowserView(left);
     workspaceWindow.addBrowserView(center);
@@ -1047,6 +1740,7 @@ export async function openCollectionWorkspace(options: OpenCollectionWorkspaceOp
       lastScrapedSourceProductId = "";
       centerDebuggerBoundViewId = 0;
       clearCapturedGoodsState();
+      void closeWorkspacePlaywright();
     });
 
     left.webContents.setWindowOpenHandler(({ url }) => {
@@ -1061,9 +1755,9 @@ export async function openCollectionWorkspace(options: OpenCollectionWorkspaceOp
     syncViewBounds();
 
     await Promise.all([
-      left.webContents.loadURL(buildPaneUrl("left")),
-      center.webContents.loadURL(getCollectionPlatformDriver(options.sourceType).homeUrl),
-      right.webContents.loadURL(buildPaneUrl("right")),
+      safeLoadPane(left, buildPaneUrl("left"), "left"),
+      safeLoadPane(center, isTbWorkspace ? getCenterLoadingUrl("正在打开淘宝采集页面...") : getPlaywrightViewerUrl(), "center"),
+      isTbWorkspace ? Promise.resolve() : safeLoadPane(right, buildPaneUrl("right"), "right"),
     ]);
   } else {
     workspaceWindow.setTitle(`采集工作台 - ${options.batch.name || `批次 #${options.batch.id}`}`);
@@ -1079,39 +1773,47 @@ export async function openCollectionWorkspace(options: OpenCollectionWorkspaceOp
   const paneLoads: Promise<unknown>[] = [];
 
   if (workspaceViews.left.webContents.getURL() !== leftPaneUrl) {
-    paneLoads.push(workspaceViews.left.webContents.loadURL(leftPaneUrl));
+    paneLoads.push(safeLoadPane(workspaceViews.left, leftPaneUrl, "left"));
   }
-  if (workspaceViews.right.webContents.getURL() !== rightPaneUrl) {
-    paneLoads.push(workspaceViews.right.webContents.loadURL(rightPaneUrl));
+  if (!isTbWorkspace && workspaceViews.right.webContents.getURL() !== rightPaneUrl) {
+    paneLoads.push(safeLoadPane(workspaceViews.right, rightPaneUrl, "right"));
   }
   if (paneLoads.length > 0) {
     await Promise.all(paneLoads);
   }
 
-  try {
-    await ensureCenterNetworkCapture(workspaceViews.center);
-  } catch (error) {
-    log.warn("[collection workspace] failed to enable center network capture", error);
+  if (!isTbWorkspace && !workspaceViews.center.webContents.getURL().startsWith("data:text/html")) {
+    await workspaceViews.center.webContents.loadURL(getPlaywrightViewerUrl());
   }
-
-  if (options.cookies?.length) {
-    await applyCookies(workspaceViews.center, options.cookies);
+  let workspaceUrl: string;
+  if (isTbWorkspace) {
+    await closeWorkspacePlaywright();
+    setupCenterViewBrowserEnvironment(workspaceViews.center);
+    bindCenterViewEvents(workspaceViews.center);
+    bindCenterWindowOpenHandler(workspaceViews.center);
+    try {
+      await ensureCenterNetworkCapture(workspaceViews.center);
+    } catch (error) {
+      log.warn("[collection workspace] failed to enable tb center network capture, continue loading page", error);
+    }
+    const resourceId = String(options.batch?.shopId || options.batch?.id || "default");
+    await applyTbSharedStorage(workspaceViews.center, resourceId);
+    workspaceUrl = await navigateCenterView(normalizeWorkspaceUrl(options.initialUrl));
+  } else {
+    const centerUrl = workspaceViews.center.webContents.getURL();
+    if (!centerUrl.startsWith("data:text/html")) {
+      await workspaceViews.center.webContents.loadURL(getPlaywrightViewerUrl());
+    }
+    workspaceUrl = await ensureWorkspacePlaywrightPage(options.initialUrl);
   }
-
-  if (options.originStorage?.length) {
-    await applyOriginStorage(workspaceViews.center, options.originStorage);
-  }
-
-  await safeLoadWorkspaceUrl(workspaceViews.center.webContents, normalizeWorkspaceUrl(options.initialUrl));
   await renderSidePanes();
 
   if (workspaceWindow.isMinimized()) {
     workspaceWindow.restore();
   }
-  workspaceWindow.show();
   workspaceWindow.focus();
 
-  return workspaceViews.center.webContents.getURL();
+  return workspaceUrl;
 }
 
 export function getCollectionWorkspaceState() {
@@ -1126,10 +1828,11 @@ export async function selectCollectionWorkspaceRecord(recordId: number) {
   if (workspaceState.sourceType === "tb" && nextId > 0) {
     workspaceRightPanelVisible = true;
     syncViewBounds();
+    await ensureRightPaneLoaded(workspaceState.batch?.id);
 
-    if (record?.sourceSnapshotUrl && workspaceViews?.center && !workspaceViews.center.webContents.isDestroyed()) {
+    if (record?.sourceSnapshotUrl) {
       try {
-        await safeLoadWorkspaceUrl(workspaceViews.center.webContents, record.sourceSnapshotUrl);
+        await navigateCenterView(record.sourceSnapshotUrl);
         log.info("[collection workspace] loaded original tb source url for record", {
           recordId: nextId,
           sourceProductId: record.sourceProductId,
@@ -1148,11 +1851,11 @@ export async function selectCollectionWorkspaceRecord(recordId: number) {
   await renderSidePanes();
 
   // Load local HTML snapshot in center view if available
-  if (workspaceState.sourceType !== "tb" && record?.sourceProductId && workspaceViews?.center && !workspaceViews.center.webContents.isDestroyed()) {
+  if (workspaceState.sourceType !== "tb" && record?.sourceProductId && workspacePlaywrightPage && !workspacePlaywrightPage.isClosed()) {
     const htmlPath = getCollectedHtmlPath(record.sourceProductId, workspaceState.sourceType);
     if (fs.existsSync(htmlPath)) {
       try {
-        await safeLoadWorkspaceUrl(workspaceViews.center.webContents, `file://${htmlPath}`);
+        await navigatePlaywrightPage(`file://${htmlPath}`);
         log.info("[collection workspace] loaded local html snapshot for record", {
           recordId: nextId,
           sourceProductId: record.sourceProductId,
@@ -1192,7 +1895,7 @@ export async function previewCollectedRecord(sourceProductId: string, sourceType
   if (sourceType !== "tb") {
     const htmlPath = getCollectedHtmlPath(sourceProductId, sourceType);
     if (fs.existsSync(htmlPath)) {
-      await safeLoadWorkspaceUrl(workspaceViews.center.webContents, `file://${htmlPath}`);
+      await navigatePlaywrightPage(`file://${htmlPath}`);
       log.info("[collection workspace] preview loaded local html", { sourceProductId, htmlPath });
       return { success: true, url: `file://${htmlPath}` };
     }
@@ -1201,7 +1904,11 @@ export async function previewCollectedRecord(sourceProductId: string, sourceType
   // Fallback: load the original source URL if available
   const record = workspaceState.records.find((item) => item.sourceProductId === sourceProductId);
   if (record?.sourceSnapshotUrl) {
-    await safeLoadWorkspaceUrl(workspaceViews.center.webContents, record.sourceSnapshotUrl);
+    if (sourceType === "tb") {
+      await navigateCenterView(record.sourceSnapshotUrl);
+    } else {
+      await navigatePlaywrightPage(record.sourceSnapshotUrl);
+    }
     return { success: true, url: record.sourceSnapshotUrl };
   }
 
@@ -1232,33 +1939,115 @@ export async function navigateCollectionWorkspace(action: "back" | "forward" | "
     throw new Error("采集工作台尚未打开");
   }
 
-  const centerView = workspaceViews.center;
-  const webContents = centerView.webContents;
+  if (workspaceState.sourceType === "tb") {
+    const center = workspaceViews.center;
+    switch (action) {
+      case "back":
+        if (center.webContents.canGoBack()) {
+          center.webContents.goBack();
+        }
+        break;
+      case "forward":
+        if (center.webContents.canGoForward()) {
+          center.webContents.goForward();
+        }
+        break;
+      case "home":
+        await navigateCenterView(getCurrentDriver().homeUrl);
+        break;
+      case "refresh":
+        center.webContents.reload();
+        break;
+      default:
+        throw new Error(`unsupported navigation action: ${action}`);
+    }
+
+    return { success: true, url: center.webContents.getURL() };
+  }
+
+  const page = workspacePlaywrightPage;
+  if (!page || page.isClosed()) {
+    throw new Error("Playwright 采集浏览器尚未打开");
+  }
 
   switch (action) {
-    case "back":
-      if (webContents.canGoBack()) {
-        webContents.goBack();
+    case "back": {
+      // Close any lingering tabs in the context (e.g. Taobao popups that
+      // weren't cleaned up yet) before navigating back.
+      const extraPages = page.context().pages().filter((p) => p !== page && !p.isClosed());
+      await Promise.all(extraPages.map((p) => p.close().catch(() => null)));
+      if (extraPages.length > 0) {
+        log.info("[collection workspace] closed extra playwright pages on back", { count: extraPages.length });
       }
+      await page.goBack({ waitUntil: "domcontentloaded" }).catch(() => null);
       break;
+    }
     case "forward":
-      if (webContents.canGoForward()) {
-        webContents.goForward();
-      }
+      await page.goForward({ waitUntil: "domcontentloaded" }).catch(() => null);
       break;
     case "home":
-      await safeLoadWorkspaceUrl(webContents, getCurrentDriver().homeUrl);
+      await page.goto(getCurrentDriver().homeUrl, { waitUntil: "domcontentloaded" });
       break;
     case "refresh":
-      webContents.reload();
+      await page.reload({ waitUntil: "domcontentloaded" }).catch(() => null);
       break;
     default:
       throw new Error(`unsupported navigation action: ${action}`);
   }
 
-  const url = webContents.getURL() || getCurrentDriver().homeUrl;
+  await emitPlaywrightFrame();
+  const url = page.url() || getCurrentDriver().homeUrl;
   return {
     success: true,
     url,
   };
+}
+
+export async function dispatchCollectionPlaywrightInput(input: PlaywrightViewerInputEvent): Promise<void> {
+  const page = workspacePlaywrightPage;
+  if (!page || page.isClosed()) {
+    return;
+  }
+
+  try {
+    const x = Number(input.x) || 0;
+    const y = Number(input.y) || 0;
+    const button = input.button || "left";
+
+    switch (input.type) {
+      case "mouse-move":
+        await page.mouse.move(x, y);
+        break;
+      case "mouse-down":
+        await page.mouse.move(x, y);
+        await page.mouse.down({ button });
+        break;
+      case "mouse-up":
+        await page.mouse.move(x, y);
+        await page.mouse.up({ button });
+        break;
+      case "wheel":
+        await page.mouse.wheel(Number(input.deltaX) || 0, Number(input.deltaY) || 0);
+        break;
+      case "key-down":
+        if (input.key) {
+          await page.keyboard.down(input.key);
+        }
+        break;
+      case "key-up":
+        if (input.key) {
+          await page.keyboard.up(input.key);
+        }
+        break;
+      case "type":
+        if (input.text) {
+          await page.keyboard.type(input.text);
+        }
+        break;
+      default:
+        break;
+    }
+  } catch (error) {
+    log.warn("[collection workspace] failed to dispatch playwright input", { inputType: input.type, error });
+  }
 }

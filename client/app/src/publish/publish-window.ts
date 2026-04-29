@@ -4,6 +4,9 @@ import log from 'electron-log';
 import { mainWindow } from '@src/kernel/windows';
 import { getLatestCaptchaTask } from './runtime/publish-center';
 import type { PublishWindowOpenOptions } from '@eleapi/publish/publish-window.api';
+import { TbEngine } from '@src/browser/tb.engine';
+import type { Page } from 'playwright';
+import type { PlaywrightViewerInputEvent } from '@eleapi/collection-workspace/collection-workspace.api';
 
 // ─── 布局常量 ─────────────────────────────────────────────────────────────────
 
@@ -19,6 +22,13 @@ let captchaPanelVisible = false;
 let captchaSolvedCallback: (() => void) | null = null;
 /** 展示验证码前保存的窗口外框宽度，用于恢复 */
 let captchaOriginalBoundsWidth: number | null = null;
+
+// ─── 截屏流验证码状态 ─────────────────────────────────────────────────────────
+
+let screenshotCaptchaEngine: TbEngine | null = null;
+let screenshotCaptchaPage: Page | null = null;
+let screenshotCaptchaTimer: ReturnType<typeof setInterval> | null = null;
+let screenshotCaptchaFrameBusy = false;
 
 // ─── 工具函数 ─────────────────────────────────────────────────────────────────
 
@@ -107,6 +117,141 @@ function buildPublishWindowUrl(options?: PublishWindowOpenOptions): string {
   return pageUrl.toString();
 }
 
+// ─── 截屏流验证码 HTML ────────────────────────────────────────────────────────
+
+/**
+ * 生成截屏流验证码查看器 HTML。
+ * 逻辑与采集工作区的 PlaywrightViewer 一致，区别是输入事件通过 publishCaptchaViewer.dispatchInput 转发。
+ */
+function buildPublishCaptchaViewerHtml(): string {
+  return `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' data: 'unsafe-inline'; img-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline';" />
+  <style>
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: #f8fafc; }
+    #stage { position: fixed; inset: 0; width: 100vw; height: 100vh; cursor: default; outline: none; }
+    #hint { position: fixed; inset: 0; display: grid; place-items: center; color: #64748b; font: 13px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; pointer-events: none; }
+  </style>
+</head>
+<body>
+  <canvas id="stage" tabindex="0"></canvas>
+  <div id="hint">正在连接淘宝验证码页面...</div>
+  <script>
+    const canvas = document.getElementById("stage");
+    const ctx = canvas.getContext("2d", { alpha: false });
+    const hint = document.getElementById("hint");
+    let frameWidth = 1;
+    let frameHeight = 1;
+
+    function resizeCanvas() {
+      const ratio = window.devicePixelRatio || 1;
+      const width = Math.max(1, Math.floor(window.innerWidth * ratio));
+      const height = Math.max(1, Math.floor(window.innerHeight * ratio));
+      if (canvas.width !== width || canvas.height !== height) {
+        canvas.width = width;
+        canvas.height = height;
+        ctx.fillStyle = "#f8fafc";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+      }
+    }
+
+    function normalizePoint(event) {
+      const rect = canvas.getBoundingClientRect();
+      return {
+        x: Math.max(0, Math.min(frameWidth, (event.clientX - rect.left) * frameWidth / Math.max(rect.width, 1))),
+        y: Math.max(0, Math.min(frameHeight, (event.clientY - rect.top) * frameHeight / Math.max(rect.height, 1))),
+      };
+    }
+
+    function mapButton(button) {
+      if (button === 1) return "middle";
+      if (button === 2) return "right";
+      return "left";
+    }
+
+    async function send(input) {
+      try {
+        await window.publishCaptchaViewer?.dispatchInput?.(input);
+      } catch (error) {
+        console.warn("[publish-captcha-viewer] input dispatch failed", error);
+      }
+    }
+
+    window.__PLAYWRIGHT_VIEWER_FRAME__ = (dataUrl, width, height) => {
+      resizeCanvas();
+      frameWidth = Math.max(1, Number(width) || canvas.width);
+      frameHeight = Math.max(1, Number(height) || canvas.height);
+      const image = new Image();
+      image.onload = () => {
+        hint.style.display = "none";
+        ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+      };
+      image.src = dataUrl;
+    };
+
+    window.addEventListener("resize", resizeCanvas);
+    canvas.addEventListener("mousemove", (e) => { const p = normalizePoint(e); send({ type: "mouse-move", ...p }); });
+    canvas.addEventListener("mousedown", (e) => { canvas.focus(); const p = normalizePoint(e); send({ type: "mouse-down", ...p, button: mapButton(e.button) }); e.preventDefault(); });
+    canvas.addEventListener("mouseup", (e) => { const p = normalizePoint(e); send({ type: "mouse-up", ...p, button: mapButton(e.button) }); e.preventDefault(); });
+    canvas.addEventListener("wheel", (e) => { send({ type: "wheel", deltaX: e.deltaX, deltaY: e.deltaY }); e.preventDefault(); }, { passive: false });
+    canvas.addEventListener("keydown", (e) => { send({ type: "key-down", key: e.key }); e.preventDefault(); });
+    canvas.addEventListener("keyup", (e) => { send({ type: "key-up", key: e.key }); });
+    canvas.addEventListener("contextmenu", (e) => e.preventDefault());
+    resizeCanvas();
+  </script>
+</body>
+</html>`;
+}
+
+// ─── 截屏流帧推送 ─────────────────────────────────────────────────────────────
+
+async function emitScreenshotCaptchaFrame(): Promise<void> {
+  if (screenshotCaptchaFrameBusy || !screenshotCaptchaPage || screenshotCaptchaPage.isClosed()) {
+    return;
+  }
+  if (!rightBrowserView || rightBrowserView.webContents.isDestroyed()) {
+    return;
+  }
+
+  screenshotCaptchaFrameBusy = true;
+  try {
+    const image = await screenshotCaptchaPage.screenshot({
+      type: 'jpeg',
+      quality: 72,
+      timeout: 5000,
+      animations: 'disabled',
+    });
+    const dataUrl = `data:image/jpeg;base64,${image.toString('base64')}`;
+    const viewport = screenshotCaptchaPage.viewportSize();
+    const w = viewport?.width ?? 800;
+    const h = viewport?.height ?? 600;
+    await rightBrowserView.webContents.executeJavaScript(
+      `window.__PLAYWRIGHT_VIEWER_FRAME__ && window.__PLAYWRIGHT_VIEWER_FRAME__(${JSON.stringify(dataUrl)}, ${w}, ${h});`,
+      true,
+    );
+  } catch {
+    /* 截帧失败不影响流程 */
+  } finally {
+    screenshotCaptchaFrameBusy = false;
+  }
+}
+
+function startScreenshotCaptchaStream(): void {
+  stopScreenshotCaptchaStream();
+  screenshotCaptchaTimer = setInterval(() => { void emitScreenshotCaptchaFrame(); }, 200);
+  void emitScreenshotCaptchaFrame();
+}
+
+function stopScreenshotCaptchaStream(): void {
+  if (screenshotCaptchaTimer) {
+    clearInterval(screenshotCaptchaTimer);
+    screenshotCaptchaTimer = null;
+  }
+  screenshotCaptchaFrameBusy = false;
+}
+
 // ─── 公开接口 ─────────────────────────────────────────────────────────────────
 
 /**
@@ -168,9 +313,10 @@ export function openPublishWindow(options?: PublishWindowOpenOptions): void {
     },
   });
 
-  // ── 右侧视图：加载验证码内容（初始隐藏） ──
+  // ── 右侧视图：普通模式加载验证码 URL；截屏流模式加载 canvas 查看器 ──
   rightBrowserView = new BrowserView({
     webPreferences: {
+      preload: getPreloadPath(),
       contextIsolation: true,
       nodeIntegration: false,
       // 验证码页面可能含跨域资源，关闭同源限制
@@ -275,6 +421,7 @@ export function showCaptchaPanel(captchaUrl: string, onSolved?: () => void): voi
 
 /**
  * 隐藏右侧验证码面板，并将窗口恢复为展示验证码之前的宽度。
+ * 若当前处于截屏流模式，同时停止截屏流。
  */
 export function hideCaptchaPanel(): void {
   captchaPanelVisible = false;
@@ -282,6 +429,7 @@ export function hideCaptchaPanel(): void {
     rightBrowserView.webContents.removeAllListeners('did-navigate');
   }
   captchaSolvedCallback = null;
+  stopScreenshotCaptchaStream();
   syncBounds();
 
   // 恢复窗口到展示验证码前的宽度
@@ -296,6 +444,150 @@ export function hideCaptchaPanel(): void {
 
   broadcastCaptchaPanelVisibility(false);
   log.info('[publish-window] captcha panel hidden');
+}
+
+/**
+ * 以截屏流方式展示图片上传验证码。
+ *
+ * 不同于 showCaptchaPanel（在 Electron BrowserView 里直接加载验证码 URL），
+ * 此函数：
+ *  1. 在右侧面板加载 canvas 截屏流查看器 HTML
+ *  2. 通过同 shopId 的 headless TbEngine Playwright 上下文导航到 captchaUrl
+ *  3. 每 200ms 截帧并推送到 canvas
+ *  4. 监听 Playwright 页面导航，验证码通过后调用 onSolved
+ */
+export async function showScreenshotCaptchaPanel(
+  captchaUrl: string,
+  shopId: number,
+  taskId: number,
+  onSolved?: () => void,
+): Promise<void> {
+  if (!publishBrowserWindow || publishBrowserWindow.isDestroyed()) {
+    log.warn('[publish-window] showScreenshotCaptchaPanel: publish window is not open');
+    return;
+  }
+  if (!rightBrowserView || rightBrowserView.webContents.isDestroyed()) {
+    log.warn('[publish-window] showScreenshotCaptchaPanel: right view is not available');
+    return;
+  }
+
+  // 停止上一次截屏流（如有）
+  stopScreenshotCaptchaStream();
+  if (screenshotCaptchaPage && !screenshotCaptchaPage.isClosed()) {
+    try { await screenshotCaptchaPage.close(); } catch { /* ignore */ }
+  }
+  screenshotCaptchaPage = null;
+  screenshotCaptchaEngine = null;
+
+  // 展开右侧面板
+  if (!captchaPanelVisible) {
+    const currentBounds = publishBrowserWindow.getBounds();
+    captchaOriginalBoundsWidth = currentBounds.width;
+    publishBrowserWindow.setBounds({
+      ...currentBounds,
+      width: currentBounds.width + CAPTCHA_PANEL_WIDTH,
+    });
+  }
+  captchaPanelVisible = true;
+  syncBounds();
+  broadcastCaptchaPanelVisibility(true);
+
+  // 加载 canvas 查看器 HTML
+  const viewerHtml = buildPublishCaptchaViewerHtml();
+  const viewerDataUrl = `data:text/html;charset=utf-8,${encodeURIComponent(viewerHtml)}`;
+  await rightBrowserView.webContents.loadURL(viewerDataUrl).catch((err) => {
+    log.warn('[publish-window] showScreenshotCaptchaPanel: failed to load viewer html', err);
+  });
+
+  // 初始化 headless TbEngine，导航到验证码 URL
+  try {
+    const engine = new TbEngine(String(shopId), true);
+    engine.bindPublishTask(taskId);
+    screenshotCaptchaEngine = engine;
+
+    const context = await engine.getContextOnly();
+    if (!context) {
+      log.warn('[publish-window] showScreenshotCaptchaPanel: no playwright context for shop', shopId);
+      return;
+    }
+
+    const pages = context.pages();
+    const page: Page = pages.length > 0 ? pages[0] : await context.newPage();
+    screenshotCaptchaPage = page;
+
+    await page.goto(captchaUrl, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch((err) => {
+      log.warn('[publish-window] showScreenshotCaptchaPanel: navigate to captcha url failed', err);
+    });
+
+    startScreenshotCaptchaStream();
+
+    // 监听页面导航：跳离验证码页面 = 验证通过
+    const onFrameNavigated = (frame: { parentFrame(): unknown; url(): string }) => {
+      if (frame.parentFrame() !== null) return;
+      const url = frame.url();
+      if (!url || /captcha|checkcode|turing/i.test(url)) return;
+      log.info('[publish-window] screenshot captcha solved, url navigated to', url);
+      page.off('framenavigated', onFrameNavigated);
+      stopScreenshotCaptchaStream();
+      hideCaptchaPanel();
+      onSolved?.();
+    };
+    page.on('framenavigated', onFrameNavigated);
+
+  } catch (err) {
+    log.error('[publish-window] showScreenshotCaptchaPanel: failed to setup playwright page', err);
+    stopScreenshotCaptchaStream();
+  }
+
+  publishBrowserWindow.focus();
+  log.info('[publish-window] screenshot captcha panel shown', { captchaUrl, shopId });
+}
+
+/**
+ * 将来自 canvas 查看器的输入事件转发到 Playwright 截屏流页面。
+ * 由 PublishCaptchaViewerImpl 调用。
+ */
+export async function dispatchPublishCaptchaViewerInput(input: PlaywrightViewerInputEvent): Promise<void> {
+  const page = screenshotCaptchaPage;
+  if (!page || page.isClosed()) {
+    return;
+  }
+
+  try {
+    const x = Number(input.x) || 0;
+    const y = Number(input.y) || 0;
+    const button = input.button ?? 'left';
+
+    switch (input.type) {
+      case 'mouse-move':
+        await page.mouse.move(x, y);
+        break;
+      case 'mouse-down':
+        await page.mouse.move(x, y);
+        await page.mouse.down({ button });
+        break;
+      case 'mouse-up':
+        await page.mouse.move(x, y);
+        await page.mouse.up({ button });
+        break;
+      case 'wheel':
+        await page.mouse.wheel(Number(input.deltaX) || 0, Number(input.deltaY) || 0);
+        break;
+      case 'key-down':
+        if (input.key) await page.keyboard.down(input.key);
+        break;
+      case 'key-up':
+        if (input.key) await page.keyboard.up(input.key);
+        break;
+      case 'type':
+        if (input.text) await page.keyboard.type(input.text);
+        break;
+      default:
+        break;
+    }
+  } catch (err) {
+    log.warn('[publish-window] dispatchPublishCaptchaViewerInput: failed', { type: input.type, err });
+  }
 }
 
 /**

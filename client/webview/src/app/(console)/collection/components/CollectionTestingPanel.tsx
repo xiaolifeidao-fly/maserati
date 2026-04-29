@@ -69,6 +69,7 @@ interface CollectTestingBridge {
 type CollectTestingWindow = Window & {
   collectTestingBridge?: CollectTestingBridge;
   __COLLECTION_WORKSPACE_UPDATE__?: (nextState: CollectionWorkspaceState) => void;
+  __COLLECTION_WORKSPACE_NOTIFY__?: (notification: { type: "error" | "info" | "success"; message: string }) => void;
 };
 
 const DEFAULT_PAGE_SIZE = 12;
@@ -180,6 +181,15 @@ function useCollectionWorkspaceState({ enabled = true, fallbackBatchId = 0 } = {
     };
 
     collectionWindow.__COLLECTION_WORKSPACE_UPDATE__ = handleWorkspaceUpdate;
+    collectionWindow.__COLLECTION_WORKSPACE_NOTIFY__ = (notification) => {
+      if (notification.type === "error") {
+        void message.error(notification.message);
+      } else if (notification.type === "success") {
+        void message.success(notification.message);
+      } else {
+        void message.info(notification.message);
+      }
+    };
 
     void (async () => {
       const initialLoadVersion = updateVersionRef.current;
@@ -225,6 +235,7 @@ function useCollectionWorkspaceState({ enabled = true, fallbackBatchId = 0 } = {
       if (collectionWindow.__COLLECTION_WORKSPACE_UPDATE__ === handleWorkspaceUpdate) {
         delete collectionWindow.__COLLECTION_WORKSPACE_UPDATE__;
       }
+      delete collectionWindow.__COLLECTION_WORKSPACE_NOTIFY__;
     };
   }, [enabled, fallbackBatchId]);
 

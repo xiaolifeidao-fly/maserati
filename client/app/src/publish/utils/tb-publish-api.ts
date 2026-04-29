@@ -887,6 +887,107 @@ export function assertTbDraftSubmitSuccess(
   }
 }
 
+export interface AsyncOptCatPropItem {
+  name: string;
+  uiType?: string;
+  label?: string;
+  required?: boolean;
+  parent?: string;
+  dataSource?: Array<{ value?: string | number; text?: string }>;
+}
+
+export async function fetchTbCatPropAsyncOpt(
+  taskId: number,
+  shopId: number,
+  page: Page,
+  draftContext: TbDraftContext,
+  catPropValues: Record<string, unknown>,
+): Promise<AsyncOptCatPropItem[]> {
+  const catId = draftContext.catId;
+  const itemId = draftContext.itemId ?? '';
+  const referer = page.url() || 'https://item.upload.taobao.com/sell/v2/draft.htm';
+
+  let headers: Record<string, string>;
+  try {
+    headers = await buildTaobaoHeaders(page, referer);
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('Cookie')) {
+      await handleTbLoginRequired(StepCode.FILL_DRAFT, shopId);
+    }
+    throw error;
+  }
+
+  const jsonBodyObj: Record<string, unknown> = {
+    global: { catId, id: itemId },
+    catProp: catPropValues,
+  };
+  const globalExtendInfoObj: Record<string, unknown> = {
+    startTraceId: draftContext.startTraceId,
+    skuDecoupling: 'true',
+    noIcmp: 'true',
+  };
+  const data = {
+    jsonBody: JSON.stringify(jsonBodyObj),
+    globalExtendInfo: JSON.stringify(globalExtendInfoObj),
+  };
+  const requestUrl = `${TB_CRO_RULE_ASYNC_CHECK_URL}?optType=taobaoCatProp&editType=editTypeLog&catId=${catId}&id=${itemId}&requiredKey=title-foodPrdLicense-globalStock-images-id`;
+
+  publishTaobaoRequestLog(taskId, 'fetch-cat-prop-async-opt', {
+    url: requestUrl,
+    method: 'POST',
+    catId,
+    draftId: draftContext.draftId,
+    itemId,
+    input: { data: summarizeForLog(data) },
+  });
+
+  const response = await axios.post<string>(requestUrl, data, {
+    headers,
+    timeout: 30000,
+    responseType: 'text',
+    transformResponse: [raw => raw],
+  });
+
+  await handleTbMaybeLoginRequired(StepCode.FILL_DRAFT, shopId, response.data);
+  const rawData = parseTaobaoResponseText(response.data, '淘宝商品属性扩展接口');
+  await handleTbMaybeLoginRequired(StepCode.FILL_DRAFT, shopId, rawData);
+
+  publishTaobaoResponseLog(taskId, 'fetch-cat-prop-async-opt', {
+    url: requestUrl,
+    method: 'POST',
+    status: response.status,
+    catId,
+    draftId: draftContext.draftId,
+    itemId,
+    output: { rawData: summarizeForLog(rawData) },
+  });
+
+  // Parse catProps from noIcmp.models[name==="catProp"].dataSource
+  const noIcmp = asRecord(rawData['noIcmp']);
+  const models = noIcmp?.models;
+  if (Array.isArray(models)) {
+    const catPropModel = (models as Array<Record<string, unknown>>).find(m => m.name === 'catProp');
+    if (catPropModel) {
+      const dataSource = catPropModel.dataSource;
+      if (Array.isArray(dataSource)) {
+        return dataSource as AsyncOptCatPropItem[];
+      }
+    }
+  }
+
+  // Fallback: icmp.components.catProp.props.dataSource
+  const icmp = asRecord(rawData['icmp']);
+  const components = asRecord(icmp?.components);
+  const catPropComponent = asRecord(components?.catProp);
+  const props = asRecord(catPropComponent?.props);
+  const ds = props?.dataSource;
+  if (Array.isArray(ds)) {
+    return ds as AsyncOptCatPropItem[];
+  }
+
+  return [];
+}
+
 async function buildTaobaoHeaders(page: Page, referer: string): Promise<Record<string, string>> {
   const context = page.context();
   const cookies = await context.cookies([

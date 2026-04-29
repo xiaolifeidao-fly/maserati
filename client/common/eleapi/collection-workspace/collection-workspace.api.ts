@@ -18,6 +18,19 @@ export interface CollectedProductData {
   capturedAt?: string;
 }
 
+export type PlaywrightViewerMouseButton = "left" | "middle" | "right";
+
+export interface PlaywrightViewerInputEvent {
+  type: "mouse-move" | "mouse-down" | "mouse-up" | "wheel" | "key-down" | "key-up" | "type";
+  x?: number;
+  y?: number;
+  button?: PlaywrightViewerMouseButton;
+  deltaX?: number;
+  deltaY?: number;
+  key?: string;
+  text?: string;
+}
+
 export class CollectionWorkspaceApi extends ElectronApi {
   getApiName(): string {
     return "collectionWorkspace";
@@ -71,5 +84,10 @@ export class CollectionWorkspaceApi extends ElectronApi {
   @InvokeType(Protocols.INVOKE)
   async saveStandardProductData(sourceProductId: string, sourceType: CollectSourceType, data: StandardProductData): Promise<void> {
     return this.invokeApi("saveStandardProductData", sourceProductId, sourceType, data);
+  }
+
+  @InvokeType(Protocols.INVOKE)
+  async dispatchPlaywrightInput(input: PlaywrightViewerInputEvent): Promise<void> {
+    return this.invokeApi("dispatchPlaywrightInput", input);
   }
 }

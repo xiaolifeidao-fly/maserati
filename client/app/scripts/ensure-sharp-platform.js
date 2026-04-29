@@ -65,7 +65,8 @@ function installSharpPlatform({ appDir, platform, arch }) {
 
   const env = {
     ...process.env,
-    npm_config_platform: platform,
+    npm_config_os: platform,
+    npm_config_cpu: arch,
     npm_config_arch: arch,
     npm_config_include: 'optional',
   };
@@ -82,7 +83,6 @@ function installSharpPlatform({ appDir, platform, arch }) {
     '--ignore-scripts=false',
     `--os=${platform}`,
     `--cpu=${arch}`,
-    `sharp@${sharpVersion}`,
     ...packages,
   ];
 

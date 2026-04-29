@@ -15,8 +15,7 @@ import type { FillerContext } from '../fillers/filler.interface';
 import type { TbWindowJsonCatProp, TbWindowJsonDraftData } from '../types/tb-window-json';
 import { publishInfo, publishWarn, summarizeForLog } from '../utils/publish-logger';
 import { assertTbDraftSubmitSuccess, buildDraftJsonBody, submitDraftToTaobao } from '../utils/tb-publish-api';
-
-declare const window: any;
+import { getTaskWindowJson, interceptWindowJson } from '../utils/window-json.memory';
 
 const TB_WINDOW_JSON_TIMEOUT = 20_000;
 /** 校验时跳过的组件 key（参考旧代码 filterKey） */
@@ -63,10 +62,15 @@ export class EditDraftStep extends PublishStep {
     const { page } = pageEntry;
     pageEntry.engine.bindPublishTask(ctx.taskId);
 
-    await page.reload();
-    await page.waitForFunction(() => Boolean(window?.Json), { timeout: TB_WINDOW_JSON_TIMEOUT });
+    // 先注册响应拦截，再 reload，确保捕获 HTML 中的 window.Json
+    const capturePromise = interceptWindowJson(page, ctx.taskId, TB_WINDOW_JSON_TIMEOUT);
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await capturePromise;
 
-    const rawWindowJson = await page.evaluate(() => window?.Json);
+    const rawWindowJson = getTaskWindowJson(ctx.taskId);
+    if (!rawWindowJson) {
+      throw new PublishError(this.stepCode, '无法获取淘宝草稿页面数据，请确认店铺登录状态');
+    }
     const tbWindowJson = parseTbWindowJsonForDraft(rawWindowJson);
     const saleSpecUiState = await detectTbSaleSpecUiState(page);
 

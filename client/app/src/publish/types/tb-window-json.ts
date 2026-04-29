@@ -23,6 +23,9 @@ export interface TbWindowJsonOption {
 
 export interface TbWindowJsonExpression {
   type?: string;
+  text?: string;
+  maxLength?: number;
+  placeholder?: string;
 }
 
 export interface TbWindowJsonUnit {

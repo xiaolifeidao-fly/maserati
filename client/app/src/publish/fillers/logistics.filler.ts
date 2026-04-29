@@ -67,11 +67,15 @@ export class LogisticsFiller implements IFiller {
     });
 
     // ── shipFrom 关键词归一化 ──────────────────────────────────────────────────
-    const rawShipFrom = String(logistics.shipFrom ?? '').trim() || '北京市';
+    const shipFromFromLogistics = String(logistics.shipFrom ?? '').trim();
+    const shipFromFromAttributes = getAttributeValue(product.attributes, '发货地');
+    const rawShipFrom = shipFromFromLogistics || shipFromFromAttributes || '北京市';
     const shipFromKeyword = getKeywords(rawShipFrom);
     publishInfo(`[task:${taskId}] [LogisticsFiller] ③ shipFrom 关键词`, {
       taskId,
       rawShipFrom: logistics.shipFrom ?? null,
+      attributeShipFrom: shipFromFromAttributes || null,
+      source: shipFromFromLogistics ? 'logistics.shipFrom' : shipFromFromAttributes ? 'attributes.发货地' : 'default',
       normalized: rawShipFrom,
       keyword: shipFromKeyword,
     });
@@ -226,6 +230,14 @@ function getKeywords(keywords: string): string {
   return keywords;
 }
 
+function getAttributeValue(
+  attributes: FillerContext['product']['attributes'],
+  name: string,
+): string {
+  const matched = attributes.find(attr => String(attr.name ?? '').trim() === name);
+  return String(matched?.value ?? '').trim();
+}
+
 /**
  * 从 tbWindowJson.logisticsSubItems 中提取 name="template" 的模板选项列表
  */
@@ -333,7 +345,7 @@ async function createTaobaoShippingTemplate(
     shopId,
     url: TB_FREIGHT_TEMPLATE_PAGE,
   });
-  const engine = new TbEngine(String(shopId), false);
+  const engine = new TbEngine(String(shopId), true);
   try {
     const page = await engine.init(TB_FREIGHT_TEMPLATE_PAGE);
     if (!page) {

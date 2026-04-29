@@ -1,4 +1,4 @@
-import { CollectionWorkspaceApi, type CollectedProductData } from "@eleapi/collection-workspace/collection-workspace.api";
+import { CollectionWorkspaceApi, type CollectedProductData, type PlaywrightViewerInputEvent } from "@eleapi/collection-workspace/collection-workspace.api";
 import { type CollectSourceType } from "@eleapi/collect/collect.platform";
 import type { StandardProductData } from "@product/standard-product";
 import {
@@ -13,6 +13,7 @@ import {
   getCollectedProductRawDataWithFallback,
   hasCollectedHtml,
   saveStandardProductToStore,
+  dispatchCollectionPlaywrightInput,
 } from "@src/collect/workspace.manager";
 
 export class CollectionWorkspaceImpl extends CollectionWorkspaceApi {
@@ -54,5 +55,9 @@ export class CollectionWorkspaceImpl extends CollectionWorkspaceApi {
 
   async saveStandardProductData(sourceProductId: string, sourceType: CollectSourceType, data: StandardProductData): Promise<void> {
     saveStandardProductToStore(sourceProductId, data, sourceType);
+  }
+
+  async dispatchPlaywrightInput(input: PlaywrightViewerInputEvent): Promise<void> {
+    return dispatchCollectionPlaywrightInput(input);
   }
 }

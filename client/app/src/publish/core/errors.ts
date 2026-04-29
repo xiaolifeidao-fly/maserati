@@ -49,8 +49,27 @@ export class StepSkippedError extends PublishError {
   }
 }
 
+/**
+ * 图片上传步骤检测到验证码时抛出此错误。
+ * 与 CaptchaRequiredError 的区别：验证码通过截屏流（Playwright canvas）方式呈现，
+ * 而非在 Electron BrowserView 中直接加载验证码 URL。
+ */
+export class ScreenshotCaptchaRequiredError extends CaptchaRequiredError {
+  readonly shopId: number;
+
+  constructor(stepCode: StepCode, captchaUrl: string, shopId: number) {
+    super(stepCode, captchaUrl);
+    this.name = 'ScreenshotCaptchaRequiredError';
+    this.shopId = shopId;
+  }
+}
+
 export function isCaptchaError(err: unknown): err is CaptchaRequiredError {
   return err instanceof CaptchaRequiredError;
+}
+
+export function isScreenshotCaptchaError(err: unknown): err is ScreenshotCaptchaRequiredError {
+  return err instanceof ScreenshotCaptchaRequiredError;
 }
 
 export function isPublishError(err: unknown): err is PublishError {

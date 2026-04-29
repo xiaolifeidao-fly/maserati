@@ -167,6 +167,12 @@ export interface PublishProgressEvent {
   captchaUrl?: string;
   /** 验证码校验地址 */
   validateUrl?: string;
+  /**
+   * 验证码呈现方式：
+   *  - 'browser'（默认）：在 Electron BrowserView 中直接加载验证码 URL
+   *  - 'screenshot'：通过 Playwright 截屏流呈现，用于图片上传步骤
+   */
+  captchaMode?: 'browser' | 'screenshot';
 }
 
 export type PublishEntryScene = 'collection' | 'product';

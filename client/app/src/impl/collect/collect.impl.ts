@@ -1,4 +1,3 @@
-import type { CookiesSetDetails } from "electron";
 import fs from "fs";
 import path from "path";
 import AdmZip from "adm-zip";
@@ -24,8 +23,6 @@ import {
 } from "@eleapi/collect/collect.api";
 import { normalizeCollectSourceType } from "@eleapi/collect/collect.platform";
 import type { ShopRecord } from "@eleapi/commerce/commerce.api";
-import { PxxEngine } from "@src/browser/pxx.engine";
-import { TbEngine } from "@src/browser/tb.engine";
 import { getCollectionPlatformDriver } from "@src/collect/platforms/registry";
 import type { CollectedGoodsSummary } from "@src/collect/platforms/types";
 import { importCollectedRecordToStore, navigateCollectionWorkspace, openCollectionWorkspace } from "@src/collect/workspace.manager";
@@ -37,54 +34,6 @@ interface ImportJsonFile {
   entryName: string;
   name: string;
   readText(): string;
-}
-
-function mapCookieSameSite(value?: "Strict" | "Lax" | "None") {
-  switch (value) {
-    case "Strict":
-      return "strict" as const;
-    case "Lax":
-      return "lax" as const;
-    case "None":
-      return "no_restriction" as const;
-    default:
-      return undefined;
-  }
-}
-
-function toElectronCookies(
-  cookies: Array<{
-    name?: string;
-    value?: string;
-    domain?: string;
-    path?: string;
-    secure?: boolean;
-    httpOnly?: boolean;
-    sameSite?: "Strict" | "Lax" | "None";
-    expires?: number;
-  }>,
-): CookiesSetDetails[] {
-  return cookies.reduce<CookiesSetDetails[]>((result, cookie) => {
-    const host = String(cookie.domain || "").replace(/^\./, "").trim();
-    const name = String(cookie.name || "").trim();
-    if (!host || !name) {
-      return result;
-    }
-
-    result.push({
-        url: `${cookie.secure ? "https" : "http"}://${host}${cookie.path || "/"}`,
-        name,
-        value: String(cookie.value || ""),
-        domain: cookie.domain,
-        path: cookie.path,
-        secure: Boolean(cookie.secure),
-        httpOnly: Boolean(cookie.httpOnly),
-        sameSite: mapCookieSameSite(cookie.sameSite),
-        expirationDate: Number(cookie.expires) > 0 ? cookie.expires : undefined,
-    });
-
-    return result;
-  }, []);
 }
 
 export class CollectImpl extends CollectApi {
@@ -172,55 +121,13 @@ export class CollectImpl extends CollectApi {
     const normalizedRecords = Array.isArray(records.data) ? records.data : [];
     let workspaceUrl = driver.homeUrl;
 
-    if (driver.sourceType === "pxx") {
-      const engine = new PxxEngine(String(batch.shopId), true);
-      const openedPage = await engine.openCollectionWorkspace(batch, normalizedRecords);
-      if (!openedPage) {
-        throw new Error("采集引擎初始化失败");
-      }
-
-      const context = engine.getContext();
-      const storageState = context ? await context.storageState() : { cookies: [], origins: [] };
-      const cookieDetails = toElectronCookies(Array.isArray(storageState.cookies) ? storageState.cookies : []);
-
+    if (driver.sourceType === "pxx" || driver.sourceType === "tb") {
       workspaceUrl = await openCollectionWorkspace({
         batch,
         records: normalizedRecords,
         sourceType,
         initialUrl: driver.homeUrl,
-        cookies: cookieDetails,
-        originStorage: Array.isArray(storageState.origins) ? storageState.origins : [],
       });
-
-      if (!openedPage.isClosed()) {
-        await openedPage.close().catch(() => null);
-      }
-      await engine.closeContext().catch(() => null);
-      await engine.closeBrowser().catch(() => null);
-    } else if (driver.sourceType === "tb") {
-      const engine = new TbEngine(String(batch.shopId), true);
-      const openedPage = await engine.init(driver.homeUrl);
-      if (!openedPage) {
-        throw new Error("淘宝采集引擎初始化失败");
-      }
-
-      const context = engine.getContext();
-      const storageState = context ? await context.storageState() : { cookies: [], origins: [] };
-      const cookies = toElectronCookies(Array.isArray(storageState.cookies) ? storageState.cookies : []);
-      workspaceUrl = await openCollectionWorkspace({
-        batch,
-        records: normalizedRecords,
-        sourceType,
-        initialUrl: driver.homeUrl,
-        cookies,
-        originStorage: Array.isArray(storageState.origins) ? storageState.origins : [],
-      });
-
-      if (!openedPage.isClosed()) {
-        await openedPage.close().catch(() => null);
-      }
-      await engine.closeContext().catch(() => null);
-      await engine.closeBrowser().catch(() => null);
     } else {
       throw new Error(`采集平台 ${shop.platform || sourceType || "unknown"} 暂未接入`);
     }

@@ -5,6 +5,13 @@ cd /d "%~dp0\.."
 if errorlevel 1 exit /b %errorlevel%
 
 set NODE_OPTIONS=--max-old-space-size=4096
+
+rem 代码签名证书配置（可选）
+rem 如需签名，在运行前设置这两个环境变量，或在此处填入路径和密码
+rem set CSC_LINK=%~dp0cert.pfx
+rem set CSC_KEY_PASSWORD=你的证书密码
+rem 若未设置 CSC_LINK，electron-builder 会跳过签名步骤
+
 if exist dist rmdir /s /q dist
 
 call npm run build

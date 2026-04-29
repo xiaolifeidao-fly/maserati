@@ -73,6 +73,31 @@ export async function injectCookiesIntoTbContext(
   }
 }
 
+/**
+ * 清理 Chrome persistent context 目录下的过期锁文件。
+ * Windows 上 app 崩溃或重装后这些文件会残留，导致 Chrome 弹出
+ * "Profile is in use - Retry / Cancel" 对话框并无限循环。
+ */
+function clearChromeLockFiles(userDataDir: string): void {
+    const lockFiles = [
+        'lockfile',
+        'SingletonLock',
+        'SingletonCookie',
+        'SingletonSocket',
+    ];
+    for (const name of lockFiles) {
+        const lockPath = path.join(userDataDir, name);
+        try {
+            if (fs.existsSync(lockPath)) {
+                fs.rmSync(lockPath, { force: true });
+                log.info('[Engine] removed stale Chrome lock file', lockPath);
+            }
+        } catch (e) {
+            log.warn('[Engine] failed to remove Chrome lock file', lockPath, e);
+        }
+    }
+}
+
 export async function closeAllBrowserContexts(): Promise<void> {
     const tasks: Promise<void>[] = [];
 
@@ -333,6 +358,30 @@ export abstract class DoorEngine<T = any> {
         return this.timeout;
     }
 
+    /**
+     * 创建 Page 但不导航（用于在 goto 前注册响应监听器）。
+     * 调用方完成监听器注册后，自行调用 page.goto(url)。
+     */
+    public async createPage(): Promise<Page | undefined> {
+        if (this.usePersistentContext) {
+            this.context = await this.createContextByPersistentContext();
+        } else {
+            this.browser = await this.createBrowser();
+            if (!this.context) {
+                this.context = await this.createContext();
+            }
+        }
+        if (!this.context) return undefined;
+        const timeout = await this.buildTimeout();
+        this.timeout = timeout;
+        const page = await this.context.newPage();
+        await page.setViewportSize({ width: this.width, height: this.height });
+        this.onRequest(page);
+        this.onResponse(page);
+        this.page = page;
+        return page;
+    }
+
     public async init(url : string|undefined = undefined) : Promise<Page | undefined> {
         log.info("init usePersistentContext is ", this.usePersistentContext);
         if(this.usePersistentContext){
@@ -402,8 +451,9 @@ export abstract class DoorEngine<T = any> {
             }
         }
         const userDataDir = this.getUserDataDir();
+        clearChromeLockFiles(userDataDir);
         const platform = await ensurePlatform();
-        
+
         const contextConfig: any = {
             headless: this.headless,
             executablePath: storeBrowserPath,
@@ -1109,7 +1159,6 @@ export abstract class DoorEngine<T = any> {
             };
         }
         const context = await this.browser?.newContext(contextConfig);
-        
         contextMap.set(key, context);
         return context;
     }
@@ -1727,7 +1776,7 @@ export abstract class DoorEngine<T = any> {
                 overrideCanvas();
                 hideAutomationFeatures();
                 blockFingerprinting();
-                antiHeadlessDetection(); // 添加无头浏览器专用反检测
+                antiHeadlessDetection();
             } catch (err) {
                 // 忽略错误继续执行
             }

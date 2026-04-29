@@ -12,6 +12,7 @@ import { SkuFiller } from '../fillers/sku.filler';
 import { LogisticsFiller } from '../fillers/logistics.filler';
 import { DetailImagesFiller } from '../fillers/detail-images.filler';
 import { FoodFiller } from '../fillers/food.filler';
+import { PublishConfigFiller } from '../fillers/publish-config.filler';
 import type { IFiller, FillerContext } from '../fillers/filler.interface';
 import { getImageCropMetaMap } from '../core/publish-image-meta-store';
 import { requestBackend } from '@src/impl/shared/backend';
@@ -39,8 +40,12 @@ import {
   syncCustomSalePropsToTaobao,
 } from '../utils/tb-publish-api';
 import { ensureTbShopLoggedIn, handleTbMaybeLoginRequired } from '../utils/tb-login-state';
-
-declare const window: any;
+import {
+  extractWindowJsonFromHtml,
+  getTaskWindowJson,
+  interceptWindowJson,
+  setTaskWindowJson,
+} from '../utils/window-json.memory';
 
 function buildPublishStartTime(strategy?: PublishStrategy): { type: 0 | 2; shelfTime: null } {
   return {
@@ -246,6 +251,7 @@ export class FillDraftStep extends PublishStep {
     new LogisticsFiller(),
     new DetailImagesFiller(),
     new FoodFiller(),
+    new PublishConfigFiller(),
   ];
 
   protected async doExecute(ctx: StepContext): Promise<StepResult> {
@@ -388,6 +394,7 @@ export class FillDraftStep extends PublishStep {
       draftContext: draftCtx,
       publishConfig: ctx.get('publishConfig'),
       tbWindowJson,
+      page: getPublishPage(ctx.taskId)?.page,
       draftPayload: initialDraftPayload,
     };
 
@@ -468,25 +475,31 @@ export class FillDraftStep extends PublishStep {
     const engine = new TbEngine(String(ctx.shopId), true);
     engine.bindPublishTask(ctx.taskId);
 
-    const page = await engine.init(url);
+    // 先创建 page，不导航，以便在响应到达前注册拦截器
+    const page = await engine.createPage();
     if (!page) {
       throw new PublishError(this.stepCode, '无法打开淘宝发布页面，请确认店铺登录状态');
     }
+
+    // 注册 HTML 响应拦截（必须在 goto 之前）
+    let capturePromise = interceptWindowJson(page, ctx.taskId, TB_WINDOW_JSON_TIMEOUT);
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
     await ensureTbShopLoggedIn(page, this.stepCode, ctx.shopId);
 
     // 在同一个页面上检查草稿数量，超限则删除，之后 reload 回到干净状态
     const needsReload = await this.checkAndCleanDraftSlot(ctx.taskId, ctx.shopId, catId, page);
     if (needsReload) {
+      // 重新注册拦截器以捕获 reload 后的新 HTML
+      capturePromise = interceptWindowJson(page, ctx.taskId, TB_WINDOW_JSON_TIMEOUT);
       await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
       await ensureTbShopLoggedIn(page, this.stepCode, ctx.shopId);
     }
 
-    // 等待 window.Json 就绪
-    try {
-      await page.waitForFunction(() => Boolean(window?.Json), { timeout: TB_WINDOW_JSON_TIMEOUT });
-    } catch {
+    await capturePromise;
+    const rawWindowJson = getTaskWindowJson(ctx.taskId);
+    if (!rawWindowJson) {
       await ensureTbShopLoggedIn(page, this.stepCode, ctx.shopId);
-      throw new PublishError(this.stepCode, '无法打开淘宝发布页面，请确认店铺登录状态');
+      throw new PublishError(this.stepCode, '无法获取淘宝发布页面数据，请确认店铺登录状态');
     }
 
     // 处理可能弹出的协议确认对话框
@@ -513,8 +526,6 @@ export class FillDraftStep extends PublishStep {
     // 点击保存草稿按钮
     await clickTbSaveDraftButton(page);
 
-    // 提取 window.Json
-    const rawWindowJson = await page.evaluate(() => window?.Json);
     const tbWindowJson = parseTbWindowJsonForDraft(rawWindowJson);
     const saleSpecUiState = await detectTbSaleSpecUiState(page);
 
@@ -624,52 +635,49 @@ export class FillDraftStep extends PublishStep {
     const engine = new TbEngine(String(ctx.shopId), true);
     engine.bindPublishTask(ctx.taskId);
 
-    const page = await engine.init(url);
+    // 先创建 page，不导航，以便在响应到达前注册拦截器
+    const page = await engine.createPage();
     if (!page) {
       throw new PublishError(this.stepCode, '无法打开淘宝草稿页面，请确认店铺登录状态');
     }
-    await ensureTbShopLoggedIn(page, this.stepCode, ctx.shopId);
 
-    try {
-      const loadStateHandle = await page.waitForFunction(
-        (invalidText) => {
-          const pageGlobal = globalThis as {
-            window?: { Json?: unknown };
-            document?: { body?: { innerText?: string }; documentElement?: { innerHTML?: string } };
-          };
-          const text = pageGlobal.document?.body?.innerText
-            ?? pageGlobal.document?.documentElement?.innerHTML
-            ?? '';
-          if (text.includes(invalidText)) {
-            return 'invalid-draft';
-          }
-          if (pageGlobal.window?.Json) {
-            return 'ready';
-          }
-          return '';
-        },
-        TB_INVALID_DRAFT_DETAIL_TEXT,
+    // 注册 HTML 响应拦截，同时检查草稿失效文案
+    let isInvalidDraft = false;
+    const capturePromise = page
+      .waitForResponse(
+        (r) => r.url().includes('item.upload.taobao.com') && r.request().resourceType() === 'document',
         { timeout: TB_WINDOW_JSON_TIMEOUT },
-      );
-      const loadState = await loadStateHandle.jsonValue();
-      if (loadState === 'invalid-draft') {
-        await engine.closePage().catch(() => undefined);
-        throw new InvalidTaobaoDraftError(tbDraftId, fallbackCatId);
-      }
-    } catch (error) {
-      if (isInvalidTaobaoDraftError(error)) {
-        throw error;
-      }
+      )
+      .then(async (resp) => {
+        const html = await resp.text();
+        if (html.includes(TB_INVALID_DRAFT_DETAIL_TEXT)) {
+          isInvalidDraft = true;
+          return;
+        }
+        const json = extractWindowJsonFromHtml(html);
+        if (json) setTaskWindowJson(ctx.taskId, json);
+      })
+      .catch(() => {});
+
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await ensureTbShopLoggedIn(page, this.stepCode, ctx.shopId);
+    await capturePromise;
+
+    if (isInvalidDraft) {
+      await engine.closePage().catch(() => undefined);
+      throw new InvalidTaobaoDraftError(tbDraftId, fallbackCatId);
+    }
+
+    const rawWindowJson = getTaskWindowJson(ctx.taskId);
+    if (!rawWindowJson) {
       await ensureTbShopLoggedIn(page, this.stepCode, ctx.shopId);
-      const pageText = await page.evaluate(() => {
-        const doc = (globalThis as { document?: { body?: { innerText?: string }; documentElement?: { innerHTML?: string } } }).document;
-        return doc?.body?.innerText ?? doc?.documentElement?.innerHTML ?? '';
-      }).catch(() => '');
-      if (pageText.includes(TB_INVALID_DRAFT_DETAIL_TEXT)) {
+      // 从当前页面内容兜底检查草稿失效
+      const currentHtml = await page.content().catch(() => '');
+      if (currentHtml.includes(TB_INVALID_DRAFT_DETAIL_TEXT)) {
         await engine.closePage().catch(() => undefined);
         throw new InvalidTaobaoDraftError(tbDraftId, fallbackCatId);
       }
-      throw new PublishError(this.stepCode, '无法打开淘宝草稿页面，请确认店铺登录状态');
+      throw new PublishError(this.stepCode, '无法获取淘宝草稿页面数据，请确认店铺登录状态');
     }
 
     // 处理可能弹出的协议确认对话框
@@ -694,7 +702,6 @@ export class FillDraftStep extends PublishStep {
 
     await clickTbSaveDraftButton(page);
 
-    const rawWindowJson = await page.evaluate(() => window?.Json);
     const tbWindowJson = parseTbWindowJsonForDraft(rawWindowJson);
     const saleSpecUiState = await detectTbSaleSpecUiState(page);
 

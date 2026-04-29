@@ -765,16 +765,17 @@ export function convertPxxToStandard(
       ? String(goods.refundPolicy || goods.returnPolicy)
       : undefined;
 
+  const shipFromFromGoods = goods.warehouse || goods.shipFrom || goods.originPlace
+    ? String(goods.warehouse || goods.shipFrom || goods.originPlace).trim()
+    : undefined;
   const shipFromFromOak = Array.isArray(goodsProperty)
     ? goodsProperty
         .find((p) => String(p.key ?? "").trim() === "发货地")
         ?.values as string[] | undefined
     : undefined;
   const shipFrom =
-    (Array.isArray(shipFromFromOak) ? shipFromFromOak.join(" ") : undefined) ||
-    (goods.warehouse || goods.shipFrom || goods.originPlace
-      ? String(goods.warehouse || goods.shipFrom || goods.originPlace)
-      : undefined);
+    shipFromFromGoods ||
+    (Array.isArray(shipFromFromOak) ? shipFromFromOak.join(" ").trim() : undefined);
 
   return {
     sourceId: meta?.sourceProductId ?? String(goods.goodsId || goods.id || ""),

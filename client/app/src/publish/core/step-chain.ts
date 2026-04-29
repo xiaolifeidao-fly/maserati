@@ -2,7 +2,7 @@ import { StepCode, StepStatus, TaskStatus } from '../types/publish-task';
 import type { PublishProgressEvent } from '../types/publish-task';
 import type { PublishStep } from './publish-step';
 import type { StepContext } from './step-context';
-import { CaptchaRequiredError, isPublishError } from './errors';
+import { CaptchaRequiredError, ScreenshotCaptchaRequiredError, isPublishError } from './errors';
 import type { IPublishPersister } from './publish-runner';
 import { publishError, publishStepLog, summarizeForLog } from '../utils/publish-logger';
 
@@ -134,6 +134,7 @@ export class StepChain {
             message: '需要验证码',
             captchaUrl: err.captchaUrl,
             validateUrl: err.validateUrl,
+            captchaMode: err instanceof ScreenshotCaptchaRequiredError ? 'screenshot' : 'browser',
           });
           publishStepLog(ctx.taskId, step.stepCode, 'captcha', {
             captchaUrl: err.captchaUrl,
