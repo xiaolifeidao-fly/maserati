@@ -57,7 +57,10 @@
       "Bash(git -C /Users/fly/Documents/develop/private/maserati/.claude/worktrees/serene-davinci-99e452 diff -- client/common/product/standard-product.ts test/taobao-context-extractor/transform.js)",
       "Bash(git apply *)",
       "Bash(git add *)",
-      "Bash(git commit -m ' *)"
+      "Bash(git commit -m ' *)",
+      "Bash(git -C /Users/fly/Documents/develop/private/maserati/.claude/worktrees/serene-davinci-99e452 log --oneline -3)",
+      "Bash(git -C /Users/fly/Documents/develop/private/maserati/.claude/worktrees/serene-davinci-99e452 show --stat HEAD)",
+      "Bash(git -C /Users/fly/Documents/develop/private/maserati/.claude/worktrees/serene-davinci-99e452 branch)"
     ]
   }
 }
