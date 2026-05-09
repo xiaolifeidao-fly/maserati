@@ -46,7 +46,18 @@
       "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\(d.get\\('main',''\\), d.get\\('os',''\\), d.get\\('cpu',''\\)\\)\")",
       "Bash(python3 -c \"import json; d=json.load\\(open\\('/Users/fly/Documents/develop/private/maserati/client/app/node_modules/sharp/package.json'\\)\\); print\\('scripts:', d.get\\('scripts',{}\\)\\); print\\('os:', d.get\\('os',[]\\)\\); print\\('cpu:', d.get\\('cpu',[]\\)\\)\")",
       "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\('main:', d.get\\('main',''\\)\\); print\\('name:', d.get\\('name',''\\)\\)\")",
-      "Bash(python3 -m json.tool)"
+      "Bash(python3 -m json.tool)",
+      "Bash(git -C /Users/fly/Documents/develop/private/maserati/.claude/worktrees/competent-taussig-35a00a diff HEAD d15393e --stat)",
+      "Bash(git -C /Users/fly/Documents/develop/private/maserati/.claude/worktrees/competent-taussig-35a00a status --short)",
+      "Bash(git -C /Users/fly/Documents/develop/private/maserati/.claude/worktrees/serene-davinci-99e452 status --short)",
+      "Bash(git -C /Users/fly/Documents/develop/private/maserati/.claude/worktrees/serene-davinci-99e452 log --oneline -5)",
+      "Bash(git -C /Users/fly/Documents/develop/private/maserati/.claude/worktrees/modest-chandrasekhar-963d34 status --short)",
+      "Bash(git -C /Users/fly/Documents/develop/private/maserati/.claude/worktrees/modest-chandrasekhar-963d34 log --oneline -5)",
+      "Bash(git -C /Users/fly/Documents/develop/private/maserati/.claude/worktrees/serene-davinci-99e452 diff)",
+      "Bash(git -C /Users/fly/Documents/develop/private/maserati/.claude/worktrees/serene-davinci-99e452 diff -- client/common/product/standard-product.ts test/taobao-context-extractor/transform.js)",
+      "Bash(git apply *)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)"
     ]
   }
 }
