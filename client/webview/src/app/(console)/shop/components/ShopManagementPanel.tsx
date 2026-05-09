@@ -47,7 +47,7 @@ const platformOptions = [
 ];
 
 const shopUsageOptions = [
-  { label: "采集", value: "COLLECT" },
+  { label: "选品", value: "COLLECT" },
   { label: "发布", value: "PUBLISH" },
 ];
 
@@ -263,7 +263,7 @@ export function ShopManagementPanel() {
           {normalizeShopUsage(record.shopUsage) !== "COLLECT" && (
             <IconOnlyButton type="text" icon={<KeyOutlined />} tooltip="激活码授权" onClick={() => openAuthorizeModal(record)} />
           )}
-          <IconOnlyButton type="text" icon={<ArrowRightOutlined />} tooltip="进入采集管理" onClick={() => router.push(`/collection?shopId=${record.id}`)} />
+          <IconOnlyButton type="text" icon={<ArrowRightOutlined />} tooltip="进入选品管理" onClick={() => router.push(`/collection?shopId=${record.id}`)} />
           <IconOnlyButton type="text" icon={<EditOutlined />} tooltip="编辑店铺" onClick={() => openEditModal(record)} />
           <Popconfirm
             title="确认删除这个店铺记录吗？"
@@ -441,7 +441,7 @@ function normalizePlatform(platform: string) {
 
 function normalizeShopUsage(shopUsage: string) {
   const normalized = (shopUsage || "").trim().toUpperCase();
-  if (normalized === "COLLECT" || normalized === "采集") {
+  if (normalized === "COLLECT" || normalized === "采集" || normalized === "选品") {
     return "COLLECT";
   }
   if (normalized === "PUBLISH" || normalized === "发布") {

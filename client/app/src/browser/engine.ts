@@ -959,6 +959,90 @@ export abstract class DoorEngine<T = any> {
         await this.context.storageState({ path: sessionDir});
     }
 
+    /**
+     * If this engine's context is already open in the contextMap, save its storage state
+     * to a fresh session JSON file. Returns true if the state was saved.
+     */
+    public async saveContextStateIfOpen(): Promise<boolean> {
+        const chromePath = await this.getRealChromePath().catch(() => undefined);
+        let key = `${this.headless.toString()}_${this.getKey()}`;
+        if (chromePath) {
+            key += '_' + chromePath;
+        }
+        const cached = contextMap.get(key);
+        if (!cached) {
+            return false;
+        }
+        try {
+            await cached.cookies(); // verify context is still alive
+            const sessionDir = this.getSessionDir();
+            setGlobal(this.getKey(), sessionDir);
+            await cached.storageState({ path: sessionDir });
+            log.info('[Engine] refreshed session state from open context', this.getKey());
+            return true;
+        } catch {
+            return false;
+        }
+    }
+
+    /**
+     * Read storage state from the headed (non-headless) userDataDir by launching a temporary
+     * headless context against that profile using the system Chrome.
+     * Saves the result to a session JSON file so future calls can read it without re-launching.
+     * Returns true on success.
+     *
+     * Only safe to call when no headed context for this resourceId is currently running.
+     */
+    public async readAndSaveStorageStateFromHeadedDir(): Promise<boolean> {
+        const headedUserDataDir = path.join(
+            app.getPath('userData'),
+            'resource', 'userDataDir',
+            this.getNamespace(), 'headed',
+            this.resourceId.toString(),
+        );
+        if (!fs.existsSync(headedUserDataDir)) {
+            return false;
+        }
+
+        const chromePath = await this.getRealChromePath().catch(() => undefined);
+
+        // Skip if the headed context is already open — it would conflict with a second launch
+        let headedKey = `false_${this.getKey()}`;
+        if (chromePath) {
+            headedKey += '_' + chromePath;
+        }
+        if (contextMap.has(headedKey)) {
+            return false;
+        }
+
+        clearChromeLockFiles(headedUserDataDir);
+        let tempContext: BrowserContext | undefined;
+        try {
+            tempContext = await chromium.launchPersistentContext(headedUserDataDir, {
+                headless: true,
+                executablePath: chromePath,
+                args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+            });
+            const state = await tempContext.storageState();
+            if (!Array.isArray(state.cookies) || state.cookies.length === 0) {
+                log.warn('[Engine] headed dir has no cookies, skipping session save', this.getKey());
+                return false;
+            }
+            const sessionDir = this.getSessionDir();
+            setGlobal(this.getKey(), sessionDir);
+            fs.writeFileSync(sessionDir, JSON.stringify(state), 'utf8');
+            log.info('[Engine] extracted and saved session state from headed dir', this.getKey(), 'cookies:', state.cookies.length);
+            return true;
+        } catch (error) {
+            log.warn('[Engine] failed to extract session state from headed dir', { key: this.getKey(), error: String(error) });
+            return false;
+        } finally {
+            if (tempContext) {
+                await tempContext.close().catch(() => {});
+            }
+        }
+    }
+
     public async saveBak(bakPath : string) {
         try{
 

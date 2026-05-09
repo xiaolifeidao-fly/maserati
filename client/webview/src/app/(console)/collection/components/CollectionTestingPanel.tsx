@@ -118,9 +118,9 @@ function getStatusColor(status: string) {
 
 function getStatusLabel(status: string) {
   switch (status?.toUpperCase()) {
-    case "COLLECTED": return "已采集";
+    case "COLLECTED": return "已选品";
     case "SUCCESS": return "成功";
-    case "RUNNING": return "采集中";
+    case "RUNNING": return "选品中";
     case "PENDING": return "待处理";
     case "FAILED": return "失败";
     case "MATCHED": return "已匹配";
@@ -222,12 +222,12 @@ function useCollectionWorkspaceState({ enabled = true, fallbackBatchId = 0 } = {
             return;
           } catch (fallbackError) {
             setLoading(false);
-            message.error(fallbackError instanceof Error ? fallbackError.message : "采集工作台状态加载失败");
+            message.error(fallbackError instanceof Error ? fallbackError.message : "选品工作台状态加载失败");
             return;
           }
         }
         setLoading(false);
-        message.error(error instanceof Error ? error.message : "采集工作台状态加载失败");
+        message.error(error instanceof Error ? error.message : "选品工作台状态加载失败");
       }
     })();
 
@@ -274,7 +274,7 @@ export function CollectionWorkspaceLeftPanel({
     try {
       await navigateCollectionWorkspace(action);
     } catch (error) {
-      message.error(error instanceof Error ? error.message : "采集工作台导航失败");
+      message.error(error instanceof Error ? error.message : "选品工作台导航失败");
     } finally {
       setNavigatingAction("");
     }
@@ -293,7 +293,7 @@ export function CollectionWorkspaceLeftPanel({
       // selectRecord in main process: updates selectedRecordId + loads local HTML snapshot if available
       await selectCollectionWorkspaceRecord(recordId);
     } catch (error) {
-      message.error(error instanceof Error ? error.message : "切换采集商品失败");
+      message.error(error instanceof Error ? error.message : "切换选品商品失败");
     }
   };
 
@@ -366,7 +366,7 @@ export function CollectionWorkspaceLeftPanel({
         }}
       >
         <div style={{ fontSize: 11, letterSpacing: 1, opacity: 0.72, textTransform: "uppercase", marginBottom: 4 }}>
-          采集批次
+          选品批次
         </div>
         <div style={{ fontSize: 15, fontWeight: 700, lineHeight: 1.4, marginBottom: 2 }}>
           {workspaceState.batch?.name || `批次 #${workspaceState.batch?.id || 0}`}
@@ -475,7 +475,7 @@ export function CollectionWorkspaceLeftPanel({
         }}
       >
         <div style={{ fontSize: 12, fontWeight: 700, color: "#334155", letterSpacing: 0.5 }}>
-          采集列表
+          选品列表
         </div>
         <div style={{ fontSize: 11, color: "#94a3b8" }}>点击商品查看详情</div>
       </div>
@@ -503,7 +503,7 @@ export function CollectionWorkspaceLeftPanel({
 
         {!loading && records.length === 0 && (
           <div style={{ display: "grid", placeItems: "center", minHeight: 160 }}>
-            <Empty description={<span style={{ color: "#94a3b8", fontSize: 13 }}>暂无采集商品</span>} />
+            <Empty description={<span style={{ color: "#94a3b8", fontSize: 13 }}>暂无选品商品</span>} />
           </div>
         )}
 
@@ -579,7 +579,7 @@ export function CollectionWorkspaceLeftPanel({
                       {isLoadingRecord ? (
                         <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
                           <Spin size="small" />
-                          <span>{record.productName || "采集中..."}</span>
+                          <span>{record.productName || "选品中..."}</span>
                         </span>
                       ) : (
                         <Tooltip title={record.productName || `商品 #${record.id}`}>
@@ -605,7 +605,7 @@ export function CollectionWorkspaceLeftPanel({
                           color={record.source === "manual" ? "blue" : "gold"}
                           style={{ marginInlineEnd: 0, borderRadius: 999 }}
                         >
-                          {record.source === "manual" ? "手动采集" : "文件来源"}
+                          {record.source === "manual" ? "手动选品" : "文件来源"}
                         </Tag>
                       )}
                       {record.sourceProductId && (
@@ -1007,7 +1007,7 @@ export function CollectionTestingPanel() {
         return nextOptions[0]?.id ?? 0;
       });
     } catch (error) {
-      message.error(error instanceof Error ? error.message : "采集批次加载失败");
+      message.error(error instanceof Error ? error.message : "选品批次加载失败");
     }
   }, []);
 
@@ -1037,7 +1037,7 @@ export function CollectionTestingPanel() {
         setPageIndex(nextPageIndex);
         setServerTotal(result.total);
       } catch (error) {
-        message.error(error instanceof Error ? error.message : "采集商品加载失败");
+        message.error(error instanceof Error ? error.message : "选品商品加载失败");
       } finally {
         runner(false);
       }
@@ -1157,7 +1157,7 @@ export function CollectionTestingPanel() {
     try {
       await navigateCollectionWorkspace(action);
     } catch (error) {
-      message.error(error instanceof Error ? error.message : "采集工作台导航失败");
+      message.error(error instanceof Error ? error.message : "选品工作台导航失败");
     } finally {
       setNavigatingAction("");
     }
@@ -1168,7 +1168,7 @@ export function CollectionTestingPanel() {
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap", justifyContent: "space-between", alignItems: "center" }}>
         <div>
           <div className="manager-section-label">测试入口</div>
-          <h3 style={{ margin: "10px 0 6px", color: "var(--manager-text)" }}>采集管理临时测试面板</h3>
+          <h3 style={{ margin: "10px 0 6px", color: "var(--manager-text)" }}>选品管理临时测试面板</h3>
           <div className="manager-muted">这块是临时加的，后续你要删时直接移除这个组件即可。</div>
         </div>
 
@@ -1183,7 +1183,7 @@ export function CollectionTestingPanel() {
       <div style={{ marginTop: 16 }}>
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center", marginBottom: 16 }}>
           <Select
-            placeholder="选择采集批次"
+            placeholder="选择选品批次"
             value={selectedBatchId || undefined}
             onChange={(value) => setSelectedBatchId(Number(value || 0))}
             options={batchOptions.map((item) => ({ label: item.name || `批次 #${item.id}`, value: item.id }))}
@@ -1290,7 +1290,7 @@ export function CollectionTestingPanel() {
           ))}
 
           {!loading && mergedRecords.length === 0 && (
-            <Empty description="当前批次下还没有采集商品" />
+            <Empty description="当前批次下还没有选品商品" />
           )}
 
           {loading && (

@@ -160,7 +160,7 @@ export default function CollectionSharePage() {
       setSharingBatchName("");
       await loadMyShares();
     } catch (error) {
-      message.error(error instanceof Error ? error.message : "分享采集批次失败");
+      message.error(error instanceof Error ? error.message : "分享选品批次失败");
     } finally {
       setShareSubmitting(false);
     }
@@ -179,7 +179,7 @@ export default function CollectionSharePage() {
   const sharedColumns = useMemo<ColumnsType<SharedCollectBatchRecord>>(
     () => [
       {
-        title: "采集批次",
+        title: "选品批次",
         dataIndex: "name",
         width: 260,
         render: (_, record) => (
@@ -190,7 +190,7 @@ export default function CollectionSharePage() {
         ),
       },
       { title: "分享人", dataIndex: "ownerUsername", width: 150 },
-      { title: "采集数量", dataIndex: "collectedCount", width: 110 },
+      { title: "选品数量", dataIndex: "collectedCount", width: 110 },
       {
         title: "分享状态",
         dataIndex: "shareStatus",
@@ -223,7 +223,7 @@ export default function CollectionSharePage() {
   const mineColumns = useMemo<ColumnsType<CollectShareRecord>>(
     () => [
       {
-        title: "采集批次",
+        title: "选品批次",
         dataIndex: "batchName",
         width: 260,
         render: (value: string, record) => (

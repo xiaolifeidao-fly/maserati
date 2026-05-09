@@ -12,10 +12,11 @@ import {
   ShoppingOutlined,
   UserOutlined,
 } from "@ant-design/icons";
-import { Avatar, Button, Dropdown, Empty, Form, Input, Layout, Modal, Popover, Space, Tag, Typography, message } from "antd";
+import { Avatar, Button, Dropdown, Empty, Form, Input, Layout, Modal, Popover, Space, Tabs, Tag, Typography, message } from "antd";
 import type { MenuProps } from "antd";
 import { usePathname, useRouter } from "next/navigation";
 import { PropsWithChildren, useEffect, useMemo, useState } from "react";
+import { fetchCollectBatches, fetchCollectionShopOptions, type CollectBatchRecord, type ShopRecord } from "@/app/(console)/collection/api/collection.api";
 import { changePassword, getAuthState, getCurrentProfile, logout, updateCurrentProfile } from "@/utils/auth";
 import { getPublishApi } from "@/utils/publish";
 import { getPublishWindowApi } from "@/utils/publish-window";
@@ -58,8 +59,21 @@ interface PublishCenterMessage {
 }
 
 type PublishCenterReadState = Record<string, string>;
+type CollectionMonitorReadState = Record<string, string>;
+
+interface CollectionMonitorMessage {
+  id: string;
+  shopId: number;
+  batchId?: number;
+  title: string;
+  description: string;
+  level: "success" | "processing" | "warning" | "default";
+  updatedAt: string;
+}
 
 const PUBLISH_CENTER_READ_STORAGE_KEY = "publish-center-read-state-v1";
+const COLLECTION_MONITOR_READ_STORAGE_KEY = "collection-monitor-read-state-v1";
+const COLLECTION_MONITOR_PLATFORMS = ["tb", "pxx"] as const;
 
 interface ProfileFormValues {
   name: string;
@@ -96,15 +110,15 @@ const navigationItems = [
   },
   {
     key: "/collection",
-    label: "采集管理",
+    label: "选品管理",
     icon: <BarcodeOutlined />,
-    description: "采集任务与结果跟踪",
+    description: "选品任务与结果跟踪",
   },
   {
     key: "/collection-share",
     label: "分享管理",
     icon: <ShareAltOutlined />,
-    description: "采集批次共享与发布",
+    description: "选品批次共享与发布",
   },
 ] as const;
 
@@ -121,6 +135,77 @@ function getActivePath(pathname: string) {
   }
 
   return "/workspace";
+}
+
+function getShopDisplayName(shop: ShopRecord) {
+  return shop.remark || shop.nickname || shop.name || shop.code || shop.platform || `店铺 #${shop.id}`;
+}
+
+function getBatchUpdatedAt(batch?: CollectBatchRecord) {
+  return batch?.updatedTime || batch?.createdTime || new Date(0).toISOString();
+}
+
+function getBatchStatusLabel(status: string) {
+  const normalized = String(status || "").trim().toUpperCase();
+  if (normalized === "RUNNING") {
+    return "选品中";
+  }
+  if (normalized === "COMPLETED" || normalized === "DONE" || normalized === "FINISHED") {
+    return "已完成";
+  }
+  if (normalized === "FAILED" || normalized === "ERROR") {
+    return "异常";
+  }
+  return "待选品";
+}
+
+function getMonitorLevel(batch?: CollectBatchRecord): CollectionMonitorMessage["level"] {
+  const normalized = String(batch?.status || "").trim().toUpperCase();
+  if (!batch || normalized === "FAILED" || normalized === "ERROR") {
+    return "warning";
+  }
+  if (normalized === "RUNNING") {
+    return "processing";
+  }
+  if (normalized === "COMPLETED" || normalized === "DONE" || normalized === "FINISHED") {
+    return "success";
+  }
+  return "default";
+}
+
+function buildCollectionMonitorMessages(shops: ShopRecord[], batches: CollectBatchRecord[]) {
+  const batchMap = new Map<number, CollectBatchRecord[]>();
+  for (const batch of batches) {
+    if (batch.shopId <= 0) {
+      continue;
+    }
+    const group = batchMap.get(batch.shopId) || [];
+    group.push(batch);
+    batchMap.set(batch.shopId, group);
+  }
+
+  return shops.map<CollectionMonitorMessage>((shop) => {
+    const shopBatches = (batchMap.get(shop.id) || [])
+      .sort((a, b) => new Date(getBatchUpdatedAt(b)).getTime() - new Date(getBatchUpdatedAt(a)).getTime());
+    const latestBatch = shopBatches[0];
+    const updatedAt = latestBatch ? getBatchUpdatedAt(latestBatch) : shop.updatedTime || shop.createdTime || new Date().toISOString();
+    const title = latestBatch
+      ? `${getShopDisplayName(shop)} · ${getBatchStatusLabel(latestBatch.status)}`
+      : `${getShopDisplayName(shop)} · 未创建选品批次`;
+    const description = latestBatch
+      ? `最近批次「${latestBatch.name || `#${latestBatch.id}`}」已选品 ${latestBatch.collectedCount || 0} 件，共 ${shopBatches.length} 个批次。`
+      : "该店铺已作为选品店铺接入，但还没有选品批次。";
+
+    return {
+      id: `collection-monitor:${shop.id}:${latestBatch?.id || 0}:${updatedAt}`,
+      shopId: shop.id,
+      batchId: latestBatch?.id,
+      title,
+      description,
+      level: getMonitorLevel(latestBatch),
+      updatedAt,
+    };
+  });
 }
 
 export function ManagerShell({ children }: ManagerShellProps) {
@@ -147,6 +232,9 @@ export function ManagerShell({ children }: ManagerShellProps) {
   });
   const [publishCenterOpen, setPublishCenterOpen] = useState(false);
   const [publishCenterReadState, setPublishCenterReadState] = useState<PublishCenterReadState>({});
+  const [collectionMonitorMessages, setCollectionMonitorMessages] = useState<CollectionMonitorMessage[]>([]);
+  const [collectionMonitorLoading, setCollectionMonitorLoading] = useState(false);
+  const [collectionMonitorReadState, setCollectionMonitorReadState] = useState<CollectionMonitorReadState>({});
 
   useEffect(() => {
     void (async () => {
@@ -163,15 +251,27 @@ export function ManagerShell({ children }: ManagerShellProps) {
 
     try {
       const rawValue = window.localStorage.getItem(PUBLISH_CENTER_READ_STORAGE_KEY);
-      if (!rawValue) {
-        return;
-      }
-      const parsed = JSON.parse(rawValue) as PublishCenterReadState;
-      if (parsed && typeof parsed === "object") {
-        setPublishCenterReadState(parsed);
+      if (rawValue) {
+        const parsed = JSON.parse(rawValue) as PublishCenterReadState;
+        if (parsed && typeof parsed === "object") {
+          setPublishCenterReadState(parsed);
+        }
       }
     } catch {
       window.localStorage.removeItem(PUBLISH_CENTER_READ_STORAGE_KEY);
+    }
+
+    try {
+      const rawValue = window.localStorage.getItem(COLLECTION_MONITOR_READ_STORAGE_KEY);
+      if (!rawValue) {
+        return;
+      }
+      const parsed = JSON.parse(rawValue) as CollectionMonitorReadState;
+      if (parsed && typeof parsed === "object") {
+        setCollectionMonitorReadState(parsed);
+      }
+    } catch {
+      window.localStorage.removeItem(COLLECTION_MONITOR_READ_STORAGE_KEY);
     }
   }, []);
 
@@ -194,6 +294,32 @@ export function ManagerShell({ children }: ManagerShellProps) {
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  const refreshCollectionMonitorMessages = async () => {
+    setCollectionMonitorLoading(true);
+    try {
+      const [shopResults, batchResults] = await Promise.all([
+        Promise.all(COLLECTION_MONITOR_PLATFORMS.map((platform) => fetchCollectionShopOptions(platform))),
+        Promise.all(COLLECTION_MONITOR_PLATFORMS.map((platform) => fetchCollectBatches({
+          pageIndex: 1,
+          pageSize: 100,
+          platform,
+        }))),
+      ]);
+
+      const shops = shopResults.flatMap((result) => Array.isArray(result.data) ? result.data : []);
+      const batches = batchResults.flatMap((result) => Array.isArray(result.data) ? result.data : []);
+      setCollectionMonitorMessages(buildCollectionMonitorMessages(shops, batches));
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "店铺选品监控消息加载失败");
+    } finally {
+      setCollectionMonitorLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void refreshCollectionMonitorMessages();
   }, []);
 
   const unreadCountByBatch = useMemo(() => {
@@ -230,6 +356,15 @@ export function ManagerShell({ children }: ManagerShellProps) {
     [unreadCountByBatch],
   );
 
+  const collectionMonitorUnreadCount = useMemo(() => collectionMonitorMessages.filter((item) => {
+    const lastReadAt = collectionMonitorReadState[item.id];
+    const messageTime = new Date(item.updatedAt).getTime();
+    const lastReadTime = lastReadAt ? new Date(lastReadAt).getTime() : 0;
+    return messageTime > lastReadTime;
+  }).length, [collectionMonitorMessages, collectionMonitorReadState]);
+
+  const messageCenterUnreadCount = totalUnreadCount + collectionMonitorUnreadCount;
+
   const markBatchAsRead = (batchId: number) => {
     if (typeof window === "undefined" || batchId <= 0) {
       return;
@@ -243,6 +378,19 @@ export function ManagerShell({ children }: ManagerShellProps) {
     window.localStorage.setItem(PUBLISH_CENTER_READ_STORAGE_KEY, JSON.stringify(nextState));
   };
 
+  const markCollectionMonitorAsRead = (messageId: string) => {
+    if (typeof window === "undefined" || !messageId) {
+      return;
+    }
+
+    const nextState = {
+      ...collectionMonitorReadState,
+      [messageId]: new Date().toISOString(),
+    };
+    setCollectionMonitorReadState(nextState);
+    window.localStorage.setItem(COLLECTION_MONITOR_READ_STORAGE_KEY, JSON.stringify(nextState));
+  };
+
   const handleOpenPublishBatch = async (summary: PublishBatchSummary) => {
     markBatchAsRead(summary.batchId);
     await getPublishWindowApi().openPublishWindow({
@@ -253,10 +401,15 @@ export function ManagerShell({ children }: ManagerShellProps) {
     setPublishCenterOpen(false);
   };
 
-  const publishCenterContent = (
-    <div style={{ width: 360, maxWidth: "calc(100vw - 48px)" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-        <strong style={{ color: "var(--manager-text)" }}>发布消息中心</strong>
+  const handleOpenCollectionMonitorMessage = (item: CollectionMonitorMessage) => {
+    markCollectionMonitorAsRead(item.id);
+    router.push(`/collection?shopId=${item.shopId}`);
+    setPublishCenterOpen(false);
+  };
+
+  const publishMessageContent = (
+    <>
+      <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", marginBottom: 12 }}>
         <Space size={8}>
           <Tag color="red">未读 {totalUnreadCount}</Tag>
           <Tag color="blue">进行中 {publishCenterState.runningCount}</Tag>
@@ -314,10 +467,82 @@ export function ManagerShell({ children }: ManagerShellProps) {
           ))}
         </div>
       )}
+    </>
+  );
+
+  const collectionMonitorContent = collectionMonitorMessages.length === 0 ? (
+    <Empty
+      image={Empty.PRESENTED_IMAGE_SIMPLE}
+      description={collectionMonitorLoading ? "正在加载店铺选品监控消息" : "暂无店铺选品监控消息"}
+      style={{ margin: "12px 0 4px" }}
+    />
+  ) : (
+    <div style={{ display: "grid", gap: 10, maxHeight: 420, overflowY: "auto", paddingRight: 4 }}>
+      {collectionMonitorMessages.map((item) => {
+        const lastReadAt = collectionMonitorReadState[item.id];
+        const isUnread = new Date(item.updatedAt).getTime() > (lastReadAt ? new Date(lastReadAt).getTime() : 0);
+        const tagColor = item.level === "warning" ? "gold" : item.level === "processing" ? "blue" : item.level === "success" ? "green" : "default";
+
+        return (
+          <button
+            key={item.id}
+            type="button"
+            onClick={() => handleOpenCollectionMonitorMessage(item)}
+            style={{
+              width: "100%",
+              padding: "10px 12px",
+              borderRadius: 12,
+              border: isUnread ? "1px solid rgba(255,77,79,0.35)" : "1px solid rgba(170,192,238,0.2)",
+              background: isUnread ? "rgba(255,77,79,0.08)" : "rgba(170,192,238,0.08)",
+              appearance: "none",
+              textAlign: "left",
+              cursor: "pointer",
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
+              <div style={{ fontWeight: 600, color: "var(--manager-text)" }}>{item.title}</div>
+              <Space size={6} wrap>
+                <Tag color={tagColor}>{item.batchId ? `批次 #${item.batchId}` : "待建批次"}</Tag>
+                {isUnread ? <Tag color="red">未读</Tag> : <Tag color="green">已读</Tag>}
+              </Space>
+            </div>
+            <div style={{ marginTop: 6, color: "var(--manager-text-soft)", fontSize: 12 }}>
+              {item.description}
+            </div>
+            <div style={{ marginTop: 6, color: "var(--manager-text-faint)", fontSize: 11 }}>
+              {item.updatedAt.replace("T", " ").slice(0, 19)}
+            </div>
+          </button>
+        );
+      })}
     </div>
   );
 
-  const publishCenterBadgeVisible = totalUnreadCount > 0;
+  const publishCenterContent = (
+    <div style={{ width: 420, maxWidth: "calc(100vw - 48px)" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+        <strong style={{ color: "var(--manager-text)" }}>客户端消息中心</strong>
+        <Tag color="red">未读 {messageCenterUnreadCount}</Tag>
+      </div>
+      <Tabs
+        size="small"
+        items={[
+          {
+            key: "publish",
+            label: `发布消息${totalUnreadCount > 0 ? ` (${totalUnreadCount})` : ""}`,
+            children: publishMessageContent,
+          },
+          {
+            key: "collection-monitor",
+            label: `店铺选品监控消息${collectionMonitorUnreadCount > 0 ? ` (${collectionMonitorUnreadCount})` : ""}`,
+            children: collectionMonitorContent,
+          },
+        ]}
+      />
+    </div>
+  );
+
+  const publishCenterBadgeVisible = messageCenterUnreadCount > 0;
 
   const publishCenterBadge = publishCenterBadgeVisible ? (
     <span
@@ -346,7 +571,7 @@ export function ManagerShell({ children }: ManagerShellProps) {
         }}
         title="未读消息"
       >
-        {totalUnreadCount > 99 ? "99+" : totalUnreadCount}
+        {messageCenterUnreadCount > 99 ? "99+" : messageCenterUnreadCount}
       </span>
     </span>
   ) : null;
@@ -362,6 +587,9 @@ export function ManagerShell({ children }: ManagerShellProps) {
 
   const handlePublishCenterOpenChange = (nextOpen: boolean) => {
     setPublishCenterOpen(nextOpen);
+    if (nextOpen) {
+      void refreshCollectionMonitorMessages();
+    }
   };
 
   const handleOpenProfile = async () => {
@@ -497,7 +725,7 @@ export function ManagerShell({ children }: ManagerShellProps) {
                   </div>
 
                   <Paragraph className="manager-commerce-description">
-                    面向商家经营、商品节奏、店铺运维与采集分析的桌面运营中台，让高频动作更聚焦，界面也更贴近电商体系。
+                    面向商家经营、商品节奏、店铺运维与选品分析的桌面运营中台，让高频动作更聚焦，界面也更贴近电商体系。
                   </Paragraph>
                 </div>
 

@@ -6,6 +6,118 @@ export interface PageResult<T> {
   data: T[];
 }
 
+export type AiSelectionStrategyType = "SHOP" | "SEARCH_CATEGORY";
+
+export class AiSelectionStrategyRecord {
+  id = 0;
+  name = "";
+  strategyTime = "";
+  isValid = true;
+  strategyType: AiSelectionStrategyType = "SHOP";
+  userId = 0;
+  active = 1;
+  createdTime?: string;
+  updatedTime?: string;
+}
+
+export interface AiSelectionStrategyQuery extends Record<string, string | number | boolean | undefined> {
+  pageIndex?: number;
+  pageSize?: number;
+  name?: string;
+  strategyType?: AiSelectionStrategyType | "";
+  userId?: number;
+  isValid?: boolean;
+}
+
+export interface AiSelectionStrategyPayload {
+  name: string;
+  strategyTime?: string;
+  isValid: boolean;
+  strategyType: AiSelectionStrategyType;
+  userId?: number;
+}
+
+export class AiSelectionShopLinkRecord {
+  id = 0;
+  collectBatchId = 0;
+  strategyId = 0;
+  shopUrl = "";
+  status = "PENDING";
+  createdAt = "";
+  updatedAt = "";
+}
+
+export interface AiSelectionShopLinkImportResult {
+  importedCount: number;
+  skippedCount: number;
+  totalCount: number;
+  data: AiSelectionShopLinkRecord[];
+}
+
+export class AiSelectionShopProductSkuRecord {
+  skuId = "";
+  skuImageUrl = "";
+  itemSkuUrl = "";
+  skuPropertyText = "";
+}
+
+export class AiSelectionShopProductRecord {
+  id = 0;
+  collectBatchId = 0;
+  strategyId = 0;
+  platform = "";
+  platformShopId = "";
+  shopUrl = "";
+  itemId = "";
+  title = "";
+  price = "";
+  vagueSold365 = "";
+  image = "";
+  itemUrl = "";
+  skuInfoList: AiSelectionShopProductSkuRecord[] = [];
+  createdAt = "";
+  updatedAt = "";
+}
+
+export interface AiSelectionShopProductListQuery extends Record<string, string | number | undefined> {
+  pageIndex?: number;
+  pageSize?: number;
+  batchId?: number;
+  strategyId?: number;
+  platformShopId?: string;
+  itemId?: string;
+}
+
+export type AiSelectionTaskStatus = "IDLE" | "RUNNING" | "STOPPED" | "SUCCESS" | "FAILED";
+
+export type AiAutoCollectStatus = "IDLE" | "RUNNING" | "SUCCESS" | "STOPPED" | "FAILED";
+
+export interface AiAutoCollectState {
+  taskId: string;
+  batchId: number;
+  status: AiAutoCollectStatus;
+  total: number;
+  processed: number;
+  percent: number;
+  message: string;
+  startedAt: string;
+  updatedAt: string;
+}
+
+export interface AiSelectionTaskState {
+  taskId: string;
+  batchId: number;
+  strategyId: number;
+  strategyType: AiSelectionStrategyType | "";
+  status: AiSelectionTaskStatus;
+  total: number;
+  processed: number;
+  percent: number;
+  message: string;
+  startedAt: string;
+  updatedAt: string;
+}
+
 export class CollectBatchRecord {
   id = 0;
   appUserId = 0;
@@ -175,6 +287,64 @@ export class CollectApi extends ElectronApi {
   }
 
   @InvokeType(Protocols.INVOKE)
+  async listAiSelectionStrategies(query: AiSelectionStrategyQuery): Promise<PageResult<AiSelectionStrategyRecord>> {
+    return this.invokeApi("listAiSelectionStrategies", query);
+  }
+
+  @InvokeType(Protocols.INVOKE)
+  async createAiSelectionStrategy(payload: AiSelectionStrategyPayload): Promise<AiSelectionStrategyRecord> {
+    return this.invokeApi("createAiSelectionStrategy", payload);
+  }
+
+  @InvokeType(Protocols.INVOKE)
+  async updateAiSelectionStrategy(id: number, payload: Partial<AiSelectionStrategyPayload>): Promise<AiSelectionStrategyRecord> {
+    return this.invokeApi("updateAiSelectionStrategy", id, payload);
+  }
+
+  @InvokeType(Protocols.INVOKE)
+  async deleteAiSelectionStrategy(id: number): Promise<{ deleted: boolean }> {
+    return this.invokeApi("deleteAiSelectionStrategy", id);
+  }
+
+  @InvokeType(Protocols.INVOKE)
+  async importAiSelectionShopLinks(
+    batchId: number,
+    payload: { strategyId: number; filePath: string },
+  ): Promise<AiSelectionShopLinkImportResult> {
+    return this.invokeApi("importAiSelectionShopLinks", batchId, payload);
+  }
+
+  @InvokeType(Protocols.INVOKE)
+  async listAiSelectionShopLinks(batchId: number, strategyId: number): Promise<AiSelectionShopLinkRecord[]> {
+    return this.invokeApi("listAiSelectionShopLinks", batchId, strategyId);
+  }
+
+  @InvokeType(Protocols.INVOKE)
+  async startAiSelectionTask(batchId: number, payload: { strategyId: number }): Promise<AiSelectionTaskState> {
+    return this.invokeApi("startAiSelectionTask", batchId, payload);
+  }
+
+  @InvokeType(Protocols.INVOKE)
+  async stopAiSelectionTask(): Promise<AiSelectionTaskState> {
+    return this.invokeApi("stopAiSelectionTask");
+  }
+
+  @InvokeType(Protocols.INVOKE)
+  async getAiSelectionTaskState(): Promise<AiSelectionTaskState> {
+    return this.invokeApi("getAiSelectionTaskState");
+  }
+
+  @InvokeType(Protocols.INVOKE)
+  async listAiSelectionShopProducts(query: AiSelectionShopProductListQuery): Promise<PageResult<AiSelectionShopProductRecord>> {
+    return this.invokeApi("listAiSelectionShopProducts", query);
+  }
+
+  @InvokeType(Protocols.INVOKE)
+  async deleteAiSelectionShopProduct(id: number): Promise<{ deleted: boolean }> {
+    return this.invokeApi("deleteAiSelectionShopProduct", id);
+  }
+
+  @InvokeType(Protocols.INVOKE)
   async shareCollectBatch(payload: CollectSharePayload): Promise<CollectShareRecord> {
     return this.invokeApi("shareCollectBatch", payload);
   }
@@ -197,6 +367,26 @@ export class CollectApi extends ElectronApi {
   @InvokeType(Protocols.INVOKE)
   async startCollection(batchId: number): Promise<CollectStartResult> {
     return this.invokeApi("startCollection", batchId);
+  }
+
+  @InvokeType(Protocols.INVOKE)
+  async startAiCollectData(batchId: number): Promise<AiAutoCollectState> {
+    return this.invokeApi("startAiCollectData", batchId);
+  }
+
+  @InvokeType(Protocols.INVOKE)
+  async stopAiAutoCollect(): Promise<AiAutoCollectState> {
+    return this.invokeApi("stopAiAutoCollect");
+  }
+
+  @InvokeType(Protocols.INVOKE)
+  async getAiAutoCollectState(): Promise<AiAutoCollectState> {
+    return this.invokeApi("getAiAutoCollectState");
+  }
+
+  @InvokeType(Protocols.TRRIGER)
+  async onAiAutoCollectStateChanged(callback: (state: AiAutoCollectState) => void): Promise<void> {
+    return this.onMessage("onAiAutoCollectStateChanged", callback);
   }
 
   @InvokeType(Protocols.INVOKE)
@@ -245,5 +435,10 @@ export class CollectApi extends ElectronApi {
   @InvokeType(Protocols.TRRIGER)
   async onImportCollectProgress(callback: (progress: ImportCollectBatchProgress) => void): Promise<void> {
     return this.onMessage("onImportCollectProgress", callback);
+  }
+
+  @InvokeType(Protocols.TRRIGER)
+  async onAiSelectionTaskChanged(callback: (state: AiSelectionTaskState) => void): Promise<void> {
+    return this.onMessage("onAiSelectionTaskChanged", callback);
   }
 }

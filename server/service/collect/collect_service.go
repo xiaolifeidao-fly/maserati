@@ -15,20 +15,24 @@ import (
 )
 
 type CollectService struct {
-	collectBatchRepository  *collectRepository.CollectBatchRepository
-	collectRecordRepository *collectRepository.CollectRecordRepository
-	collectShareRepository  *collectShareRepository.CollectShareRepository
-	appUserRepository       *appUserRepository.AppUserRepository
-	shopRepository          *shopRepository.ShopRepository
+	collectBatchRepository           *collectRepository.CollectBatchRepository
+	collectRecordRepository          *collectRepository.CollectRecordRepository
+	aiSelectionStrategyRepository    *collectRepository.AiSelectionStrategyRepository
+	aiSelectionShopProductRepository *collectRepository.AiSelectionShopProductDetailRepository
+	collectShareRepository           *collectShareRepository.CollectShareRepository
+	appUserRepository                *appUserRepository.AppUserRepository
+	shopRepository                   *shopRepository.ShopRepository
 }
 
 func NewCollectService() *CollectService {
 	return &CollectService{
-		collectBatchRepository:  db.GetRepository[collectRepository.CollectBatchRepository](),
-		collectRecordRepository: db.GetRepository[collectRepository.CollectRecordRepository](),
-		collectShareRepository:  db.GetRepository[collectShareRepository.CollectShareRepository](),
-		appUserRepository:       db.GetRepository[appUserRepository.AppUserRepository](),
-		shopRepository:          db.GetRepository[shopRepository.ShopRepository](),
+		collectBatchRepository:           db.GetRepository[collectRepository.CollectBatchRepository](),
+		collectRecordRepository:          db.GetRepository[collectRepository.CollectRecordRepository](),
+		aiSelectionStrategyRepository:    db.GetRepository[collectRepository.AiSelectionStrategyRepository](),
+		aiSelectionShopProductRepository: db.GetRepository[collectRepository.AiSelectionShopProductDetailRepository](),
+		collectShareRepository:           db.GetRepository[collectShareRepository.CollectShareRepository](),
+		appUserRepository:                db.GetRepository[appUserRepository.AppUserRepository](),
+		shopRepository:                   db.GetRepository[shopRepository.ShopRepository](),
 	}
 }
 
@@ -36,7 +40,13 @@ func (s *CollectService) EnsureTable() error {
 	if err := s.collectBatchRepository.EnsureTable(); err != nil {
 		return err
 	}
-	return s.collectRecordRepository.EnsureTable()
+	if err := s.collectRecordRepository.EnsureTable(); err != nil {
+		return err
+	}
+	if err := s.aiSelectionStrategyRepository.EnsureTable(); err != nil {
+		return err
+	}
+	return s.aiSelectionShopProductRepository.EnsureTable()
 }
 
 func normalizeCollectPage(page, pageIndex, pageSize int) (int, int) {

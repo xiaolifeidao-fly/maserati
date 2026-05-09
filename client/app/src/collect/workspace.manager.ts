@@ -48,6 +48,7 @@ const TB_RIGHT_RATIO = 0.4;
 const MIN_PANEL_WIDTH = 280;
 const LEFT_WORKSPACE_ROUTE = "/collection-workspace/left";
 const RIGHT_WORKSPACE_ROUTE = "/collection-workspace/right";
+const TB_COLLECTION_RENDER_MODE: "electron" | "playwright" = "electron";
 
 function getCollectedHtmlDir() {
   return path.join(app.getPath("userData"), "collected-html");
@@ -325,7 +326,7 @@ function buildPlaywrightViewerHtml() {
 <body>
   <canvas id="stage" tabindex="0"></canvas>
   <textarea id="ime-trap" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" aria-hidden="true"></textarea>
-  <div id="empty">正在连接采集浏览器...</div>
+  <div id="empty">正在连接选品浏览器...</div>
   <script>
     const canvas = document.getElementById("stage");
     const ctx = canvas.getContext("2d", { alpha: false });
@@ -480,8 +481,8 @@ function getPlaywrightViewerUrl() {
   return `data:text/html;charset=utf-8,${encodeURIComponent(buildPlaywrightViewerHtml())}`;
 }
 
-function getCenterLoadingUrl(message = "正在打开采集页面...") {
-  const safeMessage = String(message || "正在打开采集页面...").replace(/[<>&"]/g, (char) => ({
+function getCenterLoadingUrl(message = "正在打开选品页面...") {
+  const safeMessage = String(message || "正在打开选品页面...").replace(/[<>&"]/g, (char) => ({
     "<": "&lt;",
     ">": "&gt;",
     "&": "&amp;",
@@ -627,12 +628,22 @@ async function renderPane(view: BrowserView | null, pane: "left" | "right") {
   if (!view || view.webContents.isDestroyed()) {
     return;
   }
+  if (pane === "right" && workspaceState.sourceType === "tb" && !workspaceRightPanelVisible) {
+    return;
+  }
 
   const stateJson = JSON.stringify(cloneState());
-  await view.webContents.executeJavaScript(
-    `window.__COLLECTION_WORKSPACE_UPDATE__ && window.__COLLECTION_WORKSPACE_UPDATE__(${stateJson});`,
-    true,
-  );
+  try {
+    await Promise.race([
+      view.webContents.executeJavaScript(
+        `window.__COLLECTION_WORKSPACE_UPDATE__ && window.__COLLECTION_WORKSPACE_UPDATE__(${stateJson});`,
+        true,
+      ),
+      new Promise((resolve) => setTimeout(resolve, 1500)),
+    ]);
+  } catch (error) {
+    log.warn("[collection workspace] failed to render pane state", { pane, error });
+  }
 }
 
 async function renderSidePanes() {
@@ -757,8 +768,20 @@ function convertStorageCookies(cookies: PlaywrightStorageState["cookies"]): Cook
 
 async function readTbStorageState(resourceId: string): Promise<PlaywrightStorageState | null> {
   const engine = new TbEngine(resourceId, false);
-  const sessionPath = await engine.getSessionPath().catch(() => undefined);
+
+  // If the headed Playwright context is already open in this session, refresh the JSON file
+  await engine.saveContextStateIfOpen().catch(() => {});
+
+  let sessionPath = await engine.getSessionPath().catch(() => undefined);
+
+  // No JSON file yet — try to extract cookies from the headed userDataDir headlessly
   if (!sessionPath) {
+    await engine.readAndSaveStorageStateFromHeadedDir().catch(() => {});
+    sessionPath = await engine.getSessionPath().catch(() => undefined);
+  }
+
+  if (!sessionPath) {
+    log.warn("[collection workspace] tb storage state not found, center view will load without shared login state", { resourceId });
     return null;
   }
 
@@ -848,6 +871,35 @@ function mergeCollectedRawData(sourceProductId: string, nextRawData: unknown, so
       }
     : nextRawData;
   saveCollectedProductRawData(sourceProductId, merged, sourceType);
+}
+
+async function captureGoodsSummaryFromStoredRawData(sourceProductId: string, sourceUrl: string) {
+  if (!sourceProductId) {
+    return null;
+  }
+  const rawData = getCollectedProductRawData(sourceProductId, workspaceState.sourceType);
+  const parsed = getCurrentDriver().parseGoodsSummary(rawData);
+  if (!parsed?.sourceProductId) {
+    return null;
+  }
+
+  capturedGoodsSummaryById.set(parsed.sourceProductId, parsed);
+  saveCollectedProductToStore(parsed.sourceProductId, {
+    sourceProductId: parsed.sourceProductId,
+    productName: parsed.productName,
+    status: parsed.status,
+    sourceUrl,
+    capturedAt: new Date().toISOString(),
+  }, workspaceState.sourceType);
+  await renderSidePanes();
+  log.info("[collection workspace] parsed goods summary from stored rawData", {
+    sourceProductId: parsed.sourceProductId,
+    productName: parsed.productName,
+    status: parsed.status,
+    sourceType: workspaceState.sourceType,
+    capturedCount: capturedGoodsSummaryById.size,
+  });
+  return parsed;
 }
 
 function writeDebugRawDataFile(sourceProductId: string, sourceType: CollectSourceType) {
@@ -1036,6 +1088,7 @@ async function handlePlaywrightResponse(response: Response) {
     if (sourceProductIdFromUrl && rawData) {
       mergeCollectedRawData(sourceProductIdFromUrl, rawData, workspaceState.sourceType);
       writeDebugRawDataFile(sourceProductIdFromUrl, workspaceState.sourceType);
+      await captureGoodsSummaryFromStoredRawData(sourceProductIdFromUrl, url);
       await renderSidePanes();
     }
 
@@ -1144,13 +1197,12 @@ async function ensureWorkspacePlaywrightPage(initialUrl: string) {
   const desiredUrl = normalizeWorkspaceUrl(initialUrl);
   await closeWorkspacePlaywright();
 
-  if (workspaceState.sourceType === "tb") {
-    throw new Error("淘宝采集工作台使用 Electron BrowserView，不应初始化 Playwright 截屏流");
-  }
-
   const resourceId = String(workspaceState.batch?.shopId || workspaceState.batch?.id || "default");
-  // 拼多多截屏流必须使用有头浏览器；false = headless disabled.
-  const engine = new PxxEngine(resourceId, false);
+  // 截屏流必须使用有头浏览器；false = headless disabled.
+  // 淘宝 Playwright 选品链路保留为可切换路径，当前默认走 Electron BrowserView。
+  const engine = workspaceState.sourceType === "tb"
+    ? new TbEngine(resourceId, false)
+    : new PxxEngine(resourceId, false);
   workspacePlaywrightEngine = engine;
 
   // Tell Chrome to open off-screen from the very first frame by injecting
@@ -1165,7 +1217,7 @@ async function ensureWorkspacePlaywrightPage(initialUrl: string) {
 
   const page = await engine.init(desiredUrl);
   if (!page) {
-    throw new Error("Playwright 采集浏览器初始化失败");
+    throw new Error("Playwright 选品浏览器初始化失败");
   }
 
   workspacePlaywrightPage = page;
@@ -1182,7 +1234,7 @@ async function ensureWorkspacePlaywrightPage(initialUrl: string) {
 
 async function navigatePlaywrightPage(url: string) {
   if (!workspacePlaywrightPage || workspacePlaywrightPage.isClosed()) {
-    throw new Error("Playwright 采集浏览器尚未打开");
+    throw new Error("Playwright 选品浏览器尚未打开");
   }
   await workspacePlaywrightPage.goto(url, { waitUntil: "domcontentloaded" });
   await emitPlaywrightFrame();
@@ -1192,7 +1244,7 @@ async function navigatePlaywrightPage(url: string) {
 async function navigateCenterView(url: string) {
   const center = workspaceViews?.center;
   if (!center || center.webContents.isDestroyed()) {
-    throw new Error("采集工作台中间视图尚未打开");
+    throw new Error("选品工作台中间视图尚未打开");
   }
   await safeLoadWorkspaceUrl(center.webContents, url);
   return center.webContents.getURL() || url;
@@ -1330,6 +1382,7 @@ async function handleCenterDebuggerMessage(view: BrowserView, method: string, pa
     if (sourceProductIdFromUrl && rawData) {
       mergeCollectedRawData(sourceProductIdFromUrl, rawData, workspaceState.sourceType);
       writeDebugRawDataFile(sourceProductIdFromUrl, workspaceState.sourceType);
+      await captureGoodsSummaryFromStoredRawData(sourceProductIdFromUrl, meta.url);
       await renderSidePanes();
     }
 
@@ -1436,7 +1489,7 @@ async function pushRecordToTestingBridge(record: CollectRecordPreview) {
 function notifyCollectFailed(sourceProductId: string) {
   try {
     new Notification({
-      title: "采集失败",
+      title: "选品失败",
       body: `商品 ${sourceProductId} 未能获取到数据，请刷新页面后重试`,
     }).show();
   } catch (error) {
@@ -1447,7 +1500,7 @@ function notifyCollectFailed(sourceProductId: string) {
     return;
   }
   workspaceViews.left.webContents.executeJavaScript(
-    `window.__COLLECTION_WORKSPACE_NOTIFY__ && window.__COLLECTION_WORKSPACE_NOTIFY__({ type: "error", message: "商品 ${sourceProductId} 采集失败，未能获取到数据，请刷新页面重试" });`,
+    `window.__COLLECTION_WORKSPACE_NOTIFY__ && window.__COLLECTION_WORKSPACE_NOTIFY__({ type: "error", message: "商品 ${sourceProductId} 选品失败，未能获取到数据，请刷新页面重试" });`,
     true,
   ).catch(() => undefined);
 }
@@ -1699,7 +1752,7 @@ export async function openCollectionWorkspace(options: OpenCollectionWorkspaceOp
       backgroundColor: "#eef2f6",
       autoHideMenuBar: true,
       show: false,
-      title: `采集工作台 - ${options.batch.name || `批次 #${options.batch.id}`}`,
+      title: `选品工作台 - ${options.batch.name || `批次 #${options.batch.id}`}`,
       webPreferences: {
         preload: getPreloadPath(),
         contextIsolation: true,
@@ -1756,16 +1809,22 @@ export async function openCollectionWorkspace(options: OpenCollectionWorkspaceOp
 
     await Promise.all([
       safeLoadPane(left, buildPaneUrl("left"), "left"),
-      safeLoadPane(center, isTbWorkspace ? getCenterLoadingUrl("正在打开淘宝采集页面...") : getPlaywrightViewerUrl(), "center"),
-      isTbWorkspace ? Promise.resolve() : safeLoadPane(right, buildPaneUrl("right"), "right"),
+      safeLoadPane(
+        center,
+        isTbWorkspace && TB_COLLECTION_RENDER_MODE === "electron"
+          ? getCenterLoadingUrl("正在打开淘宝选品页面...")
+          : getPlaywrightViewerUrl(),
+        "center",
+      ),
+      isTbWorkspace && TB_COLLECTION_RENDER_MODE === "electron" ? Promise.resolve() : safeLoadPane(right, buildPaneUrl("right"), "right"),
     ]);
   } else {
-    workspaceWindow.setTitle(`采集工作台 - ${options.batch.name || `批次 #${options.batch.id}`}`);
+    workspaceWindow.setTitle(`选品工作台 - ${options.batch.name || `批次 #${options.batch.id}`}`);
     syncViewBounds();
   }
 
   if (!workspaceViews || !workspaceWindow) {
-    throw new Error("采集工作台初始化失败");
+    throw new Error("选品工作台初始化失败");
   }
 
   const leftPaneUrl = buildPaneUrl("left", options.batch.id);
@@ -1775,18 +1834,18 @@ export async function openCollectionWorkspace(options: OpenCollectionWorkspaceOp
   if (workspaceViews.left.webContents.getURL() !== leftPaneUrl) {
     paneLoads.push(safeLoadPane(workspaceViews.left, leftPaneUrl, "left"));
   }
-  if (!isTbWorkspace && workspaceViews.right.webContents.getURL() !== rightPaneUrl) {
+  if (!(isTbWorkspace && TB_COLLECTION_RENDER_MODE === "electron") && workspaceViews.right.webContents.getURL() !== rightPaneUrl) {
     paneLoads.push(safeLoadPane(workspaceViews.right, rightPaneUrl, "right"));
   }
   if (paneLoads.length > 0) {
     await Promise.all(paneLoads);
   }
 
-  if (!isTbWorkspace && !workspaceViews.center.webContents.getURL().startsWith("data:text/html")) {
+  if ((!isTbWorkspace || TB_COLLECTION_RENDER_MODE === "playwright") && !workspaceViews.center.webContents.getURL().startsWith("data:text/html")) {
     await workspaceViews.center.webContents.loadURL(getPlaywrightViewerUrl());
   }
   let workspaceUrl: string;
-  if (isTbWorkspace) {
+  if (isTbWorkspace && TB_COLLECTION_RENDER_MODE === "electron") {
     await closeWorkspacePlaywright();
     setupCenterViewBrowserEnvironment(workspaceViews.center);
     bindCenterViewEvents(workspaceViews.center);
@@ -1889,7 +1948,7 @@ export async function setCollectionWorkspaceRightPanelVisible(visible: boolean) 
 
 export async function previewCollectedRecord(sourceProductId: string, sourceType: CollectSourceType = workspaceState.sourceType || "unknown") {
   if (!workspaceViews || !workspaceWindow || workspaceWindow.isDestroyed()) {
-    throw new Error("采集工作台尚未打开");
+    throw new Error("选品工作台尚未打开");
   }
 
   if (sourceType !== "tb") {
@@ -1918,7 +1977,7 @@ export async function previewCollectedRecord(sourceProductId: string, sourceType
 export async function updateWorkspaceRecord(recordId: number, payload: { isFavorite?: boolean; status?: string }) {
   const record = workspaceState.records.find((item) => item.id === recordId);
   if (!record) {
-    throw new Error(`采集记录 #${recordId} 不存在`);
+    throw new Error(`选品记录 #${recordId} 不存在`);
   }
 
   const savedRecord = await requestBackend<CollectRecordPreview>("PUT", `/collect-records/${recordId}`, {
@@ -1936,7 +1995,7 @@ export async function updateWorkspaceRecord(recordId: number, payload: { isFavor
 
 export async function navigateCollectionWorkspace(action: "back" | "forward" | "home" | "refresh") {
   if (!workspaceViews || !workspaceWindow || workspaceWindow.isDestroyed()) {
-    throw new Error("采集工作台尚未打开");
+    throw new Error("选品工作台尚未打开");
   }
 
   if (workspaceState.sourceType === "tb") {
@@ -1967,7 +2026,7 @@ export async function navigateCollectionWorkspace(action: "back" | "forward" | "
 
   const page = workspacePlaywrightPage;
   if (!page || page.isClosed()) {
-    throw new Error("Playwright 采集浏览器尚未打开");
+    throw new Error("Playwright 选品浏览器尚未打开");
   }
 
   switch (action) {
@@ -2051,3 +2110,4 @@ export async function dispatchCollectionPlaywrightInput(input: PlaywrightViewerI
     log.warn("[collection workspace] failed to dispatch playwright input", { inputType: input.type, error });
   }
 }
+

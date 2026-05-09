@@ -32,7 +32,7 @@ const platformOptions = [
 ];
 
 const shopUsageOptions = [
-  { label: "采集", value: "COLLECT" },
+  { label: "选品", value: "COLLECT" },
   { label: "发布", value: "PUBLISH" },
 ];
 
@@ -43,7 +43,7 @@ function getDefaultShopUsage(platform: string) {
 
 function normalizeShopUsage(shopUsage: string) {
   const normalized = (shopUsage || "").trim().toUpperCase();
-  if (normalized === "COLLECT" || normalized === "采集") {
+  if (normalized === "COLLECT" || normalized === "采集" || normalized === "选品") {
     return "COLLECT";
   }
   if (normalized === "PUBLISH" || normalized === "发布") {

@@ -100,6 +100,65 @@ func (r *CollectBatchRepository) ListByQuery(query collectDTO.CollectBatchQueryD
 	return entities, nil
 }
 
+type AiSelectionStrategyRepository struct {
+	db.Repository[*AiSelectionStrategy]
+}
+
+func (r *AiSelectionStrategyRepository) EnsureTable() error {
+	if r.Db == nil {
+		return fmt.Errorf("database is not initialized")
+	}
+	return r.Db.AutoMigrate(&AiSelectionStrategy{})
+}
+
+func (r *AiSelectionStrategyRepository) CountByQuery(query collectDTO.AiSelectionStrategyQueryDTO) (int64, error) {
+	if r.Db == nil {
+		return 0, fmt.Errorf("database is not initialized")
+	}
+	dbQuery := r.Db.Model(&AiSelectionStrategy{}).Where("active = ?", 1)
+	if value := strings.TrimSpace(query.Name); value != "" {
+		dbQuery = dbQuery.Where("name LIKE ?", "%"+value+"%")
+	}
+	if value := strings.TrimSpace(query.StrategyType); value != "" {
+		dbQuery = dbQuery.Where("strategy_type = ?", value)
+	}
+	if query.UserID > 0 {
+		dbQuery = dbQuery.Where("user_id = ?", query.UserID)
+	}
+	if query.IsValid != nil {
+		dbQuery = dbQuery.Where("is_valid = ?", *query.IsValid)
+	}
+	var total int64
+	if err := dbQuery.Count(&total).Error; err != nil {
+		return 0, err
+	}
+	return total, nil
+}
+
+func (r *AiSelectionStrategyRepository) ListByQuery(query collectDTO.AiSelectionStrategyQueryDTO, pageIndex, pageSize int) ([]*AiSelectionStrategy, error) {
+	if r.Db == nil {
+		return nil, fmt.Errorf("database is not initialized")
+	}
+	dbQuery := r.Db.Model(&AiSelectionStrategy{}).Where("active = ?", 1)
+	if value := strings.TrimSpace(query.Name); value != "" {
+		dbQuery = dbQuery.Where("name LIKE ?", "%"+value+"%")
+	}
+	if value := strings.TrimSpace(query.StrategyType); value != "" {
+		dbQuery = dbQuery.Where("strategy_type = ?", value)
+	}
+	if query.UserID > 0 {
+		dbQuery = dbQuery.Where("user_id = ?", query.UserID)
+	}
+	if query.IsValid != nil {
+		dbQuery = dbQuery.Where("is_valid = ?", *query.IsValid)
+	}
+	var entities []*AiSelectionStrategy
+	if err := dbQuery.Order("id DESC").Offset((pageIndex - 1) * pageSize).Limit(pageSize).Find(&entities).Error; err != nil {
+		return nil, err
+	}
+	return entities, nil
+}
+
 type CollectRecordRepository struct{ db.Repository[*CollectRecord] }
 
 func (r *CollectRecordRepository) EnsureTable() error {
@@ -223,4 +282,89 @@ func (r *CollectRecordRepository) CountDistinctFavoriteSourceProductsByBatch(bat
 		return 0, err
 	}
 	return total, nil
+}
+
+type AiSelectionShopProductDetailRepository struct {
+	db.Repository[*AiSelectionShopProductDetail]
+}
+
+func (r *AiSelectionShopProductDetailRepository) EnsureTable() error {
+	if r.Db == nil {
+		return fmt.Errorf("database is not initialized")
+	}
+	return r.Db.AutoMigrate(&AiSelectionShopProductDetail{})
+}
+
+func (r *AiSelectionShopProductDetailRepository) FindByShopAndItem(platform, platformShopID, itemID string) (*AiSelectionShopProductDetail, error) {
+	if r.Db == nil {
+		return nil, fmt.Errorf("database is not initialized")
+	}
+	var entity AiSelectionShopProductDetail
+	err := r.Db.Where(
+		"active = ? AND platform = ? AND platform_shop_id = ? AND item_id = ?",
+		1,
+		strings.TrimSpace(platform),
+		strings.TrimSpace(platformShopID),
+		strings.TrimSpace(itemID),
+	).First(&entity).Error
+	if err != nil {
+		return nil, err
+	}
+	return &entity, nil
+}
+
+func (r *AiSelectionShopProductDetailRepository) FindLatestByShop(platform, platformShopID string) (*AiSelectionShopProductDetail, error) {
+	if r.Db == nil {
+		return nil, fmt.Errorf("database is not initialized")
+	}
+	var entity AiSelectionShopProductDetail
+	err := r.Db.Where(
+		"active = ? AND platform = ? AND platform_shop_id = ?",
+		1,
+		strings.TrimSpace(platform),
+		strings.TrimSpace(platformShopID),
+	).Order("id DESC").First(&entity).Error
+	if err != nil {
+		return nil, err
+	}
+	return &entity, nil
+}
+
+func (r *AiSelectionShopProductDetailRepository) CountByQuery(query collectDTO.AiSelectionShopProductQueryDTO) (int64, error) {
+	if r.Db == nil {
+		return 0, fmt.Errorf("database is not initialized")
+	}
+	dbQuery := r.Db.Model(&AiSelectionShopProductDetail{}).Where("active = ?", 1)
+	dbQuery = applyAiSelectionShopProductQuery(dbQuery, query)
+	var total int64
+	if err := dbQuery.Count(&total).Error; err != nil {
+		return 0, err
+	}
+	return total, nil
+}
+
+func (r *AiSelectionShopProductDetailRepository) ListByQuery(query collectDTO.AiSelectionShopProductQueryDTO, pageIndex, pageSize int) ([]*AiSelectionShopProductDetail, error) {
+	if r.Db == nil {
+		return nil, fmt.Errorf("database is not initialized")
+	}
+	dbQuery := r.Db.Model(&AiSelectionShopProductDetail{}).Where("active = ?", 1)
+	dbQuery = applyAiSelectionShopProductQuery(dbQuery, query)
+	var entities []*AiSelectionShopProductDetail
+	if err := dbQuery.Order("id DESC").Offset((pageIndex - 1) * pageSize).Limit(pageSize).Find(&entities).Error; err != nil {
+		return nil, err
+	}
+	return entities, nil
+}
+
+func applyAiSelectionShopProductQuery(dbQuery *gorm.DB, query collectDTO.AiSelectionShopProductQueryDTO) *gorm.DB {
+	if value := strings.TrimSpace(query.Platform); value != "" {
+		dbQuery = dbQuery.Where("platform = ?", value)
+	}
+	if value := strings.TrimSpace(query.PlatformShopID); value != "" {
+		dbQuery = dbQuery.Where("platform_shop_id = ?", value)
+	}
+	if value := strings.TrimSpace(query.ItemID); value != "" {
+		dbQuery = dbQuery.Where("item_id = ?", value)
+	}
+	return dbQuery
 }

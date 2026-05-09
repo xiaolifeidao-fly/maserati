@@ -4,6 +4,15 @@ import AdmZip from "adm-zip";
 import log from "electron-log";
 import {
   type CollectionWorkspaceNavigationAction,
+  type AiSelectionStrategyPayload,
+  type AiSelectionStrategyQuery,
+  type AiSelectionStrategyRecord,
+  type AiSelectionShopProductListQuery,
+  type AiSelectionShopProductRecord,
+  type AiSelectionShopLinkImportResult,
+  type AiSelectionShopLinkRecord,
+  type AiAutoCollectState,
+  type AiSelectionTaskState,
   CollectStartResult,
   CollectApi,
   type CollectBatchListQuery,
@@ -28,6 +37,10 @@ import type { CollectedGoodsSummary } from "@src/collect/platforms/types";
 import { importCollectedRecordToStore, navigateCollectionWorkspace, openCollectionWorkspace } from "@src/collect/workspace.manager";
 import { saveCollectedToServer } from "@src/collect/collect.saver";
 import { collectBatchStatsDb } from "@src/collect/collect-batch-stats.db";
+import { aiSelectionShopLinksDb } from "@src/collect/ai-selection/ai-selection-shop-links.db";
+import { aiSelectionResultsDb } from "@src/collect/ai-selection/ai-selection-results.db";
+import { runAiSelectionStrategy } from "@src/collect/ai-selection/ai-selection.runner";
+import { runAiAutoCollect } from "@src/collect/ai-selection/ai-auto-collect.runner";
 import { requestBackend } from "../shared/backend";
 
 interface ImportJsonFile {
@@ -36,7 +49,71 @@ interface ImportJsonFile {
   readText(): string;
 }
 
+const idleAiSelectionTaskState: AiSelectionTaskState = {
+  taskId: "",
+  batchId: 0,
+  strategyId: 0,
+  strategyType: "",
+  status: "IDLE",
+  total: 0,
+  processed: 0,
+  percent: 0,
+  message: "暂无运行中的 AI 选品任务",
+  startedAt: "",
+  updatedAt: "",
+};
+
+const idleAutoCollectState: AiAutoCollectState = {
+  taskId: "",
+  batchId: 0,
+  status: "IDLE",
+  total: 0,
+  processed: 0,
+  percent: 0,
+  message: "暂无运行中的 AI 自动采集任务",
+  startedAt: "",
+  updatedAt: "",
+};
+
 export class CollectImpl extends CollectApi {
+  private static aiSelectionTaskState: AiSelectionTaskState = idleAiSelectionTaskState;
+
+  private static aiSelectionTaskRunning = false;
+
+  private static aiSelectionAbortController: AbortController | null = null;
+
+  private static autoCollectState: AiAutoCollectState = idleAutoCollectState;
+
+  private static autoCollectRunning = false;
+
+  private static autoCollectAbortController: AbortController | null = null;
+
+  private static buildTaskState(patch: Partial<AiSelectionTaskState>): AiSelectionTaskState {
+    return {
+      ...CollectImpl.aiSelectionTaskState,
+      ...patch,
+      updatedAt: patch.updatedAt || new Date().toISOString(),
+    };
+  }
+
+  private pushAiSelectionTaskState(state: AiSelectionTaskState): void {
+    CollectImpl.aiSelectionTaskState = state;
+    try {
+      this.send("onAiSelectionTaskChanged", state);
+    } catch (error) {
+      log.warn("[collect.ai-selection] failed to push task state", { state, error });
+    }
+  }
+
+  private pushAutoCollectState(state: AiAutoCollectState): void {
+    CollectImpl.autoCollectState = state;
+    try {
+      this.send("onAiAutoCollectStateChanged", state);
+    } catch (error) {
+      log.warn("[collect.auto-collect] failed to push state", { state, error });
+    }
+  }
+
   private pushImportProgress(progress: ImportCollectBatchProgress): void {
     try {
       this.send("onImportCollectProgress", progress);
@@ -86,6 +163,184 @@ export class CollectImpl extends CollectApi {
     return requestBackend("DELETE", `/collect-batches/${id}`);
   }
 
+  async listAiSelectionStrategies(query: AiSelectionStrategyQuery): Promise<PageResult<AiSelectionStrategyRecord>> {
+    return requestBackend("GET", "/ai-selection-strategies", { params: query as Record<string, string | number | undefined> });
+  }
+
+  async createAiSelectionStrategy(payload: AiSelectionStrategyPayload): Promise<AiSelectionStrategyRecord> {
+    return requestBackend("POST", "/ai-selection-strategies", { data: payload });
+  }
+
+  async updateAiSelectionStrategy(id: number, payload: Partial<AiSelectionStrategyPayload>): Promise<AiSelectionStrategyRecord> {
+    return requestBackend("PUT", `/ai-selection-strategies/${id}`, { data: payload });
+  }
+
+  async deleteAiSelectionStrategy(id: number): Promise<{ deleted: boolean }> {
+    return requestBackend("DELETE", `/ai-selection-strategies/${id}`);
+  }
+
+  async importAiSelectionShopLinks(
+    batchId: number,
+    payload: { strategyId: number; filePath: string },
+  ): Promise<AiSelectionShopLinkImportResult> {
+    if (!Number.isFinite(batchId) || batchId <= 0) {
+      throw new Error("collect batch id is invalid");
+    }
+    const strategyId = Number(payload.strategyId || 0);
+    if (!Number.isFinite(strategyId) || strategyId <= 0) {
+      throw new Error("strategy id is invalid");
+    }
+    const filePath = String(payload.filePath || "").trim();
+    if (!filePath) {
+      throw new Error("txt file path is required");
+    }
+    const text = fs.readFileSync(filePath, "utf8");
+    const urls = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    await aiSelectionShopLinksDb.ensureInit();
+    return aiSelectionShopLinksDb.importLinks(batchId, strategyId, urls);
+  }
+
+  async listAiSelectionShopLinks(batchId: number, strategyId: number): Promise<AiSelectionShopLinkRecord[]> {
+    await aiSelectionShopLinksDb.ensureInit();
+    return aiSelectionShopLinksDb.list(batchId, strategyId);
+  }
+
+  async getAiSelectionTaskState(): Promise<AiSelectionTaskState> {
+    return CollectImpl.aiSelectionTaskState;
+  }
+
+  async stopAiSelectionTask(): Promise<AiSelectionTaskState> {
+    if (CollectImpl.aiSelectionAbortController) {
+      CollectImpl.aiSelectionAbortController.abort();
+    }
+    const state = CollectImpl.buildTaskState({
+      status: "STOPPED",
+      message: "AI 选品任务已停止",
+    });
+    this.pushAiSelectionTaskState(state);
+    return state;
+  }
+
+  async listAiSelectionShopProducts(query: AiSelectionShopProductListQuery): Promise<PageResult<AiSelectionShopProductRecord>> {
+    await aiSelectionResultsDb.ensureInit();
+    return aiSelectionResultsDb.list(query || {});
+  }
+
+  async deleteAiSelectionShopProduct(id: number): Promise<{ deleted: boolean }> {
+    await aiSelectionResultsDb.ensureInit();
+    return { deleted: aiSelectionResultsDb.delete(Number(id || 0)) };
+  }
+
+  async startAiSelectionTask(batchId: number, payload: { strategyId: number }): Promise<AiSelectionTaskState> {
+    if (CollectImpl.aiSelectionTaskRunning) {
+      throw new Error("当前已有 AI 选品任务运行，请等待完成后再开始");
+    }
+    if (!Number.isFinite(batchId) || batchId <= 0) {
+      throw new Error("collect batch id is invalid");
+    }
+    const strategyId = Number(payload.strategyId || 0);
+    if (!Number.isFinite(strategyId) || strategyId <= 0) {
+      throw new Error("strategy id is invalid");
+    }
+
+    const strategy = await requestBackend<AiSelectionStrategyRecord>("GET", `/ai-selection-strategies/${strategyId}`);
+    const batch = await requestBackend<CollectBatchRecord>("GET", `/collect-batches/${batchId}`);
+    const shop = await requestBackend<ShopRecord>("GET", `/shops/${batch.shopId}`);
+    if (!strategy.isValid) {
+      throw new Error("AI 选品策略未启用");
+    }
+    if (strategy.strategyType === "SEARCH_CATEGORY") {
+      throw new Error("按搜索品类模式待实现");
+    }
+
+    await aiSelectionShopLinksDb.ensureInit();
+    const shopLinks = aiSelectionShopLinksDb.list(batchId, strategyId);
+    if (strategy.strategyType === "SHOP" && shopLinks.length === 0) {
+      throw new Error("请先导入店铺链接");
+    }
+
+    const startedAt = new Date().toISOString();
+    const taskId = `ai-selection-${batchId}-${strategyId}-${Date.now()}`;
+    const initialState = CollectImpl.buildTaskState({
+      taskId,
+      batchId,
+      strategyId,
+      strategyType: strategy.strategyType,
+      status: "RUNNING",
+      total: shopLinks.length,
+      processed: 0,
+      percent: 0,
+      message: "AI 选品任务已开始",
+      startedAt,
+      updatedAt: startedAt,
+    });
+    CollectImpl.aiSelectionTaskRunning = true;
+    CollectImpl.aiSelectionAbortController = new AbortController();
+    this.pushAiSelectionTaskState(initialState);
+
+    void (async () => {
+      try {
+        await runAiSelectionStrategy({
+          batch,
+          shop,
+          strategy,
+          shopLinks,
+          signal: CollectImpl.aiSelectionAbortController!.signal,
+          onLinkStatus: (id, status) => {
+            aiSelectionShopLinksDb.updateStatus(id, status);
+          },
+          onProgress: (state) => {
+            this.pushAiSelectionTaskState(CollectImpl.buildTaskState({
+              ...state,
+              taskId,
+              startedAt,
+            }));
+          },
+        });
+        if (CollectImpl.aiSelectionAbortController?.signal.aborted) {
+          this.pushAiSelectionTaskState(CollectImpl.buildTaskState({
+            taskId,
+            batchId,
+            strategyId,
+            strategyType: strategy.strategyType,
+            status: "STOPPED",
+            message: "AI 选品任务已停止",
+            startedAt,
+          }));
+          return;
+        }
+        this.pushAiSelectionTaskState(CollectImpl.buildTaskState({
+          taskId,
+          batchId,
+          strategyId,
+          strategyType: strategy.strategyType,
+          status: "SUCCESS",
+          total: shopLinks.length,
+          processed: shopLinks.length,
+          percent: 100,
+          message: "AI 选品任务已完成",
+          startedAt,
+        }));
+      } catch (error) {
+        const stopped = CollectImpl.aiSelectionAbortController?.signal.aborted;
+        this.pushAiSelectionTaskState(CollectImpl.buildTaskState({
+          taskId,
+          batchId,
+          strategyId,
+          strategyType: strategy.strategyType,
+          status: stopped ? "STOPPED" : "FAILED",
+          message: stopped ? "AI 选品任务已停止" : error instanceof Error ? error.message : "AI 选品任务执行失败",
+          startedAt,
+        }));
+      } finally {
+        CollectImpl.aiSelectionTaskRunning = false;
+        CollectImpl.aiSelectionAbortController = null;
+      }
+    })();
+
+    return initialState;
+  }
+
   async shareCollectBatch(payload: CollectSharePayload): Promise<CollectShareRecord> {
     return requestBackend("POST", "/collect-shares", { data: payload });
   }
@@ -129,7 +384,7 @@ export class CollectImpl extends CollectApi {
         initialUrl: driver.homeUrl,
       });
     } else {
-      throw new Error(`采集平台 ${shop.platform || sourceType || "unknown"} 暂未接入`);
+      throw new Error(`选品平台 ${shop.platform || sourceType || "unknown"} 暂未接入`);
     }
 
     return Object.assign(new CollectStartResult(), {
@@ -139,9 +394,127 @@ export class CollectImpl extends CollectApi {
       sourceType,
       message:
         driver.sourceType === "tb"
-          ? `淘宝采集工作台已打开：${batch.name || `批次 #${batchId}`}`
-          : `采集工作台已打开：${batch.name || `批次 #${batchId}`}`,
+          ? `淘宝选品工作台已打开：${batch.name || `批次 #${batchId}`}`
+          : `选品工作台已打开：${batch.name || `批次 #${batchId}`}`,
     });
+  }
+
+  async getAiAutoCollectState(): Promise<AiAutoCollectState> {
+    return CollectImpl.autoCollectState;
+  }
+
+  async stopAiAutoCollect(): Promise<AiAutoCollectState> {
+    if (CollectImpl.autoCollectAbortController) {
+      CollectImpl.autoCollectAbortController.abort();
+    }
+    const state: AiAutoCollectState = {
+      ...CollectImpl.autoCollectState,
+      status: "STOPPED",
+      message: "AI 自动采集已停止",
+      updatedAt: new Date().toISOString(),
+    };
+    this.pushAutoCollectState(state);
+    return state;
+  }
+
+  async startAiCollectData(batchId: number): Promise<AiAutoCollectState> {
+    if (CollectImpl.autoCollectRunning) {
+      throw new Error("当前已有 AI 自动采集任务运行，请等待完成后再开始");
+    }
+    if (!Number.isFinite(batchId) || batchId <= 0) {
+      throw new Error("collect batch id is invalid");
+    }
+
+    const batch = await requestBackend<CollectBatchRecord>("GET", `/collect-batches/${batchId}`);
+    const shop = await requestBackend<ShopRecord>("GET", `/shops/${batch.shopId}`);
+    const sourceType = normalizeCollectSourceType(shop.platform);
+
+    if (sourceType !== "tb") {
+      throw new Error(`AI 自动采集暂只支持淘宝平台，当前平台：${shop.platform || sourceType || "unknown"}`);
+    }
+
+    await aiSelectionResultsDb.ensureInit();
+    const allResults = aiSelectionResultsDb.list({ batchId, pageIndex: 1, pageSize: 1000 });
+    const tbItems = allResults.data.filter((item) => item.platform === "tb" && item.itemId);
+
+    if (tbItems.length === 0) {
+      throw new Error("没有可采集的 TB 商品，请先完成 AI 选品");
+    }
+
+    const taskId = `ai-auto-collect-${batchId}-${Date.now()}`;
+    const startedAt = new Date().toISOString();
+    const total = tbItems.length;
+
+    const initialState: AiAutoCollectState = {
+      taskId,
+      batchId,
+      status: "RUNNING",
+      total,
+      processed: 0,
+      percent: 0,
+      message: `AI 自动采集已开始，共 ${total} 个商品`,
+      startedAt,
+      updatedAt: startedAt,
+    };
+
+    CollectImpl.autoCollectRunning = true;
+    CollectImpl.autoCollectAbortController = new AbortController();
+    this.pushAutoCollectState(initialState);
+
+    // 纯 Playwright 后台采集，不打开工作台 UI
+    void (async () => {
+      try {
+        await runAiAutoCollect({
+          batch,
+          items: tbItems.map((item) => ({ itemId: item.itemId })),
+          signal: CollectImpl.autoCollectAbortController!.signal,
+          onProgress: ({ processed, total: tot, itemId, success, message }) => {
+            const percent = Math.round((processed / tot) * 100);
+            this.pushAutoCollectState({
+              taskId,
+              batchId,
+              status: "RUNNING",
+              total: tot,
+              processed,
+              percent,
+              message: `[${processed}/${tot}] ${message || (success ? `${itemId} ✓` : `${itemId} 跳过`)}`,
+              startedAt,
+              updatedAt: new Date().toISOString(),
+            });
+          },
+        });
+        const stopped = CollectImpl.autoCollectAbortController?.signal.aborted;
+        this.pushAutoCollectState({
+          taskId,
+          batchId,
+          status: stopped ? "STOPPED" : "SUCCESS",
+          total,
+          processed: CollectImpl.autoCollectState.processed,
+          percent: stopped ? CollectImpl.autoCollectState.percent : 100,
+          message: stopped ? "AI 自动采集已停止" : `AI 自动采集完成，共 ${total} 个商品`,
+          startedAt,
+          updatedAt: new Date().toISOString(),
+        });
+      } catch (error) {
+        const stopped = CollectImpl.autoCollectAbortController?.signal.aborted;
+        this.pushAutoCollectState({
+          taskId,
+          batchId,
+          status: stopped ? "STOPPED" : "FAILED",
+          total,
+          processed: CollectImpl.autoCollectState.processed,
+          percent: CollectImpl.autoCollectState.percent,
+          message: stopped ? "AI 自动采集已停止" : error instanceof Error ? error.message : "AI 自动采集失败",
+          startedAt,
+          updatedAt: new Date().toISOString(),
+        });
+      } finally {
+        CollectImpl.autoCollectRunning = false;
+        CollectImpl.autoCollectAbortController = null;
+      }
+    })();
+
+    return initialState;
   }
 
   async startPxxCollection(batchId: number) {
@@ -317,7 +690,7 @@ export class CollectImpl extends CollectApi {
               percent: total > 0 ? Math.round(((processedBefore + 1) / total) * 100) : 100,
               currentFile: entry.entryName,
               status: "running",
-              message: "已采集，跳过",
+              message: "已选品，跳过",
             });
             continue;
           }

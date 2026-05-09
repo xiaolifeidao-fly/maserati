@@ -269,7 +269,7 @@ function getTbLoginUrl(shop: ShopRecord): string {
 
 function normalizeShopUsage(shopUsage: string): string {
   const normalized = (shopUsage || "").trim().toUpperCase();
-  if (normalized === "COLLECT" || normalized === "采集") {
+  if (normalized === "COLLECT" || normalized === "采集" || normalized === "选品") {
     return "COLLECT";
   }
   if (normalized === "PUBLISH" || normalized === "发布") {

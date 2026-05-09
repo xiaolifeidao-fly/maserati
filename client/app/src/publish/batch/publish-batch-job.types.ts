@@ -12,7 +12,7 @@ export enum PublishBatchJobStatus {
 /** 发布批次任务（持久化在 SQLite） */
 export interface PublishBatchJob {
   id: number;
-  /** 关联的采集批次 ID（服务端） */
+  /** 关联的选品批次 ID（服务端） */
   collectBatchId: number;
   shopId: number;
   status: PublishBatchJobStatus;

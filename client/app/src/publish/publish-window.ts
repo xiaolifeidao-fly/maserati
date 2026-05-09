@@ -121,7 +121,7 @@ function buildPublishWindowUrl(options?: PublishWindowOpenOptions): string {
 
 /**
  * 生成截屏流验证码查看器 HTML。
- * 逻辑与采集工作区的 PlaywrightViewer 一致，区别是输入事件通过 publishCaptchaViewer.dispatchInput 转发。
+ * 逻辑与选品工作区的 PlaywrightViewer 一致，区别是输入事件通过 publishCaptchaViewer.dispatchInput 转发。
  */
 function buildPublishCaptchaViewerHtml(): string {
   return `<!doctype html>

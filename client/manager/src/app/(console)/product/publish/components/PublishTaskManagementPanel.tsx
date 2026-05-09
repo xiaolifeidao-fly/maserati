@@ -20,14 +20,14 @@ const statusOptions: CrudOption[] = [
 ];
 
 const sourceOptions: CrudOption[] = [
-  { label: "采集商品", value: "collect" },
+  { label: "选品商品", value: "collect" },
   { label: "手工创建", value: "manual" },
 ];
 
 const fields: CrudField<PublishTaskRecord>[] = [
   { name: "appUserId", label: "App用户ID", type: "number", required: true, min: 1, precision: 0 },
   { name: "shopId", label: "店铺ID", type: "number", required: true, min: 1, precision: 0 },
-  { name: "collectBatchId", label: "采集批次ID", type: "number", min: 0, precision: 0 },
+  { name: "collectBatchId", label: "选品批次ID", type: "number", min: 0, precision: 0 },
   { name: "productId", label: "商品ID", type: "number", min: 0, precision: 0 },
   { name: "sourceType", label: "来源类型", type: "select", required: true, options: sourceOptions },
   { name: "sourceProductId", label: "来源商品ID", required: true },
@@ -43,7 +43,7 @@ const columns: CrudTableColumn<PublishTaskRecord>[] = [
   { name: "sourceProductId", label: "来源商品ID", width: 180, copyable: true },
   { name: "appUserId", label: "App用户ID", width: 120 },
   { name: "shopId", label: "店铺ID", width: 100 },
-  { name: "collectBatchId", label: "采集批次ID", width: 130 },
+  { name: "collectBatchId", label: "选品批次ID", width: 130 },
   { name: "productId", label: "商品ID", width: 100 },
   { name: "sourceType", label: "来源", width: 110 },
   { name: "status", label: "状态", width: 120 },

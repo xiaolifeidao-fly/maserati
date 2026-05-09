@@ -70,7 +70,7 @@ export function ManagerShell({ children }: ManagerShellProps) {
       },
       {
         key: "/collect/batches",
-        label: "采集批次",
+        label: "选品批次",
         icon: <CloudDownloadOutlined />,
       },
       {
@@ -122,11 +122,11 @@ export function ManagerShell({ children }: ManagerShellProps) {
       {
         key: "/collect",
         icon: <CloudDownloadOutlined />,
-        label: "采集管理",
+        label: "选品管理",
         children: [
           {
             key: "/collect/batches",
-            label: "采集批次管理",
+            label: "选品批次管理",
           },
         ],
       },

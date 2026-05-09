@@ -103,3 +103,80 @@ type CollectRecordQueryDTO struct {
 	Status          string `form:"status"`
 	IsFavorite      *bool  `form:"isFavorite"`
 }
+
+type AiSelectionStrategyDTO struct {
+	baseDTO.BaseDTO
+	Name         string `json:"name"`
+	StrategyTime string `json:"strategyTime"`
+	IsValid      bool   `json:"isValid"`
+	StrategyType string `json:"strategyType"`
+	UserID       uint64 `json:"userId"`
+}
+
+type CreateAiSelectionStrategyDTO struct {
+	Name         string `json:"name"`
+	StrategyTime string `json:"strategyTime"`
+	IsValid      bool   `json:"isValid"`
+	StrategyType string `json:"strategyType"`
+	UserID       uint64 `json:"userId"`
+}
+
+type UpdateAiSelectionStrategyDTO struct {
+	Name         *string `json:"name,omitempty"`
+	StrategyTime *string `json:"strategyTime,omitempty"`
+	IsValid      *bool   `json:"isValid,omitempty"`
+	StrategyType *string `json:"strategyType,omitempty"`
+	UserID       *uint64 `json:"userId,omitempty"`
+}
+
+type AiSelectionStrategyQueryDTO struct {
+	Page         int    `form:"page"`
+	PageIndex    int    `form:"pageIndex"`
+	PageSize     int    `form:"pageSize"`
+	Name         string `form:"name"`
+	StrategyType string `form:"strategyType"`
+	UserID       uint64 `form:"userId"`
+	IsValid      *bool  `form:"isValid"`
+}
+
+type AiSelectionShopProductSkuDTO struct {
+	SkuID           string `json:"skuId"`
+	SkuImageURL     string `json:"skuImageUrl"`
+	ItemSkuURL      string `json:"itemSkuUrl"`
+	SkuPropertyText string `json:"skuPropertyText"`
+}
+
+type AiSelectionShopProductDTO struct {
+	baseDTO.BaseDTO
+	Platform       string                         `json:"platform"`
+	PlatformShopID string                         `json:"platformShopId"`
+	ItemID         string                         `json:"itemId"`
+	Title          string                         `json:"title"`
+	Price          string                         `json:"price"`
+	VagueSold365   string                         `json:"vagueSold365"`
+	Image          string                         `json:"image"`
+	ItemURL        string                         `json:"itemUrl"`
+	SkuJSON        string                         `json:"skuJson"`
+	SkuInfoList    []AiSelectionShopProductSkuDTO `json:"skuInfoList,omitempty"`
+}
+
+type AiSelectionShopProductUpsertDTO struct {
+	Platform       string                      `json:"platform"`
+	PlatformShopID string                      `json:"platformShopId"`
+	Products       []AiSelectionShopProductDTO `json:"products"`
+}
+
+type AiSelectionShopProductUpsertResultDTO struct {
+	InsertedCount int                         `json:"insertedCount"`
+	SkippedCount  int                         `json:"skippedCount"`
+	Data          []AiSelectionShopProductDTO `json:"data"`
+}
+
+type AiSelectionShopProductQueryDTO struct {
+	Page           int    `form:"page"`
+	PageIndex      int    `form:"pageIndex"`
+	PageSize       int    `form:"pageSize"`
+	Platform       string `form:"platform"`
+	PlatformShopID string `form:"platformShopId"`
+	ItemID         string `form:"itemId"`
+}

@@ -123,10 +123,10 @@ export function ManagerDashboardPanel() {
       },
       {
         key: "collected",
-        title: "今日新采集",
+        title: "今日新选品",
         value: formatInteger(overview.todayCollectedCount),
         suffix: "个",
-        hint: "按店铺分类拆解采集记录",
+        hint: "按店铺分类拆解选品记录",
         icon: <AppstoreAddOutlined />,
         accent: "#238e9f",
         tone: "shop",
@@ -246,7 +246,7 @@ export function ManagerDashboardPanel() {
               </div>
 
               <CategoryPanel
-                title="今日新采集"
+                title="今日新选品"
                 subtitle="按店铺分类"
                 total={overview.todayCollectedCount}
                 items={overview.todayCollectedByShopCategory}

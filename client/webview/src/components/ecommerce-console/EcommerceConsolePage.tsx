@@ -97,40 +97,40 @@ const sectionConfigs: Record<SectionKey, SectionConfig> = {
   workspace: {
     badge: "实时数据看板",
     title: "工作台",
-    description: "基于当前店铺、商品与采集接口汇总真实业务数据。",
+    description: "基于当前店铺、商品与选品接口汇总真实业务数据。",
     spotlight: "正在加载今日数据，请稍候刷新工作台。",
     heroAction: "",
     metrics: [
       { label: "今日新增店铺数量", value: "0", helper: "今日创建的店铺记录" },
       { label: "今日新发布商品", value: "0", helper: "今日创建且状态为已发布的商品" },
-      { label: "今日新采集商品数量", value: "0", helper: "今日新增采集商品记录" },
+      { label: "今日新选品商品数量", value: "0", helper: "今日新增选品商品记录" },
       { label: "已接入店铺", value: "0", helper: "已授权 0 家" },
       { label: "商品总量", value: "0", helper: "已发布 0 个" },
-      { label: "采集任务总数", value: "0", helper: "运行中 0 个" },
+      { label: "选品任务总数", value: "0", helper: "运行中 0 个" },
     ],
     tableTitle: "基础数据概览",
-    tableDescription: "来自店铺、商品、采集任务接口的当前汇总数据。",
+    tableDescription: "来自店铺、商品、选品任务接口的当前汇总数据。",
     rows: [
       { key: "shops", name: "店铺接入情况", status: "待加载", owner: "店铺管理", value: "总计 0 家 / 已授权 0 家", trend: "0%" },
       { key: "products", name: "商品资料情况", status: "待加载", owner: "商品管理", value: "总计 0 个 / 已发布 0 个", trend: "0%" },
-      { key: "collects", name: "采集执行情况", status: "待加载", owner: "采集管理", value: "总计 0 个 / 运行中 0 个", trend: "0%" },
+      { key: "collects", name: "选品执行情况", status: "待加载", owner: "选品管理", value: "总计 0 个 / 运行中 0 个", trend: "0%" },
     ],
     feedTitle: "最近更新",
     feed: [
       { title: "暂未加载到店铺数据", meta: "可前往店铺管理查看", status: "待处理" },
       { title: "暂未加载到商品数据", meta: "可前往商品管理查看", status: "待处理" },
-      { title: "暂未加载到采集任务", meta: "可前往采集管理查看", status: "待处理" },
+      { title: "暂未加载到选品任务", meta: "可前往选品管理查看", status: "待处理" },
     ],
     actionTitle: "数据建议",
     actions: [
-      { title: "检查店铺授权", description: "店铺授权影响商品发布和采集链路，建议优先确保已接入店铺均完成授权。" },
-      { title: "关注采集结果", description: "采集商品记录会进入后续商品资料处理流程，可根据最近更新继续检查采集任务状态。" },
+      { title: "检查店铺授权", description: "店铺授权影响商品发布和选品链路，建议优先确保已接入店铺均完成授权。" },
+      { title: "关注选品结果", description: "选品商品记录会进入后续商品资料处理流程，可根据最近更新继续检查选品任务状态。" },
     ],
     healthTitle: "数据覆盖率",
     health: [
       { label: "店铺授权覆盖率", value: 0, tone: "risk" },
       { label: "商品发布覆盖率", value: 0, tone: "risk" },
-      { label: "采集任务运行率", value: 0, tone: "risk" },
+      { label: "选品任务运行率", value: 0, tone: "risk" },
     ],
   },
   store: {
@@ -210,26 +210,26 @@ const sectionConfigs: Record<SectionKey, SectionConfig> = {
     ],
   },
   collection: {
-    badge: "货源与采集分析",
-    title: "采集管理",
-    description: "用于管理竞品采集、货源追踪、素材沉淀与采集规则，适合桌面端高频批量操作。",
+    badge: "货源与选品分析",
+    title: "选品管理",
+    description: "用于管理竞品选品、货源追踪、素材沉淀与选品规则，适合桌面端高频批量操作。",
     spotlight: "今日新增 3 个竞品热销链接，建议优先同步到选品池并复核价格波动。",
-    heroAction: "创建采集任务",
+    heroAction: "创建选品任务",
     metrics: [
-      { label: "活跃采集任务", value: "42", helper: "自动任务 31 / 手动任务 11" },
+      { label: "活跃选品任务", value: "42", helper: "自动任务 31 / 手动任务 11" },
       { label: "待审核素材", value: "126", helper: "主图 68 / 详情 41 / 视频 17" },
       { label: "新增竞品", value: "18", helper: "高潜链接 6 条" },
       { label: "命中规则", value: "93%", helper: "近 24 小时任务成功率" },
     ],
-    tableTitle: "采集任务面板",
-    tableDescription: "集中展示采集来源、负责人、最新结果和趋势，方便继续扩展选品与素材库。",
+    tableTitle: "选品任务面板",
+    tableDescription: "集中展示选品来源、负责人、最新结果和趋势，方便继续扩展选品与素材库。",
     rows: [
       { key: "1", name: "竞品上新监控", status: "自动运行", owner: "情报组", value: "新增链接 12", trend: "+5" },
-      { key: "2", name: "爆款素材采集", status: "待审核", owner: "内容团队", value: "图文 38 组", trend: "+14" },
+      { key: "2", name: "爆款素材选品", status: "待审核", owner: "内容团队", value: "图文 38 组", trend: "+14" },
       { key: "3", name: "供应商价格对比", status: "波动预警", owner: "采购组", value: "2 家上涨", trend: "+3.6%" },
-      { key: "4", name: "平台评价回收", status: "稳定", owner: "用户研究", value: "采集 420 条", trend: "+11%" },
+      { key: "4", name: "平台评价回收", status: "稳定", owner: "用户研究", value: "选品 420 条", trend: "+11%" },
     ],
-    feedTitle: "采集提醒",
+    feedTitle: "选品提醒",
     feed: [
       { title: "某竞品链接价格上涨 8.2%", meta: "建议复核我们活动价是否仍具优势", status: "需跟进" },
       { title: "详情页视频素材待人工筛选", meta: "今日已累计 17 条", status: "待审核" },
@@ -238,9 +238,9 @@ const sectionConfigs: Record<SectionKey, SectionConfig> = {
     actionTitle: "推荐动作",
     actions: [
       { title: "建立竞品价格波动日报", description: "把近 7 天价格变化大的链接固定输出到运营晨会。" },
-      { title: "沉淀高点击素材库", description: "将采集命中高互动的主图与短视频拆分存档，便于二次创作。" },
+      { title: "沉淀高点击素材库", description: "将选品命中高互动的主图与短视频拆分存档，便于二次创作。" },
     ],
-    healthTitle: "采集体系健康度",
+    healthTitle: "选品体系健康度",
     health: [
       { label: "规则命中率", value: 88, tone: "hot" },
       { label: "素材可复用", value: 67, tone: "steady" },
@@ -398,7 +398,7 @@ export function EcommerceConsolePage({ section }: { section: SectionKey }) {
 
     return {
       ...sectionConfigs.workspace,
-      spotlight: `今日新增店铺 ${todayNewShopCount} 家、新发布商品 ${todayPublishedProductCount} 个、新采集商品 ${todayCollectedCount} 个。`,
+      spotlight: `今日新增店铺 ${todayNewShopCount} 家、新发布商品 ${todayPublishedProductCount} 个、新选品商品 ${todayCollectedCount} 个。`,
       metrics: [
         {
           label: "今日新增店铺数量",
@@ -411,9 +411,9 @@ export function EcommerceConsolePage({ section }: { section: SectionKey }) {
           helper: "今日创建且状态为已发布的商品",
         },
         {
-          label: "今日新采集商品数量",
+          label: "今日新选品商品数量",
           value: String(todayCollectedCount),
-          helper: "今日新增采集商品记录",
+          helper: "今日新增选品商品记录",
         },
         {
           label: "已接入店铺",
@@ -426,7 +426,7 @@ export function EcommerceConsolePage({ section }: { section: SectionKey }) {
           helper: `已发布 ${workspaceOverview.publishedProductTotal} 个`,
         },
         {
-          label: "采集任务总数",
+          label: "选品任务总数",
           value: String(workspaceOverview.collectTotal),
           helper: `运行中 ${workspaceOverview.runningCollectTotal} 个`,
         },
@@ -450,9 +450,9 @@ export function EcommerceConsolePage({ section }: { section: SectionKey }) {
         },
         {
           key: "collects",
-          name: "采集执行情况",
+          name: "选品执行情况",
           status: workspaceOverview.runningCollectTotal > 0 ? "自动运行" : "待审核",
-          owner: "采集管理",
+          owner: "选品管理",
           value: `总计 ${workspaceOverview.collectTotal} 个 / 运行中 ${workspaceOverview.runningCollectTotal} 个`,
           trend: `${collectCoverage}%`,
         },
@@ -484,11 +484,11 @@ export function EcommerceConsolePage({ section }: { section: SectionKey }) {
         },
         {
           title: latestCollect
-            ? `采集任务「${latestCollect.name || `#${latestCollect.id}`}」最近有进展`
-            : "暂未查询到采集任务",
+            ? `选品任务「${latestCollect.name || `#${latestCollect.id}`}」最近有进展`
+            : "暂未查询到选品任务",
           meta: latestCollect
             ? `状态 ${latestCollect.status || "PENDING"} / 更新时间 ${formatDateTime(latestCollect.updatedTime)}`
-            : "可前往采集管理创建首个任务",
+            : "可前往选品管理创建首个任务",
           status: latestCollect?.status || "待处理",
         },
       ],
@@ -511,7 +511,7 @@ export function EcommerceConsolePage({ section }: { section: SectionKey }) {
       health: [
         { label: "店铺授权覆盖率", value: shopCoverage, tone: shopCoverage >= 70 ? "hot" : "risk" },
         { label: "商品发布覆盖率", value: productCoverage, tone: productCoverage >= 60 ? "steady" : "risk" },
-        { label: "采集任务运行率", value: collectCoverage, tone: collectCoverage >= 40 ? "hot" : "steady" },
+        { label: "选品任务运行率", value: collectCoverage, tone: collectCoverage >= 40 ? "hot" : "steady" },
       ],
     };
   }, [section, workspaceOverview]);
@@ -664,7 +664,7 @@ export function EcommerceConsolePage({ section }: { section: SectionKey }) {
             电商桌面端需要的是高频、清晰、可立即行动的后台界面
           </Title>
           <Paragraph style={{ color: "rgba(122, 74, 39, 0.82)", lineHeight: 1.8 }}>
-            所以这里把界面重心放在经营数字、待办动作、门店状态、商品节奏和采集结果上，而不是只保留通用后台模板。
+            所以这里把界面重心放在经营数字、待办动作、门店状态、商品节奏和选品结果上，而不是只保留通用后台模板。
           </Paragraph>
 
           <div className="manager-commerce-highlight-grid">

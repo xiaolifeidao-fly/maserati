@@ -49,7 +49,7 @@ export function BatchDetailModal({
     try {
       await previewCollectedRecord(record.sourceProductId, sourceType);
     } catch (error) {
-      if (error instanceof Error && error.message.includes("采集工作台尚未打开")) {
+      if (error instanceof Error && error.message.includes("选品工作台尚未打开")) {
         return;
       }
       message.error(error instanceof Error ? error.message : "加载预览失败");
@@ -108,7 +108,7 @@ export function BatchDetailModal({
         setSelectedRecordId(items.find((item) => item.id === focusRecordId)?.id || items[0]?.id || 0);
       })
       .catch((error) => {
-        message.error(error instanceof Error ? error.message : "加载采集记录失败");
+        message.error(error instanceof Error ? error.message : "加载选品记录失败");
       })
       .finally(() => setLoading(false));
   }, [open, batch?.id, focusRecordId, activeSource, favoritesOnly]);
@@ -139,7 +139,7 @@ export function BatchDetailModal({
             height: "78vh",
           },
         }}
-        title={batch ? `采集详情 · ${batch.name}` : "采集详情"}
+        title={batch ? `选品详情 · ${batch.name}` : "选品详情"}
         destroyOnClose
       >
       {/* Left Panel */}
@@ -161,7 +161,7 @@ export function BatchDetailModal({
           activeKey={activeSource}
           onChange={(value) => setActiveSource(value as CollectRecordSource)}
           items={[
-            { key: "manual", label: "手动采集" },
+            { key: "manual", label: "手动选品" },
             { key: "file", label: "文件来源" },
           ]}
           style={{ flex: "0 0 auto", marginBottom: 10 }}

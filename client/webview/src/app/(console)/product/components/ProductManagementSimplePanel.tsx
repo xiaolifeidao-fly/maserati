@@ -63,7 +63,7 @@ export function ProductManagementSimplePanel() {
 
   const openPreviewModal = async (record: ProductRecord) => {
     if (!record.collectRecordId) {
-      message.warning("该商品没有关联采集记录，暂时无法打开采集详情");
+      message.warning("该商品没有关联选品记录，暂时无法打开选品详情");
       return;
     }
 
@@ -72,11 +72,11 @@ export function ProductManagementSimplePanel() {
     try {
       const collectRecord = await fetchCollectRecord(record.collectRecordId);
       if (!collectRecord.sourceProductId) {
-        throw new Error("关联采集商品缺少源商品ID");
+        throw new Error("关联选品商品缺少源商品ID");
       }
 
       if (!collectRecord.collectBatchId) {
-        throw new Error("关联采集批次不存在");
+        throw new Error("关联选品批次不存在");
       }
 
       const batch = await fetchCollectBatch(collectRecord.collectBatchId);
@@ -85,7 +85,7 @@ export function ProductManagementSimplePanel() {
       const rawData = await getCollectedProductRawData(collectRecord.sourceProductId, sourceType);
 
       if (!rawData || typeof rawData !== "object") {
-        throw new Error("未找到该商品的采集详情数据");
+        throw new Error("未找到该商品的选品详情数据");
       }
 
       setDetailTitle(record.title || collectRecord.productName || `商品 #${record.id}`);
@@ -98,7 +98,7 @@ export function ProductManagementSimplePanel() {
       );
       setDetailModalOpen(true);
     } catch (error) {
-      message.error(error instanceof Error ? error.message : "加载采集详情失败");
+      message.error(error instanceof Error ? error.message : "加载选品详情失败");
     } finally {
       setPreviewLoading(false);
       setPreviewingRecordId(0);
@@ -107,7 +107,7 @@ export function ProductManagementSimplePanel() {
 
   const handleCopySourceUrl = async (record: ProductRecord) => {
     if (!record.collectRecordId) {
-      message.warning("该商品没有关联采集记录，无法复制原采集链接");
+      message.warning("该商品没有关联选品记录，无法复制原选品链接");
       return;
     }
 
@@ -116,14 +116,14 @@ export function ProductManagementSimplePanel() {
       const sourceUrl = String(collectRecord.sourceSnapshotUrl || "").trim();
 
       if (!sourceUrl) {
-        message.warning("该商品暂未记录原采集链接");
+        message.warning("该商品暂未记录原选品链接");
         return;
       }
 
       await navigator.clipboard.writeText(sourceUrl);
-      message.success("原采集链接已复制");
+      message.success("原选品链接已复制");
     } catch (error) {
-      message.error(error instanceof Error ? error.message : "复制原采集链接失败");
+      message.error(error instanceof Error ? error.message : "复制原选品链接失败");
     }
   };
 
@@ -186,7 +186,7 @@ export function ProductManagementSimplePanel() {
           <IconOnlyButton
             type="text"
             icon={<CopyOutlined />}
-            tooltip="复制原采集链接"
+            tooltip="复制原选品链接"
             onClick={() => void handleCopySourceUrl(record)}
           />
           <IconOnlyButton
@@ -222,7 +222,7 @@ export function ProductManagementSimplePanel() {
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap", justifyContent: "space-between" }}>
           <Space wrap size={12}>
             <Typography.Text type="secondary" style={{ lineHeight: "44px" }}>
-              采集来源
+              选品来源
             </Typography.Text>
             <Tabs
               activeKey={activePlatform}

@@ -32,6 +32,14 @@ func (h *CollectHandler) RegisterHandler(engine *gin.RouterGroup) {
 	engine.POST("/collect-batches", h.createBatch)
 	engine.PUT("/collect-batches/:id", h.updateBatch)
 	engine.DELETE("/collect-batches/:id", h.deleteBatch)
+	engine.GET("/ai-selection-strategies", h.listAiSelectionStrategies)
+	engine.GET("/ai-selection-strategies/:id", h.getAiSelectionStrategyByID)
+	engine.POST("/ai-selection-strategies", h.createAiSelectionStrategy)
+	engine.PUT("/ai-selection-strategies/:id", h.updateAiSelectionStrategy)
+	engine.DELETE("/ai-selection-strategies/:id", h.deleteAiSelectionStrategy)
+	engine.GET("/ai-selection-shop-products", h.listAiSelectionShopProducts)
+	engine.GET("/ai-selection-shop-products/latest", h.getLatestAiSelectionShopProduct)
+	engine.POST("/ai-selection-shop-products/batch-upsert", h.upsertAiSelectionShopProducts)
 }
 
 func (h *CollectHandler) listBatches(context *gin.Context) {
@@ -96,6 +104,104 @@ func (h *CollectHandler) deleteBatch(context *gin.Context) {
 		return
 	}
 	commonRouter.ToJson(context, gin.H{"deleted": true}, err)
+}
+
+func (h *CollectHandler) listAiSelectionStrategies(context *gin.Context) {
+	var query collectDTO.AiSelectionStrategyQueryDTO
+	if err := context.ShouldBindQuery(&query); err != nil {
+		commonRouter.ToError(context, "参数错误")
+		return
+	}
+	result, err := h.service.ListAiSelectionStrategies(query)
+	commonRouter.ToJson(context, result, err)
+}
+
+func (h *CollectHandler) getAiSelectionStrategyByID(context *gin.Context) {
+	id, ok := parseCollectID(context)
+	if !ok {
+		return
+	}
+	result, err := h.service.GetAiSelectionStrategyByID(id)
+	if err == gorm.ErrRecordNotFound {
+		commonRouter.ToError(context, "AI selection strategy not found")
+		return
+	}
+	commonRouter.ToJson(context, result, err)
+}
+
+func (h *CollectHandler) createAiSelectionStrategy(context *gin.Context) {
+	var req collectDTO.CreateAiSelectionStrategyDTO
+	if err := context.ShouldBindJSON(&req); err != nil {
+		commonRouter.ToError(context, "参数错误")
+		return
+	}
+	result, err := h.service.CreateAiSelectionStrategy(&req)
+	commonRouter.ToJson(context, result, err)
+}
+
+func (h *CollectHandler) updateAiSelectionStrategy(context *gin.Context) {
+	id, ok := parseCollectID(context)
+	if !ok {
+		return
+	}
+	var req collectDTO.UpdateAiSelectionStrategyDTO
+	if err := context.ShouldBindJSON(&req); err != nil {
+		commonRouter.ToError(context, "参数错误")
+		return
+	}
+	result, err := h.service.UpdateAiSelectionStrategy(id, &req)
+	if err == gorm.ErrRecordNotFound {
+		commonRouter.ToError(context, "AI selection strategy not found")
+		return
+	}
+	commonRouter.ToJson(context, result, err)
+}
+
+func (h *CollectHandler) deleteAiSelectionStrategy(context *gin.Context) {
+	id, ok := parseCollectID(context)
+	if !ok {
+		return
+	}
+	err := h.service.DeleteAiSelectionStrategy(id)
+	if err == gorm.ErrRecordNotFound {
+		commonRouter.ToError(context, "AI selection strategy not found")
+		return
+	}
+	commonRouter.ToJson(context, gin.H{"deleted": true}, err)
+}
+
+func (h *CollectHandler) listAiSelectionShopProducts(context *gin.Context) {
+	var query collectDTO.AiSelectionShopProductQueryDTO
+	if err := context.ShouldBindQuery(&query); err != nil {
+		commonRouter.ToError(context, "参数错误")
+		return
+	}
+	result, err := h.service.ListAiSelectionShopProducts(query)
+	commonRouter.ToJson(context, result, err)
+}
+
+func (h *CollectHandler) getLatestAiSelectionShopProduct(context *gin.Context) {
+	var query collectDTO.AiSelectionShopProductQueryDTO
+	if err := context.ShouldBindQuery(&query); err != nil {
+		commonRouter.ToError(context, "参数错误")
+		return
+	}
+	result, err := h.service.GetLatestAiSelectionShopProduct(query)
+	if err == gorm.ErrRecordNotFound {
+		commonRouter.ToJson(context, nil, nil)
+		return
+	}
+	commonRouter.ToJson(context, result, err)
+}
+
+func (h *CollectHandler) upsertAiSelectionShopProducts(context *gin.Context) {
+	var req collectDTO.AiSelectionShopProductUpsertDTO
+	if err := context.ShouldBindJSON(&req); err != nil {
+		commonRouter.ToError(context, "参数错误")
+		return
+	}
+	result, err := h.service.UpsertAiSelectionShopProducts(&req)
+	commonRouter.ToJson(context, result, err)
 }
 
 func parseCollectID(context *gin.Context) (uint, bool) {

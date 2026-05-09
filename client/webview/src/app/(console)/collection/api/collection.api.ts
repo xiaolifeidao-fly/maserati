@@ -1,7 +1,16 @@
 "use client";
 
 import {
+  AiSelectionStrategyRecord,
+  type AiAutoCollectState,
   type CollectionWorkspaceNavigationAction,
+  type AiSelectionStrategyPayload,
+  type AiSelectionStrategyQuery,
+  type AiSelectionShopLinkImportResult,
+  type AiSelectionShopLinkRecord,
+  type AiSelectionShopProductListQuery,
+  type AiSelectionShopProductRecord,
+  type AiSelectionTaskState,
   type CollectStartResult,
   type CollectBatchListQuery,
   type CollectBatchPayload,
@@ -23,7 +32,7 @@ import { type ShopRecord } from "@eleapi/commerce/commerce.api";
 import { getCollectApi } from "@/utils/collect";
 import { getCommerceApi } from "@/utils/commerce";
 
-export { CollectBatchRecord, CollectRecordPreview, CollectionWorkspaceState };
+export { AiSelectionStrategyRecord, CollectBatchRecord, CollectRecordPreview, CollectionWorkspaceState };
 export { normalizeCollectSourceType };
 
 export type CollectRecordSource = "file" | "manual";
@@ -31,6 +40,8 @@ export type CollectRecordSource = "file" | "manual";
 export function normalizeCollectRecordSource(value?: string): CollectRecordSource {
   return String(value || "").trim().toLowerCase() === "file" ? "file" : "manual";
 }
+
+export type { AiAutoCollectState };
 
 export type {
   CollectBatchListQuery,
@@ -48,6 +59,13 @@ export type {
   ImportCollectBatchProgress,
   SharedCollectBatchRecord,
   StandardProductData,
+  AiSelectionStrategyPayload,
+  AiSelectionStrategyQuery,
+  AiSelectionShopLinkImportResult,
+  AiSelectionShopLinkRecord,
+  AiSelectionShopProductListQuery,
+  AiSelectionShopProductRecord,
+  AiSelectionTaskState,
 };
 
 export async function fetchCollectBatches(query: CollectBatchListQuery) {
@@ -86,6 +104,59 @@ export async function updateCollectBatch(id: number, payload: Partial<CollectBat
   return getCollectApi().updateCollectBatch(id, payload);
 }
 
+export async function fetchAiSelectionStrategies(query: AiSelectionStrategyQuery) {
+  return getCollectApi().listAiSelectionStrategies(query);
+}
+
+export async function createAiSelectionStrategy(payload: AiSelectionStrategyPayload) {
+  return getCollectApi().createAiSelectionStrategy(payload);
+}
+
+export async function updateAiSelectionStrategy(id: number, payload: Partial<AiSelectionStrategyPayload>) {
+  return getCollectApi().updateAiSelectionStrategy(id, payload);
+}
+
+export async function deleteAiSelectionStrategy(id: number) {
+  return getCollectApi().deleteAiSelectionStrategy(id);
+}
+
+export async function importAiSelectionShopLinks(
+  batchId: number,
+  payload: { strategyId: number; filePath: string },
+): Promise<AiSelectionShopLinkImportResult> {
+  return getCollectApi().importAiSelectionShopLinks(batchId, payload);
+}
+
+export async function fetchAiSelectionShopLinks(batchId: number, strategyId: number): Promise<AiSelectionShopLinkRecord[]> {
+  return getCollectApi().listAiSelectionShopLinks(batchId, strategyId);
+}
+
+export async function startAiSelectionTask(batchId: number, payload: { strategyId: number }): Promise<AiSelectionTaskState> {
+  return getCollectApi().startAiSelectionTask(batchId, payload);
+}
+
+export async function stopAiSelectionTask(): Promise<AiSelectionTaskState> {
+  return getCollectApi().stopAiSelectionTask();
+}
+
+export async function fetchAiSelectionTaskState(): Promise<AiSelectionTaskState> {
+  return getCollectApi().getAiSelectionTaskState();
+}
+
+export async function fetchAiSelectionShopProducts(
+  query: AiSelectionShopProductListQuery,
+): Promise<{ total: number; data: AiSelectionShopProductRecord[] }> {
+  return getCollectApi().listAiSelectionShopProducts(query);
+}
+
+export async function deleteAiSelectionShopProduct(id: number): Promise<{ deleted: boolean }> {
+  return getCollectApi().deleteAiSelectionShopProduct(id);
+}
+
+export async function subscribeAiSelectionTaskChanged(callback: (state: AiSelectionTaskState) => void) {
+  return getCollectApi().onAiSelectionTaskChanged(callback);
+}
+
 export async function deleteCollectBatch(id: number) {
   return getCollectApi().deleteCollectBatch(id);
 }
@@ -108,6 +179,22 @@ export async function cancelCollectShare(id: number) {
 
 export async function startCollection(batchId: number) {
   return getCollectApi().startCollection(batchId) as Promise<CollectStartResult>;
+}
+
+export async function startAiCollectData(batchId: number): Promise<AiAutoCollectState> {
+  return getCollectApi().startAiCollectData(batchId) as Promise<AiAutoCollectState>;
+}
+
+export async function stopAiAutoCollect(): Promise<AiAutoCollectState> {
+  return getCollectApi().stopAiAutoCollect() as Promise<AiAutoCollectState>;
+}
+
+export async function fetchAiAutoCollectState(): Promise<AiAutoCollectState> {
+  return getCollectApi().getAiAutoCollectState() as Promise<AiAutoCollectState>;
+}
+
+export async function subscribeAiAutoCollectStateChanged(callback: (state: AiAutoCollectState) => void) {
+  return getCollectApi().onAiAutoCollectStateChanged(callback);
 }
 
 export async function startPxxCollection(batchId: number) {

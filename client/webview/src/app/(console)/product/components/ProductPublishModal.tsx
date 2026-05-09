@@ -371,7 +371,7 @@ export function ProductPublishModal({
       }
       setCollectBatches(nextBatches);
     }).catch((error) => {
-      if (!cancelled) message.error(error instanceof Error ? error.message : "加载采集批次失败");
+      if (!cancelled) message.error(error instanceof Error ? error.message : "加载选品批次失败");
     });
 
     return () => { cancelled = true; };
@@ -836,10 +836,10 @@ export function ProductPublishModal({
     setPriceAmountInput(formatEditableNumber(DEFAULT_PUBLISH_SETTINGS.floatAmount));
   };
 
-  // 第二步 → 第三步：保存价格设置，拉取喜欢的采集记录并生成预览队列
+  // 第二步 → 第三步：保存价格设置，拉取喜欢的选品记录并生成预览队列
   const handleConfirmPriceAndNext = async () => {
     if (!selectedBatch) {
-      message.warning("请先选择采集批次");
+      message.warning("请先选择选品批次");
       return;
     }
     if (!selectedTargetShopId) {
@@ -859,7 +859,7 @@ export function ProductPublishModal({
     try {
       const queue = await loadFavoriteQueue(selectedBatch.id, selectedTargetShopId, selectedBatch.name);
       if (queue.length === 0) {
-        message.warning("该批次暂无关注（喜欢）的采集记录，请先在采集页面标记喜欢后再发布");
+        message.warning("该批次暂无关注（喜欢）的选品记录，请先在选品页面标记喜欢后再发布");
         return;
       }
       setRestoredFromCenter(false);
@@ -868,7 +868,7 @@ export function ProductPublishModal({
       setStep4Phase("preview");
       setCurrentStep(4);
     } catch (error) {
-      message.error(error instanceof Error ? error.message : "加载采集记录失败");
+      message.error(error instanceof Error ? error.message : "加载选品记录失败");
     } finally {
       setFetchingFavorites(false);
     }
@@ -1081,13 +1081,13 @@ export function ProductPublishModal({
     try {
       sourceShop = await fetchShop(selectedBatch.shopId);
     } catch (error) {
-      message.error(error instanceof Error ? error.message : "加载采集店铺失败");
+      message.error(error instanceof Error ? error.message : "加载选品店铺失败");
       return;
     }
 
     const sourceType = collectSourceTypeToPublishSourceType(normalizeCollectSourceType(sourceShop?.platform));
     if (!sourceType) {
-      message.error("当前采集批次来源平台暂不支持发布");
+      message.error("当前选品批次来源平台暂不支持发布");
       return;
     }
 
@@ -1636,15 +1636,15 @@ export function ProductPublishModal({
 
           {currentStep === 1 && (
             <div>
-              <div className="manager-panel-title" style={{ marginBottom: 12 }}>选择采集批次</div>
+              <div className="manager-panel-title" style={{ marginBottom: 12 }}>选择选品批次</div>
               {!isCollectionEntry ? (
                 <div className="manager-muted" style={{ marginBottom: 20, fontSize: 13 }}>
-                  当前仅支持按采集批次发起发布。
+                  当前仅支持按选品批次发起发布。
                 </div>
               ) : null}
               <Select
                 value={selectedBatchId || undefined}
-                placeholder="请选择要发布的采集批次"
+                placeholder="请选择要发布的选品批次"
                 onChange={(v) => setSelectedBatchId(Number(v ?? 0))}
                 options={collectBatches.map((b) => ({
                   label: `${b.name}  ·  ${shopNameMap.get(b.shopId) ?? `#${b.shopId}`}  ·  共 ${b.collectedCount ?? 0} 条`,
@@ -1664,7 +1664,7 @@ export function ProductPublishModal({
                 <div className="publish-info-card" style={{ marginTop: 20 }}>
                   <Descriptions size="small" column={2} colon>
                     <Descriptions.Item label="批次名称">{selectedBatch.name}</Descriptions.Item>
-                    <Descriptions.Item label="总采集数">
+                    <Descriptions.Item label="总选品数">
                       {batchStatsLoading
                         ? "统计中..."
                         : batchStatsMap[selectedBatch.id] != null
@@ -1943,7 +1943,7 @@ export function ProductPublishModal({
                       <Descriptions.Item label="品牌配置">
                         {priceSettings.brandMode === "none" ? "无品牌" : "跟随原商品"}
                       </Descriptions.Item>
-                      <Descriptions.Item label="采集总数">
+                      <Descriptions.Item label="选品总数">
                         {selectedBatchRepublishStatsLoading
                           ? "正在统计喜欢的商品..."
                           : `${showBatchHistory ? (selectedBatchRepublishStats?.totalCount ?? runningPublishStats.total) : runningPublishStats.total} 条`}
@@ -2201,7 +2201,7 @@ function normalizeShopUsage(shopUsage: string) {
   if (normalized === "PUBLISH" || normalized === "发布") {
     return "PUBLISH";
   }
-  if (normalized === "COLLECT" || normalized === "采集") {
+  if (normalized === "COLLECT" || normalized === "采集" || normalized === "选品") {
     return "COLLECT";
   }
   return normalized;

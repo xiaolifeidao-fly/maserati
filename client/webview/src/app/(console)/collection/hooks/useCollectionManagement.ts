@@ -60,7 +60,7 @@ export function useCollectionManagement() {
     if (record?.appUserId) {
       return record.appUserId;
     }
-    throw new Error("未找到店铺对应的 appUserId，无法提交采集任务");
+    throw new Error("未找到店铺对应的 appUserId，无法提交选品任务");
   };
 
   const saveCollection = async (
