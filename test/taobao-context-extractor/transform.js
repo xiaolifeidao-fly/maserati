@@ -28,11 +28,51 @@ function pickFirst(...values) {
   return "";
 }
 
+// Taobao encrypts prices as [keyId#seq#base64Data#].
+// keyId is embedded in the price field itself and used directly as the XOR key.
+function decryptTbEncryptedPrice(text) {
+  const match = text.match(/^\[([^#\]]+)#\d+#([A-Za-z0-9+/]+=*)#\]$/);
+  if (!match) {
+    return null;
+  }
+  try {
+    const keyId = match[1];
+    const base64Data = match[2];
+    const binaryStr = atob(base64Data);
+    const plainChars = [];
+    for (let i = 0; i < binaryStr.length; i++) {
+      plainChars.push(String.fromCharCode(binaryStr.charCodeAt(i) ^ keyId.charCodeAt(i % keyId.length)));
+    }
+    const plain = plainChars.join("").replace(/[^\d.]/g, "");
+    const price = parseFloat(plain);
+    if (!isFinite(price)) {
+      return null;
+    }
+    return price.toFixed(2);
+  } catch (err) {
+    console.error("[decryptTbEncryptedPrice] failed, text:", text, "error:", err);
+    return null;
+  }
+}
+
 function normalizePriceText(value) {
   const text = trimString(value);
   if (!text) {
     return "";
   }
+
+  if (text.startsWith("[") && text.includes("#")) {
+    try {
+      const decrypted = decryptTbEncryptedPrice(text);
+      if (decrypted !== null) {
+        return decrypted;
+      }
+    } catch (err) {
+      console.error("[normalizePriceText] decryptTbEncryptedPrice threw:", err, "value:", text);
+    }
+    return "0.00";
+  }
+
   if (/^\d+$/.test(text)) {
     return (Number(text) / 100).toFixed(2);
   }

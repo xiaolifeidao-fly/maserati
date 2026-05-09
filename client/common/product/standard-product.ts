@@ -75,9 +75,49 @@ function normalizeImageUrl(url: unknown): string {
   return text;
 }
 
+// Taobao encrypts prices as [keyId#seq#base64Data#].
+// keyId is embedded in the price field itself and used directly as the XOR key.
+function decryptTbEncryptedPrice(text: string): string | null {
+  const match = text.match(/^\[([^#\]]+)#\d+#([A-Za-z0-9+/]+=*)#\]$/);
+  if (!match) {
+    return null;
+  }
+  try {
+    const [, keyId, base64Data] = match;
+    const keyBytes = Buffer.from(keyId, "utf8");
+    const cipherBytes = Buffer.from(base64Data, "base64");
+    const plainBytes = Buffer.alloc(cipherBytes.length);
+    for (let i = 0; i < cipherBytes.length; i++) {
+      plainBytes[i] = cipherBytes[i] ^ keyBytes[i % keyBytes.length];
+    }
+    const plain = plainBytes.toString("utf8").replace(/[^\d.]/g, "");
+    const price = parseFloat(plain);
+    if (!Number.isFinite(price)) {
+      return null;
+    }
+    return price.toFixed(2);
+  } catch (err) {
+    console.error("[decryptTbEncryptedPrice] failed, text:", text, "error:", err);
+    return null;
+  }
+}
+
 function normalizePrice(value: unknown): string {
   const text = String(value || "").trim();
   if (!text) return "";
+
+  if (text.startsWith("[") && text.includes("#")) {
+    try {
+      const decrypted = decryptTbEncryptedPrice(text);
+      if (decrypted !== null) {
+        return decrypted;
+      }
+    } catch (err) {
+      console.error("[normalizePrice] decryptTbEncryptedPrice threw:", err, "value:", text);
+    }
+    return "0.00";
+  }
+
   if (/^\d+$/.test(text)) {
     return (Number(text) / 100).toFixed(2);
   }
