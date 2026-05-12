@@ -1,17 +1,16 @@
-# AI 运营机器人 — 总体设计文档
+# AI 运营机器人 - 基于运行实例的队列管控设计
 
-## 一、系统目标
+## 一、设计目标
 
-构建一个**全自动化的电商运营机器人系统**：
+本设计用于管理一批电商运营机器人，机器人在客户端 Electron 内运行 Playwright，服务端负责创建运行实例、生成 Redis 队列、调度任务、记录状态、处理超时和人工介入。
 
-- **定时监控**多个店铺，发现新商品
-- **自动采集**新商品数据
-- **自动发布**到目标店铺
-- 客户端运行 Playwright + 本地网络环境 + 设备指纹
-- 服务端集中编排、调度、容错、观测
-- **支持人工介入**：流程中遇到验证码、风控等阻塞时自动转人工
+核心目标：
 
-支持规模：**几百个客户端机器人并发运行**。
+- 一个机器人运行实例内，同一种逻辑运行单元同一时间只能执行一个任务。
+- 机器人任务支持监控、采集、发布三类阶段。
+- 客户端可崩溃、重启、恢复，任务不能因为进程异常永久丢失。
+- 人工介入任务可以弹给当前登录用户处理，处理完成后机器人继续执行。
+- 服务端统一管理运行实例和 Redis 队列，客户端只根据运行实例主动拉取任务并执行。
 
 ---
 
@@ -19,1246 +18,1111 @@
 
 | 原则 | 含义 |
 |---|---|
-| **服务端做大脑，客户端做手脚** | 编排、调度、状态、可靠性都在服务端；客户端只负责执行 Playwright 操作 |
-| **机器人 = 1 源账号 + 1 目标店铺** | 一一绑定，简化路由；配置在服务端 |
-| **机器人就是一个 ID** | 客户端发版不带机器人特定逻辑，按 robotId 从服务端拉配置 |
-| **采集数据本地存** | 不含图片视频，纯结构化数据存 client 本地 SQLite；服务端只持有元数据 |
-| **任务粘机器人** | 同商品的 monitor→collect→publish 必须落在同一机器人（共享登录态、本地数据）|
-| **服务端无业务状态 + Redis 单点状态** | 服务端进程可重启，状态全在 Redis/DB |
-| **客户端可崩溃** | 客户端死了重启后能从断点继续，所有任务有 lease + 超时回收 |
-| **WebSocket 长连接通信** | 服务端可主动推任务、推命令；客户端不轮询 |
-| **客户端 = 机器人 + 操作员双角色** | 同一个 Electron 进程既跑 Playwright 机器人，也是操作员的人工任务工作台；一个登录身份一个 WS 连接 |
-| **阻塞即转人工** | 任何无法程序化解决的阻塞统一抽象为 Blocker，弹屏到任一在线操作员的客户端 |
-| **任务粘合作业窗口** | 同一 (robot, taskType) 阻塞未解前禁止派发新任务（Playwright 会话被占用，新任务也无处可去）|
+| 服务端管理生命周期 | 机器人启动、停止、暂停、队列创建、队列删除、状态流转都由服务端统一管理 |
+| 客户端执行具体动作 | 客户端负责 Playwright、SQLite、本地账号环境、截图、人工弹屏 UI |
+| 运行实例是调度核心 | 任务队列不直接绑定机器人配置，而是绑定机器人运行实例 ID |
+| 同类型逻辑单元串行 | 同一 runId 下，同一 workerType 任意时刻只能有一个 active task |
+| 共享资源按资源锁串行 | 跨 workerType 可以并行，但浏览器 profile、账号、店铺、SQLite 等共享资源必须加资源锁 |
+| 队列分阶段 | 每个运行实例下有监控队列、采集队列、发布队列 |
+| 监控队列可延迟 | 监控任务天然是定时任务，适合使用 Redis ZSet 延迟队列 |
+| 任务主动拉取 | 客户端逻辑单元主动长轮询/短轮询服务端获取任务，不依赖服务端直推 |
+| 人工任务独立但占用对应逻辑单元 | 风控、验证码、短信等阻塞进入人工任务工作台，但原任务所属 workerType 仍保持占用 |
+| 服务端状态可恢复 | Redis 存运行时状态，MySQL 存配置、实例、任务历史和人工任务 |
+| 客户端本地兜底互斥 | 即使服务端误派，客户端也必须对 runId + workerType 加本地 mutex，避免同类型逻辑单元并发 |
 
 ---
 
-## 三、系统架构
+## 三、核心概念
 
-```
-                    ┌─────────────────────────────────────┐
-                    │            Go 服务端                │
-                    │                                     │
-   ┌────────────┐   │  ┌─────────────────────────────┐    │
-   │ Scheduler  │──▶│  │   Orchestrator              │    │
-   │ (cron)     │   │  │   - 任务链派发              │    │
-   └────────────┘   │  │   - 失败→DLQ                │    │
-                    │  │   - 商品状态机              │    │
-                    │  └─────────────┬───────────────┘    │
-                    │                │                    │
-                    │  ┌─────────────▼──────────────┐     │
-                    │  │  Queue Mgr (Redis)         │     │
-                    │  └─────────────┬──────────────┘     │
-                    │                │                    │
-                    │  ┌─────────────▼─────────────────┐  │
-                    │  │       WebSocket Hub           │  │
-                    │  │  ┌─────────────────────────┐  │  │
-                    │  │  │  Operator Connections   │  │  │
-                    │  │  │  (operatorId → conn,    │  │  │
-                    │  │  │   robotId → operatorId) │  │  │
-                    │  │  └─────────────────────────┘  │  │
-                    │  └──────┬────────────────┬───────┘  │
-                    │         │                │          │
-                    │  ┌──────▼────────┐  ┌────▼──────┐   │
-                    │  │ Lease Sweeper │  │ Human Task│   │
-                    │  │ - running     │  │ Dispatcher│   │
-                    │  │   timeout     │  │ + Reclaim │   │
-                    │  │ - suspended   │  │   Pool    │   │
-                    │  │   超时回收     │  └───────────┘   │
-                    │  └───────────────┘                  │
-                    └──────┬──────────────────────────────┘
-                           │
-                           │ 单条 WS 连接（双角色）
-                           │
-        ┌──────────────────┼──────────────────────────────┐
-        ▼                  ▼                              ▼
-  ┌─────────────┐    ┌─────────────┐                ┌─────────────┐
-  │ 操作员 A    │    │ 操作员 B    │     ......     │ 操作员 N    │
-  │  Electron   │    │  Electron   │                │  Electron   │
-  │ ┌─────────┐ │    │ ┌─────────┐ │                │ ┌─────────┐ │
-  │ │ Robot   │ │    │ │ Robot   │ │                │ │ Robot   │ │
-  │ │ Runtime │ │    │ │ Runtime │ │                │ │ Runtime │ │
-  │ │ Playwrgt│ │    │ │ Playwrgt│ │                │ │ Playwrgt│ │
-  │ │ +SQLite │ │    │ │ +SQLite │ │                │ │ +SQLite │ │
-  │ ├─────────┤ │    │ ├─────────┤ │                │ ├─────────┤ │
-  │ │ 操作员  │ │    │ │ 操作员  │ │                │ │ 操作员  │ │
-  │ │ 工作台  │ │    │ │ 工作台  │ │                │ │ 工作台  │ │
-  │ │ 弹屏 UI │ │    │ │ 弹屏 UI │ │                │ │ 弹屏 UI │ │
-  │ └─────────┘ │    │ └─────────┘ │                │ └─────────┘ │
-  └─────────────┘    └─────────────┘                └─────────────┘
-       管 N 个机器人      管 N 个机器人                    管 N 个机器人
-       接 任意机器人      接 任意机器人                    接 任意机器人
-       的弹屏             的弹屏                          的弹屏
-```
+### 3.1 机器人配置 RobotConfig
 
----
+机器人配置是静态业务配置，描述一个机器人应该如何运行。
 
-## 四、核心概念与数据模型
-
-### 4.1 实体定义
-
-| 实体 | 说明 |
-|---|---|
-| **Operator** | 操作员 = 登录身份；一人一个 Electron 客户端；本节是 V1 的唯一终端形态 |
-| **Robot** | 一个机器人单位，绑定一个采集账号 + 一个目标店铺；归属某个 Operator，运行在该 Operator 的 Electron 内 |
-| **Task** | 一个最小执行单元（monitor / collect / publish）|
-| **Lease** | 任务被某个客户端"租用"的凭证，带 TTL 和 state |
-| **TaskChain** | 由编排器串起来的任务链路（monitor→collect→publish）|
-| **Blocker** | 流程中需要人工介入的阻塞点（验证码、风控等）|
-| **HumanTask** | 一个待解决的 Blocker；自动派发给任一在线 Operator，超时后回到待认领池 |
-
-### 4.2 Task 状态机
-
-```
-                          ┌─────────────────────┐
-                          ▼                     │
-PENDING ──▶ QUEUED ──▶ RUNNING ──ack──▶ SUCCESS │
-                          │                     │
-                          │intervention_required│
-                          ▼                     │
-                      SUSPENDED ────resolved────┘
-                          │
-                          │ human_unable / human_timeout
-                          ▼
-                       FAILED ──▶ DLQ
-                          ▲
-              fail(可重试)│   fail(不可重试)
-                          │
-RUNNING ──programmatic────┴─────────────▶ DLQ
-   fail
-```
-
-### 4.3 Redis Key 设计
-
-```
-# 待派发任务队列（每机器人、每类型一条）
-queue:robot:{robotId}:monitor       → List<TaskJSON>
-queue:robot:{robotId}:collect       → List<TaskJSON>
-queue:robot:{robotId}:publish       → List<TaskJSON>
-
-# 派发通知（pubsub）
-channel:queue-events                → "robot:{robotId}:{type}"
-
-# 在途任务（lease 期间）
-lease:{leaseId}                     → Hash { taskId, robotId, type, payload,
-                                              state, attempts, expiresAt,
-                                              assignedAt }
-                                     state: "running" | "suspended"
-lease:expiry-index                  → ZSet  member=leaseId, score=expiresAt
-
-# 在线操作员（客户端粒度，包含其 robotId 列表）
-operator:online                     → Set<operatorId>
-operator:{operatorId}:status        → Hash { connectedAt, version, instanceId,
-                                              busy, currentHumanTaskId,
-                                              robotIds (JSON 数组) }
-
-# robotId → operatorId 路由表（hub 派发用）
-robot:owner                         → Hash { robotId → operatorId }
-
-# 机器人冻结（阻塞期间不再派发该 robot+type 的新任务）
-frozen:{robotId}:{type}             → String  humanTaskId  (无 TTL，resolve 时删除)
-
-# 人工任务待认领池（自动派发超时后回到这里，操作员可手动认领）
-human-task:pending                  → ZSet  member=humanTaskId, score=createdAt
-
-# 死信队列
-dlq:{type}                          → List<TaskJSON>
-
-# 幂等键
-idempotency:{sourceProductId}:{targetShopId} → taskId
-```
-
-### 4.4 Task 数据结构
-
-```typescript
-{
-  taskId: "uuid",
-  type: "monitor" | "collect" | "publish",
-  robotId: "robot-001",
-  payload: {
-    // monitor: { lastChecked }
-    // collect: { sourceProductId, sourceUrl }
-    // publish: { sourceProductId }    // 数据在客户端本地按 productId 索引
-  },
-  attempts: 0,
-  maxAttempts: 3,
-  createdAt: 1715000000,
-  parentTaskId: "uuid-or-null",
-  traceId: "uuid",
-  idempotencyKey: "..."
-}
-```
-
-### 4.5 MySQL 持久化表
+典型字段：
 
 ```sql
--- 操作员（= 客户端登录身份）
-operators (
-  id              VARCHAR(64) PRIMARY KEY,
-  username        VARCHAR(64) UNIQUE,
-  password_hash   VARCHAR(255),
-  display_name    VARCHAR(64),
-  status          ENUM('active','disabled'),
-  capabilities    JSON,                           -- 能处理哪些 blocker_type
-  created_at, updated_at
-)
-
--- 机器人
-robots (
-  id              VARCHAR(64) PRIMARY KEY,
-  name            VARCHAR(255),
-  operator_id     VARCHAR(64),                    -- 归属操作员（其 Electron 运行此 robot）
-  status          ENUM('active','paused','disabled'),
-  source_account  VARCHAR(255),
-  target_shop_id  VARCHAR(64),
-  config_json     JSON,
-  created_at, updated_at,
-  INDEX (operator_id)
-)
-
--- 商品（编排器看板的核心数据）
-products (
-  id                    VARCHAR(64) PRIMARY KEY,
-  robot_id              VARCHAR(64),
-  source_product_id     VARCHAR(128),
-  source_url            TEXT,
-  status                ENUM('monitored','collecting','collected',
-                            'publishing','published','failed'),
-  target_product_id     VARCHAR(128) NULL,
-  last_error            TEXT NULL,
-  discovered_at         DATETIME,
-  collected_at          DATETIME NULL,
-  published_at          DATETIME NULL,
-  UNIQUE KEY (robot_id, source_product_id)
-)
-
--- 任务历史（审计、复盘）
-tasks_history (
-  task_id         VARCHAR(64) PRIMARY KEY,
-  type            VARCHAR(32),
-  robot_id        VARCHAR(64),
-  status          VARCHAR(32),
-  payload_json    JSON,
-  result_json     JSON,
-  attempts        INT,
-  error           TEXT,
-  started_at      DATETIME,
-  finished_at     DATETIME,
-  trace_id        VARCHAR(64),
-  INDEX (robot_id, type, status),
-  INDEX (trace_id)
-)
-
--- 人工任务
-human_tasks (
-  id                VARCHAR(64) PRIMARY KEY,
-  robot_lease_id    VARCHAR(64),
-  robot_id          VARCHAR(64),
-  blocker_type      VARCHAR(32),
-  status            ENUM('pending','assigned','resolved','abandoned'),
-                                                    -- pending: 待认领（含超时回池）
-                                                    -- assigned: 已派给某操作员，1min 计时中
-                                                    -- resolved: 已解决
-                                                    -- abandoned: 操作员标记无法处理
-  payload_ref       VARCHAR(255),                   -- 截图 OSS ref
-  context_json      JSON,
-  assignee_id       VARCHAR(64) NULL,               -- 当前认领的操作员
-  assigned_at       DATETIME NULL,
-  dispatch_expires_at DATETIME NULL,                -- 当前派发的 SLA 截止（如 1min）
-  dispatch_count    INT DEFAULT 0,                  -- 累计派发/认领次数
-  resolved_at       DATETIME NULL,
-  resolution_json   JSON NULL,
-  created_at        DATETIME,
-  trace_id          VARCHAR(64),
-  INDEX (status, dispatch_expires_at),
-  INDEX (assignee_id),
-  INDEX (robot_id, status)
+robot_configs (
+  id                  VARCHAR(64) PRIMARY KEY,
+  name                VARCHAR(128),
+  status              ENUM('active','paused','disabled'),
+  monitor_source_type  VARCHAR(32),      -- 监控来源类型：店铺 / 搜索 / 其他来源
+  monitor_account_id   VARCHAR(64),      -- 监控采集账号 ID：用于发现商品列表
+  collect_account_id   VARCHAR(64),      -- 采集商品账号 ID：用于进入详情页采集商品数据
+  publish_shop_id      VARCHAR(64),      -- 发布店铺 ID：目标发布店铺
+  config_json          JSON,
+  created_at           DATETIME,
+  updated_at           DATETIME
 )
 ```
 
-**数据划分原则：**
+说明：
 
-| 数据 | 存哪 | 备注 |
-|---|---|---|
-| 采集到的原始字段（标题、详情、SKU、价格表）| **客户端本地 SQLite** | 按 productId 索引 |
-| 商品状态元数据 | 服务端 MySQL | 编排器和看板要用 |
-| 任务历史（traceId、耗时、结果摘要）| 服务端 MySQL | 审计、复盘 |
-| 阻塞现场（截图、错误堆栈）| 服务端 OSS | 人工介入要用 |
-| 运行时队列、lease | Redis | 重启后从 MySQL 恢复 |
+- 配置不等于正在运行。
+- 配置绑定的是业务资源，不绑定当前登录用户；当前用户只体现在 robot_runs.app_user_id 和人工任务 assignee_app_user_id。
+- 一个配置可以多次启动，形成多个历史运行实例。
+- V1 建议限制同一个 robot_config 同一时间只能有一个 active 运行实例。
 
-**客户端本地数据丢失的兜底：**
+### 3.2 机器人运行实例 RobotRun
 
-publish 任务执行第一步 client 检查本地是否有该 productId 的采集数据。没有 → `task_fail { reason: "local_data_missing", retryable: false, recoveryAction: "recollect" }`。编排器把商品状态回退到 `monitored`，重新入 collect 队列。
+机器人运行实例代表一次真实启动的机器人运行过程。
+
+```sql
+robot_runs (
+  id                  VARCHAR(64) PRIMARY KEY,
+  robot_config_id      VARCHAR(64),
+  app_user_id          VARCHAR(64),      -- 归属 app-api.app_user
+  status              ENUM('starting','running','paused','stopping','stopped','failed'),
+  queue_namespace      VARCHAR(128),     -- robot-run:{runId}
+  current_tasks_json   JSON NULL,        -- { monitor:{taskId,leaseId}, collect:{...}, publish:{...} }
+  started_at           DATETIME,
+  stopped_at           DATETIME NULL,
+  heartbeat_at         DATETIME NULL,    -- 最近任一 worker 心跳
+  stop_reason          VARCHAR(255) NULL,
+  created_at           DATETIME,
+  updated_at           DATETIME,
+  INDEX (robot_config_id, status),
+  INDEX (app_user_id, status)
+)
+```
+
+说明：
+
+- 队列名绑定 `runId`，不是直接绑定 `robot_config_id`。
+- 启动机器人时创建运行实例和对应队列。
+- 停止机器人时暂停队列处理，释放各 workerType 锁，清理或归档队列。
+- 暂停机器人时保留队列数据，只停止继续取任务。
+
+### 3.3 监控运行实例 MonitorRun
+
+监控运行实例用于描述一次监控周期或一组监控来源。
+
+```sql
+monitor_runs (
+  id                  VARCHAR(64) PRIMARY KEY,
+  robot_run_id         VARCHAR(64),
+  robot_config_id      VARCHAR(64),
+  source_type          VARCHAR(32),
+  status              ENUM('pending','running','success','failed','cancelled'),
+  cursor_json          JSON NULL,
+  started_at           DATETIME NULL,
+  finished_at          DATETIME NULL,
+  created_at           DATETIME,
+  updated_at           DATETIME,
+  INDEX (robot_run_id, status)
+)
+```
+
+说明：
+
+- 监控运行实例可以产生多个监控消息。
+- 监控消息发现新商品后，再产生采集消息。
+- 如果不同来源处理逻辑不同，服务端可以按 `source_type` 选择不同的监控消息生产器。
+
+### 3.4 运行实例监控店铺 RobotMonitorShop
+
+`robot_monitor_shop` 用于记录机器人运行实例启动时，客户端上传的本次监控店铺列表。它是运行实例级别的快照，不是全局店铺配置。
+
+当 `robot_configs.monitor_source_type = "shop"` 时，客户端启动 robot_run 后需要把当前要监控的店铺列表上传给服务端，服务端写入 `robot_monitor_shop`。
+
+```sql
+robot_monitor_shop (
+  id                  VARCHAR(64) PRIMARY KEY,
+  robot_run_id         VARCHAR(64),      -- 必须有，表示本次运行实例的监控店铺快照
+  robot_config_id      VARCHAR(64),
+  monitor_account_id   VARCHAR(64),      -- 本次监控使用的监控采集账号
+  shop_id              VARCHAR(64),      -- 平台侧店铺 ID，若没有可为空
+  shop_name            VARCHAR(255),
+  shop_url             TEXT,
+  status              ENUM('active','disabled'),
+  extra_json           JSON,
+  created_at           DATETIME,
+  updated_at           DATETIME,
+  INDEX (robot_run_id),
+  INDEX (robot_config_id),
+  INDEX (monitor_account_id),
+  UNIQUE KEY uk_run_shop (robot_run_id, shop_id)
+)
+```
+
+说明：
+
+- 同一个 robot_config 多次启动，会生成不同 robot_run_id，对应不同的监控店铺快照。
+- 如果店铺没有稳定 shop_id，可以把唯一约束调整为 `(robot_run_id, shop_url_hash)`。
+- monitor task 可以按 `robot_monitor_shop.id` 拆分为多个店铺监控任务。
 
 ---
 
-## 五、WebSocket 通信协议
+## 四、Redis 队列设计
 
-### 5.1 连接建立
+队列命名以机器人运行实例为命名空间：
 
-每个 Electron 客户端**只建立一条 WS 连接**，按 Operator 身份认证，hello 时声明所属的 robotId 列表和操作员能力。
+```text
+# 运行实例状态
+robot-run:{runId}:state                 -> Hash
 
-```
-GET wss://api.example.com/ws
-Headers:
-  Authorization: Bearer <jwt>
-  X-Operator-ID: operator-001
-  X-Client-Version: 1.2.3
-```
+# 逻辑单元锁，一个 runId + workerType 同一时间只能有一个 active lease
+robot-run:{runId}:lock:monitor          -> leaseId
+robot-run:{runId}:lock:collect          -> leaseId
+robot-run:{runId}:lock:publish          -> leaseId
 
-服务端验签后接受，加入 Hub。**同一 operatorId 不允许并发连接，新连接踢旧。** 服务端从 DB 查 operator 名下的 robots，建立 `robotId → operatorId` 路由表，后续派任务时按这张表找连接。
+# 共享资源锁，只有任务声明需要用到该资源时才加
+resource-lock:browser-profile:{profileId} -> leaseId
+resource-lock:monitor-account:{accountId} -> leaseId
+resource-lock:collect-account:{accountId} -> leaseId
+resource-lock:publish-shop:{shopId}       -> leaseId
+resource-lock:local-sqlite:{runId}        -> leaseId
 
-### 5.2 客户端 ↔ 服务端 消息
+# 监控延迟队列
+queue:robot-run:{runId}:monitor:delay   -> ZSet<TaskJSON> score=runAt
 
-> 客户端是 Operator + Robot 双角色，所有消息走同一条 WS。
+# 监控就绪队列
+queue:robot-run:{runId}:monitor         -> List<TaskJSON>
 
-#### 服务端 → 客户端（机器人语义）
+# 采集队列
+queue:robot-run:{runId}:collect         -> List<TaskJSON>
 
-```jsonc
-{ "type": "welcome",  "serverTime": 171..., "config": { "heartbeatInterval": 30 } }
+# 发布队列
+queue:robot-run:{runId}:publish         -> List<TaskJSON>
 
-{ "type": "task_assign",
-  "leaseId": "lease-uuid",
-  "taskId": "task-uuid",
-  "taskType": "collect",
-  "payload": { ... },
-  "leaseTtl": 60,
-  "traceId": "..." }
+# lease
+lease:{leaseId}                         -> Hash
+lease:expiry-index                      -> ZSet member=leaseId score=expiresAt
 
-{ "type": "command",
-  "command": "stop_task" | "pause_robot" | "resume_robot"
-           | "reload_config" | "shutdown" | "abort_task",
-  "args": { ... } }
+# 暂停开关
+robot-run:{runId}:paused                -> String "1"
 
-{ "type": "intervention_resolved",
-  "leaseId": "...",
-  "resolution": { "status": "resolved", "data": {...} } }
+# 停止标记
+robot-run:{runId}:stopping              -> String "1"
 
-{ "type": "intervention_aborted",
-  "leaseId": "...",
-  "reason": "human_unable" | "timeout" }
+# 人工阻塞
+human-task:pending                      -> ZSet member=humanTaskId score=createdAt
+human-task:dispatch-expiry              -> ZSet member=humanTaskId score=expiresAt
 
-{ "type": "ping", "ts": 171... }
-```
-
-#### 客户端 → 服务端（机器人语义）
-
-```jsonc
-{ "type": "hello",
-  "operatorId": "operator-001",
-  "version": "1.2.3",
-  "robotIds": ["robot-001","robot-002"],                 // 本机要跑的机器人
-  "operatorCapabilities": ["captcha_text","sms_code",    // 能处理的 blocker 类型
-                           "risk_review","manual_decision"],
-  "resumingTasks": ["leaseId-1","leaseId-2"] }
-
-{ "type": "task_accepted", "leaseId": "..." }
-
-{ "type": "task_progress", "leaseId": "...", "percent": 60, "message": "..." }
-
-{ "type": "task_heartbeat", "leaseId": "..." }
-
-{ "type": "task_ack", "leaseId": "...", "result": { ... } }
-
-{ "type": "task_fail", "leaseId": "...", "reason": "...",
-  "retryable": true|false, "errorCode": "..." }
-
-{ "type": "intervention_required",
-  "leaseId": "...",
-  "blockerType": "captcha_text",
-  "prompt": "请识别图中字符",
-  "screenshotRef": "oss://bucket/key",
-  "context": { ... },
-  "options": [...] }
-
-{ "type": "pong", "ts": 171..., "busyLeases": [...] }
+# 死信队列
+dlq:monitor                             -> List<TaskJSON>
+dlq:collect                             -> List<TaskJSON>
+dlq:publish                             -> List<TaskJSON>
 ```
 
-### 5.3 客户端 ↔ 服务端 消息（操作员语义，同一条 WS）
+### 4.1 为什么队列绑定 runId
 
-#### 客户端 → 服务端
+你图里的设计是合理的：队列跟运行实例绑定，而不是跟机器人配置绑定。
 
-```jsonc
-{ "type": "operator_status", "status": "available" | "away" }       // 手动切忙/挂起
+好处：
 
-{ "type": "human_task_claim",  "taskId": "..." }                    // 从待认领池主动认领
+- 停止某个运行实例时，可以精确停止它所属的所有队列。
+- 历史运行和当前运行容易隔离。
+- 客户端重启后，可以根据 runId 恢复未完成任务。
+- 如果未来支持迁移到别的客户端运行，只需要重新绑定 runId 的 owner。
 
-{ "type": "human_task_resolve","taskId": "...", "resolution": {...} }
+需要注意：
 
-{ "type": "human_task_unable", "taskId": "...", "reason": "..." }   // → robot 任务 DLQ
-
-{ "type": "human_task_release","taskId": "..." }                    // 主动放回待认领池
-```
-
-#### 服务端 → 客户端
-
-```jsonc
-// 自动派发（1 min SLA，超时自动收回）
-{ "type": "human_task_assign",
-  "taskId": "...",
-  "robotId": "...",          // 该 robot 不一定在本客户端运行
-  "blockerType": "...",
-  "prompt": "...",
-  "screenshotUrl": "...",
-  "context": {...},
-  "options": [...],
-  "dispatchExpiresAt": 17... }
-
-// 自动派发超时被收回
-{ "type": "human_task_reclaim",
-  "taskId": "...",
-  "reason": "dispatch_timeout" | "robot_aborted" | "claimed_by_other" }
-
-// 待认领池变化通知（用于 UI 角标 / 列表更新）
-{ "type": "pending_pool_update",
-  "added": [...] | undefined,
-  "removed": [...] | undefined,
-  "count": 3 }
-```
+- 同一个 robot_config 不能同时创建两个 active run，否则仍然可能并发操作同一个账号或店铺。
+- 服务端启动机器人时必须先获取 `robot-config:{configId}:active-run-lock`。
 
 ---
 
-## 六、人工介入子系统
-
-### 6.1 Blocker 类型与 SLA
-
-每种 blocker 有两个 SLA：
-
-- **派发 SLA**：服务端把任务自动派给某个操作员后，该操作员必须在此期限内响应；超时则任务回到**待认领池**，所有在线操作员可主动认领。**不进 DLQ**。
-- **总暂停 SLA**：机器人任务进入 suspended 状态后的最长保护时间（避免 Playwright 会话无限期挂起）。超时由 Sweeper 强制 abort + DLQ。
-
-| 类型 | 触发场景 | 派发 SLA | 总暂停 SLA | V1? |
-|---|---|---|---|---|
-| `captcha_text`    | 图形验证码 | **1 min** | 30 min | ✅ |
-| `captcha_slider`  | 滑块验证码 | **1 min** | 30 min | V2（需远程接管或现场） |
-| `sms_code`        | 短信验证   | 5 min     | 15 min | ✅ |
-| `risk_review`     | 风控限流   | 5 min     | 2 h    | ✅ |
-| `manual_decision` | 业务分叉   | 5 min     | 2 h    | ✅ |
-| `login_required`  | Cookie 失效 | 10 min   | 2 h    | V2 |
-| `manual_takeover` | 兜底       | 10 min    | 1 h    | 部分 |
-
-SLA 参数从 config 表读取，可在线调整。
-
-### 6.2 Blocker payload 规范
+## 五、任务结构
 
 ```typescript
-interface InterventionRequired {
-  leaseId: string;
-  blockerType: string;
-  prompt: string;
-  screenshotRef?: string;
-  context: Record<string, unknown>;
-  options?: Array<{ value: string; label: string }>;
-}
-
-interface InterventionResolution {
-  leaseId: string;
-  status: "resolved" | "unable" | "abort";
-  data: Record<string, unknown>;
-}
-
-// 各类型 context / data 示例
-captcha_text:    context: { imageUrl: "..." }
-                 data:    { answer: "abc123" }
-
-sms_code:        context: { phone: "***1234", expectedLength: 6 }
-                 data:    { code: "445567" }
-
-risk_review:     context: { riskScore: 85, message: "..." }
-                 data:    { decision: "continue" | "abort" }
-
-manual_decision: context: { question: "继续发布吗？" }
-                 data:    { selected: "option_id" }
-```
-
-### 6.3 自动派发 + 超时回池 + 手动认领
-
-完整生命周期：
-
-```
-       intervention_required
-              │
-              ▼
-       创建 HumanTask (status=pending)
-       lease state=suspended
-       SET frozen:{robotId}:{type}
-       从 pending pool 移除（如已在）
-              │
-              ▼
-       ┌─────────────────────────────────────┐
-       │  Dispatcher 选一个空闲在线操作员    │
-       │  (capabilities 匹配 + busy=false +  │
-       │   last_active 升序)                 │
-       └─────────────────┬───────────────────┘
-                         │
-            ┌────────────┴────────────┐
-            │                         │
-       有匹配的操作员           无匹配的操作员
-            │                         │
-            ▼                         ▼
-       status=assigned          status=pending（无变化）
-       推 human_task_assign     广播 pending_pool_update
-       开始 1min 计时           等任一操作员手动 claim
-       operator.busy=true
-            │
-            ├────────────────────────────────────────────┐
-            │                                            │
-       1min 内 resolve                            1min 内未响应
-            │                                            │
-            ▼                                            ▼
-       清除 frozen flag                          status=pending
-       lease state=running                       operator.busy=false
-       推 intervention_resolved 给 robot         推 human_task_reclaim
-       robot 应用答案 → 继续任务                 加入 pending pool
-                                                 广播 pending_pool_update
-                                                       │
-                                                       ▼
-                                              其他操作员可手动 claim
-                                              （回到上面的 assigned 流程）
-```
-
-### 6.4 端到端时序图
-
-操作员 A 名下跑着 robot R1，R1 触发 captcha；操作员 B 闲着接到弹屏帮忙：
-
-```
-[Op A 的客户端]            [Server]            [Op B 的客户端]
-  R1 Playwright              │                       │
-  检测到 captcha             │                       │
-  截图 + 上下文              │                       │
-                             │                       │
-  ── intervention_required ▶ │                       │
-     { leaseId, ...}         │                       │
-                             │ • OSS 存截图         │
-  (Playwright 暂停)          │ • human_tasks 表 ins  │
-  (浏览器保持打开)            │ • lease→suspended    │
-                             │ • frozen flag SET     │
-                             │ • 选 Op B（空闲）    │
-                             │                       │
-                             │── human_task_assign ─▶│
-                             │   { 1min 截止 }      │
-                             │                       │ 弹屏 + 声音
-                             │                       │ Op B 看图填答案
-                             │   ◀── human_task_resolve
-                             │                       │
-                             │ • 写 status=resolved │
-                             │ • frozen 删除         │
-                             │ • lease→running       │
-                             │ • Op B.busy=false    │
-                             │                       │
-  ◀── intervention_resolved ─│                       │
-       { resolution }        │                       │
-                             │                       │
-  R1 应用答案到 captcha       │                       │
-  继续 collect 流程           │                       │
-  ── task_ack ──────────────▶│                       │
-```
-
-### 6.5 机器人冻结机制
-
-一旦 (robot, taskType) 有未解 blocker，冻结状态生效：
-
-| 谁来检查 | 何时检查 | 行为 |
-|---|---|---|
-| **Orchestrator** | enqueue 前 | 任务正常入队（保留顺序），但不调用 Hub.Send |
-| **Hub.Send** | 派发前 | 检查到 frozen → 把任务塞回队列头，不派发 |
-| **Sweeper** | running lease 重新入队时 | 检查 frozen → 入队但不主动 publish 事件 |
-| **Scheduler** | cron 触发新 monitor 时 | 检查 frozen → 跳过本次触发，不入队 |
-
-**解冻时机**：human_task 被 resolve → DEL frozen flag → 把队列里堆积的任务依次 Send 出去。
-
-**多个 blocker 在同一 (robot, type) 上并发？** 不可能。一个 type 的执行是串行的，同一时刻只会有一个 lease 在 suspended。frozen flag 是 String 单值，记录正在阻塞的 humanTaskId。
-
-### 6.6 操作员行为约束
-
-- **单操作员串行**：`busy=true` 期间不再自动派发新 human_task；其他在线操作员承接
-- **主动认领**：操作员在 UI 上看到待认领列表，点击 claim 即认领；服务端用 Redis `ZREM` 做原子检查，避免双重认领
-- **主动释放**：操作员可点击"放回"按钮，把当前 assigned 的任务放回 pending pool（不计为 unable）
-- **主动放弃**：操作员可点击"无法处理"按钮，机器人任务直接进 DLQ + 告警
-- **离线**：WS 断开 → 该操作员所有 assigned 状态的 human_task 立即放回 pending pool
-
-### 6.7 总暂停超时（Sweeper 兜底）
-
-若 human_task 在 **总暂停 SLA**（如 captcha 30 min）内一直没被任何操作员 resolve（无论是无人在线还是反复超时被回池）：
-
-1. Sweeper 标记 human_task status=abandoned
-2. 删除 frozen flag
-3. robot task → DLQ
-4. 通过 hub 给 R1 所在客户端发 `intervention_aborted` → R1 关闭浏览器、释放资源
-5. 触发紧急告警
-
-### 6.8 弹屏 UI 必备功能（在 Electron 内部实现）
-
-- 操作员上线/离开切换（影响是否接收自动派发）
-- 弹窗式呈现当前 assigned 任务（含截图、提示、各类型输入控件）
-- "解决 / 放回 / 无法处理" 三个动作按钮
-- 待认领池列表（角标 + 全屏视图）
-- 历史任务记录
-- 自动播放提示音
-- 1 min 倒计时显示
-
----
-
-## 七、端到端流程
-
-### 7.1 启动与首次连接
-
-```
-客户端                                服务端                Redis      MySQL
-   │                                    │                    │           │
-   │ 1. 启动 Electron 进程              │                    │           │
-   │ 2. 加载本地配置 (robotId, token)   │                    │           │
-   │                                    │                    │           │
-   │  3. WS 连接 ────────────────────▶  │                    │           │
-   │                                    │ 4. 验证 JWT        │           │
-   │                                    │ 5. 检查 robotId    │           │
-   │                                    │    若已在线，踢旧  │           │
-   │                                    │ 6. 加入 Hub        │           │
-   │                                    │ ─── SADD ─────────▶│           │
-   │  ◀──── welcome ────────────────────│                    │           │
-   │                                    │                    │           │
-   │  7. 发 hello (含 resumingTasks)    │                    │           │
-   │  ─────────────────────────────────▶│                    │           │
-   │                                    │ 8. 对账：          │           │
-   │                                    │   - 服务端有 lease │           │
-   │                                    │     客户端没认 →   │           │
-   │                                    │     重派给客户端   │           │
-   │                                    │   - 客户端声称在跑 │           │
-   │                                    │     服务端没了 →   │           │
-   │                                    │     命令 stop      │           │
-   │  ◀── task_assign (恢复) ───────────│                    │           │
-   │                                    │                    │           │
-   │  9. 进入稳态                       │                    │           │
-```
-
-### 7.2 完整任务链：监控→采集→发布
-
-```
-[服务端]                              [客户端 robot-001]
-    │                                       │
-    │ Scheduler 每 5min 触发                │
-    │ enqueue monitor → PUBLISH 通知        │
-    │ Hub 取队列、创建 lease                │
-    │                                       │
-    │ ──── task_assign(monitor) ──────────▶ │
-    │                                       │ 启动 Playwright
-    │ ◀──── task_accepted ────────────────  │ 登录店铺
-    │ ◀──── task_progress(50%) ───────────  │ 抓商品列表
-    │ ◀──── task_ack(result:{               │ 对比本地快照
-    │         newProducts:[p1,p2,p3]}) ──   │ 发现 3 个新品
-    │                                       │
-    │ Orchestrator:                         │
-    │   - products 表 insert 3 条           │
-    │     status=monitored                  │
-    │   - 为每个 enqueue collect task       │
-    │                                       │
-    │ ──── task_assign(collect, p1) ──────▶ │
-    │ ──── task_assign(collect, p2) ──────▶ │
-    │ ──── task_assign(collect, p3) ──────▶ │
-    │                                       │
-    │ ◀──── task_heartbeat (每30s) ────────  │
-    │ ◀──── task_ack(result:{ok}) ─────────  │ 数据存本地 SQLite
-    │ ◀──── task_ack(result:{ok}) ─────────  │
-    │ ◀──── task_ack(result:{ok}) ─────────  │
-    │                                       │
-    │ Orchestrator:                         │
-    │   - products status=collected         │
-    │   - 检查发布幂等键                    │
-    │   - enqueue publish task              │
-    │                                       │
-    │ ──── task_assign(publish, p1) ──────▶ │ 读本地 SQLite
-    │                                       │ 打开发布页
-    │                                       │ 填表 + 提交
-    │ ◀──── task_ack(result:{               │
-    │         targetProductId:"..."}) ────  │
-    │                                       │
-    │ Orchestrator:                         │
-    │   - products status=published         │
-    │   - 链路结束                          │
-```
-
-### 7.3 异常：客户端崩溃
-
-```
-[服务端]                              [客户端]
-    │                                    │
-    │ ──── task_assign(collect) ───────▶ │ 开始执行
-    │ ◀── task_accepted ─────────────────│
-    │                                    │
-    │  (一段时间后...)                   │ ✗ 进程崩溃
-    │                                    │
-    │ WS 心跳超时 (30s 无 pong)          │
-    │ Hub 检测到连接断开                 │
-    │   - 从 robot:online 移除           │
-    │   - 不立刻回收任务，等 lease 到期  │
-    │                                    │
-    │ Lease Sweeper (每 5s 跑)           │
-    │ ZRANGEBYSCORE lease:expiry-index   │
-    │ 过期 lease → state="running"       │
-    │   - attempts++                     │
-    │   - 如 < max: 重新入队             │
-    │   - 如 >= max: 进 DLQ + 告警       │
-    │                                    │
-    │                                    │ (重启)
-    │ ◀── WS 重连 + hello ──────────────│
-    │ 任务已重派（如客户端已重连）       │
-```
-
-### 7.4 异常：服务端重启
-
-```
-服务端进程重启 → Hub 内存丢失 → 所有 WS 连接断开
-                                    ↓
-                          客户端检测到 WS 关闭
-                                    ↓
-                          指数退避重连 (1s, 2s, 4s, 8s, 30s 封顶)
-                                    ↓
-                          重连后 hello 消息带 resumingTasks
-                                    ↓
-                          服务端从 Redis lease 表恢复状态
-                          → 仍在 lease TTL 内 → 不重派
-                          → 已过期 → Sweeper 已处理
-```
-
----
-
-## 八、关键流程伪代码
-
-### 8.1 服务端：Hub 派发
-
-```go
-type Hub struct {
-    conns      map[string]*Conn       // operatorId → conn
-    robotOwner map[string]string      // robotId → operatorId
-    mu         sync.RWMutex
-}
-
-func (h *Hub) SendToOperator(operatorId string, msg Message) error {
-    h.mu.RLock()
-    conn, ok := h.conns[operatorId]
-    h.mu.RUnlock()
-    if !ok {
-        return ErrOperatorOffline
-    }
-    return conn.WriteJSON(msg)
-}
-
-func (h *Hub) SendToOperatorOwningRobot(robotId string, msg Message) error {
-    h.mu.RLock()
-    operatorId, ok := h.robotOwner[robotId]
-    h.mu.RUnlock()
-    if !ok {
-        return ErrRobotUnassigned
-    }
-    return h.SendToOperator(operatorId, msg)
-}
-
-func (h *Hub) BroadcastToOperators(msg Message) {
-    h.mu.RLock()
-    defer h.mu.RUnlock()
-    for _, c := range h.conns {
-        _ = c.WriteJSON(msg)
-    }
-}
-
-func (h *Hub) OnTaskEnqueued(queueKey string) {
-    robotId, taskType := parseQueueKey(queueKey)
-
-    // 冻结检查：blocker 未解前不派发该 (robot, type)
-    if rdb.Exists(ctx, frozenKey(robotId, taskType)).Val() > 0 {
-        return
-    }
-
-    task := popOneTask(queueKey)
-    if task == nil { return }
-
-    leaseId := createLease(task, "running", 60*time.Second)
-    err := h.SendToOperatorOwningRobot(robotId, TaskAssignMsg{
-        LeaseId: leaseId, Task: task, LeaseTtl: 60,
-    })
-    if err != nil {
-        rdb.LPush(queueKey, task)
-        deleteLease(leaseId)
-    }
+interface RobotTask {
+  taskId: string;
+  runId: string;
+  robotConfigId: string;
+  type: "monitor" | "collect" | "publish";
+  priority: number;
+  resourceLocks: string[];
+  payload: Record<string, unknown>;
+  attempts: number;
+  maxAttempts: number;
+  parentTaskId?: string;
+  traceId: string;
+  idempotencyKey?: string;
+  createdAt: number;
+  runAt?: number;
 }
 ```
 
-### 8.2 服务端：Sweeper
+`resourceLocks` 由服务端生成任务时写入，用来描述该任务会占用哪些不可并发资源。workerType 锁解决“同类型只能跑一个”，resourceLocks 解决“不同类型但共享资源不能并发”。
 
-```go
-func sweepStalled() {
-    for range time.Tick(5 * time.Second) {
-        now := time.Now().Unix()
-        expired, _ := rdb.ZRangeByScore(ctx, "lease:expiry-index", &redis.ZRangeBy{
-            Min: "0", Max: fmt.Sprint(now), Count: 100,
-        }).Result()
-
-        for _, leaseId := range expired {
-            data := rdb.HGetAll(ctx, "lease:"+leaseId).Val()
-            state := data["state"]
-            task := unmarshalTask(data["task"])
-
-            switch state {
-            case "running":
-                task.Attempts++
-                if task.Attempts >= task.MaxAttempts {
-                    rdb.LPush(ctx, "dlq:"+task.Type, marshal(task))
-                    emitAlert(task)
-                } else {
-                    queueKey := fmt.Sprintf("queue:robot:%s:%s", task.RobotId, task.Type)
-                    rdb.LPush(ctx, queueKey, marshal(task))
-                    rdb.Publish(ctx, "channel:queue-events", queueKey)
-                }
-            case "suspended":
-                timeoutHumanTask(leaseId)
-                rdb.LPush(ctx, "dlq:"+task.Type, marshal(task))
-                hub.SendToRobot(task.RobotId, AbortTaskMsg{LeaseId: leaseId})
-                emitAlert(task)
-            }
-
-            rdb.Del(ctx, "lease:"+leaseId)
-            rdb.ZRem(ctx, "lease:expiry-index", leaseId)
-        }
-    }
-}
-```
-
-### 8.3 服务端：编排器
-
-```go
-func (o *Orchestrator) OnTaskAck(task Task, result Result) {
-    saveHistoryAsync(task, result, "success")
-
-    switch task.Type {
-    case "monitor":
-        for _, product := range result.NewProducts {
-            if existsByIdempotencyKey(product) { continue }
-
-            insertProduct(product, "monitored")
-
-            collectTask := Task{
-                Type: "collect", RobotId: task.RobotId,
-                Payload: map[string]any{
-                    "sourceProductId": product.Id,
-                    "sourceUrl": product.Url,
-                },
-                ParentTaskId: task.TaskId, TraceId: task.TraceId,
-                IdempotencyKey: fmt.Sprintf("collect:%s", product.Id),
-            }
-            o.enqueue(collectTask)
-        }
-
-    case "collect":
-        updateProductStatus(task.Payload["sourceProductId"], "collected")
-
-        publishTask := Task{
-            Type: "publish", RobotId: task.RobotId,
-            Payload: map[string]any{
-                "sourceProductId": task.Payload["sourceProductId"],
-            },
-            ParentTaskId: task.TaskId, TraceId: task.TraceId,
-            IdempotencyKey: fmt.Sprintf("publish:%s", task.Payload["sourceProductId"]),
-        }
-        o.enqueue(publishTask)
-
-    case "publish":
-        markProductPublished(task, result)
-    }
-}
-
-func (o *Orchestrator) OnTaskFail(task Task, reason string, retryable bool, errorCode string) {
-    saveHistoryAsync(task, nil, "failed")
-
-    // 特殊回退：客户端本地数据丢失
-    if errorCode == "local_data_missing" {
-        updateProductStatus(task.Payload["sourceProductId"], "monitored")
-        recollectTask := buildCollectTask(task)
-        o.enqueue(recollectTask)
-        return
-    }
-
-    if !retryable || task.Attempts >= task.MaxAttempts {
-        rdb.LPush(ctx, "dlq:"+task.Type, marshal(task))
-        emitAlert(task)
-        return
-    }
-
-    task.Attempts++
-    o.enqueueWithBackoff(task)
-}
-```
-
-### 8.4 服务端：人工任务派发
-
-```go
-func (d *HumanTaskDispatcher) OnInterventionRequired(req InterventionRequired) {
-    sla := dispatchSLA(req.BlockerType)
-    totalSLA := totalSuspendedSLA(req.BlockerType)
-
-    ossRef := uploadToOSS(req.Screenshot)
-
-    humanTask := HumanTask{
-        Id: uuid(),
-        RobotLeaseId: req.LeaseId,
-        RobotId: req.RobotId,
-        BlockerType: req.BlockerType,
-        Status: "pending",
-        PayloadRef: ossRef,
-        ContextJson: req.Context,
-    }
-    db.Insert(humanTask)
-
-    // lease 切到 suspended，过期时间用总 SLA
-    rdb.HSet(ctx, "lease:"+req.LeaseId, "state", "suspended")
-    rdb.ZAdd(ctx, "lease:expiry-index", &redis.Z{
-        Score: float64(time.Now().Add(totalSLA).Unix()), Member: req.LeaseId,
-    })
-
-    // 冻结 (robot, type)
-    rdb.Set(ctx, frozenKey(req.RobotId, req.TaskType), humanTask.Id, 0)
-
-    d.tryDispatch(humanTask, sla)
-}
-
-func (d *HumanTaskDispatcher) tryDispatch(t HumanTask, sla time.Duration) {
-    op := d.pickIdleOperator(t.BlockerType)
-    if op == nil {
-        // 没人可派 → 放入待认领池，广播
-        rdb.ZAdd(ctx, "human-task:pending", &redis.Z{
-            Score: float64(time.Now().Unix()), Member: t.Id,
-        })
-        hub.BroadcastToOperators(PendingPoolUpdateMsg{Added: []string{t.Id}})
-        return
-    }
-
-    expiresAt := time.Now().Add(sla)
-    db.UpdateAssigned(t.Id, op.Id, expiresAt)
-    rdb.HSet(ctx, "operator:"+op.Id+":status", "busy", "true", "currentHumanTaskId", t.Id)
-    rdb.ZAdd(ctx, "dispatch:expiry-index", &redis.Z{
-        Score: float64(expiresAt.Unix()), Member: t.Id,
-    })
-    hub.SendToOperator(op.Id, HumanTaskAssignMsg{
-        TaskId: t.Id, ...,
-        DispatchExpiresAt: expiresAt,
-    })
-}
-
-// 1min 派发超时由独立 sweeper 触发
-func (d *HumanTaskDispatcher) sweepDispatchTimeouts() {
-    for range time.Tick(2 * time.Second) {
-        expired, _ := rdb.ZRangeByScore(ctx, "dispatch:expiry-index", &redis.ZRangeBy{
-            Min: "0", Max: fmt.Sprint(time.Now().Unix()),
-        }).Result()
-        for _, taskId := range expired {
-            task := db.Get(taskId)
-            if task.Status != "assigned" { continue }
-
-            // 释放原操作员
-            rdb.HSet(ctx, "operator:"+task.AssigneeId+":status", "busy", "false")
-            // 任务回 pending 池
-            db.UpdatePending(taskId)
-            rdb.ZAdd(ctx, "human-task:pending", &redis.Z{
-                Score: float64(time.Now().Unix()), Member: taskId,
-            })
-            rdb.ZRem(ctx, "dispatch:expiry-index", taskId)
-
-            hub.SendToOperator(task.AssigneeId, HumanTaskReclaimMsg{
-                TaskId: taskId, Reason: "dispatch_timeout",
-            })
-            hub.BroadcastToOperators(PendingPoolUpdateMsg{Added: []string{taskId}})
-        }
-    }
-}
-
-func (d *HumanTaskDispatcher) OnClaim(operatorId, taskId string) error {
-    removed, _ := rdb.ZRem(ctx, "human-task:pending", taskId).Result()
-    if removed == 0 {
-        return ErrAlreadyClaimed
-    }
-    task := db.Get(taskId)
-    sla := dispatchSLA(task.BlockerType)
-    expiresAt := time.Now().Add(sla)
-    db.UpdateAssigned(taskId, operatorId, expiresAt)
-    rdb.HSet(ctx, "operator:"+operatorId+":status", "busy", "true", "currentHumanTaskId", taskId)
-    rdb.ZAdd(ctx, "dispatch:expiry-index", &redis.Z{
-        Score: float64(expiresAt.Unix()), Member: taskId,
-    })
-    hub.SendToOperator(operatorId, HumanTaskAssignMsg{...})
-    hub.BroadcastToOperators(PendingPoolUpdateMsg{Removed: []string{taskId}})
-    return nil
-}
-
-func (d *HumanTaskDispatcher) OnResolve(taskId string, resolution Resolution) {
-    task := db.Get(taskId)
-    db.UpdateResolved(taskId, resolution)
-
-    // 解冻
-    rdb.Del(ctx, frozenKey(task.RobotId, task.TaskType))
-    rdb.ZRem(ctx, "dispatch:expiry-index", taskId)
-    rdb.HSet(ctx, "operator:"+task.AssigneeId+":status", "busy", "false")
-
-    // 恢复 lease 为 running
-    rdb.HSet(ctx, "lease:"+task.RobotLeaseId, "state", "running")
-    rdb.ZAdd(ctx, "lease:expiry-index", &redis.Z{
-        Score: float64(time.Now().Add(60*time.Second).Unix()),
-        Member: task.RobotLeaseId,
-    })
-
-    hub.SendToOperatorOwningRobot(task.RobotId, InterventionResolvedMsg{
-        LeaseId: task.RobotLeaseId,
-        Resolution: resolution,
-    })
-
-    // 解冻后把队列里堆积的同类任务依次推出
-    d.drainFrozenQueue(task.RobotId, task.TaskType)
-}
-
-func (d *HumanTaskDispatcher) OnUnable(operatorId, taskId, reason string) {
-    task := db.Get(taskId)
-    db.UpdateAbandoned(taskId, reason)
-    rdb.Del(ctx, frozenKey(task.RobotId, task.TaskType))
-    rdb.ZRem(ctx, "dispatch:expiry-index", taskId)
-    rdb.HSet(ctx, "operator:"+operatorId+":status", "busy", "false")
-
-    // robot 任务进 DLQ
-    moveLeaseToDLQ(task.RobotLeaseId)
-    hub.SendToOperatorOwningRobot(task.RobotId, InterventionAbortedMsg{
-        LeaseId: task.RobotLeaseId, Reason: "human_unable",
-    })
-    emitAlert("human marked unable", task, reason)
-}
-```
-
-### 8.5 客户端：连接管理
+不同任务 payload：
 
 ```typescript
-class RobotClient {
-  private ws: WebSocket | null = null;
-  private inFlight = new Map<string, TaskRuntime>();
-  private reconnectDelay = 1000;
+// monitor
+{
+  monitorRunId: string;
+  robotMonitorShopId?: string;
+  sourceType: "shop" | "search";
+  monitorAccountId: string;
+  cursor?: Record<string, unknown>;
+}
 
-  start() { this.connect(); }
+// 示例 resourceLocks:
+// ["monitor-account:monitor-acc-001", "browser-profile:profile-001"]
 
-  private connect() {
-    this.ws = new WebSocket(WS_URL, {
-      headers: { Authorization: `Bearer ${this.token}` },
-    });
+// collect
+{
+  sourceProductId: string;
+  sourceUrl: string;
+  collectAccountId: string;
+}
 
-    this.ws.on('open', () => {
-      this.reconnectDelay = 1000;
-      this.send({
-        type: 'hello',
-        robotId: this.robotId,
-        version: VERSION,
-        capabilities: ['monitor','collect','publish'],
-        resumingTasks: [...this.inFlight.keys()],
-      });
-    });
+// 示例 resourceLocks:
+// ["collect-account:collect-acc-001", "browser-profile:profile-001", "local-sqlite:run-001"]
 
-    this.ws.on('message', (raw) => this.handleMessage(JSON.parse(raw)));
-    this.ws.on('close', () => this.scheduleReconnect());
-  }
+// publish
+{
+  sourceProductId: string;
+  publishShopId: string;
+}
 
-  private scheduleReconnect() {
-    setTimeout(() => this.connect(), this.reconnectDelay);
-    this.reconnectDelay = Math.min(this.reconnectDelay * 2, 30_000);
-  }
+// 示例 resourceLocks:
+// ["publish-shop:shop-001", "browser-profile:profile-001", "local-sqlite:run-001"]
+```
 
-  private async handleMessage(msg: any) {
-    switch (msg.type) {
-      case 'task_assign':          await this.runTask(msg); break;
-      case 'command':              await this.handleCommand(msg); break;
-      case 'intervention_resolved': this.resumeTask(msg); break;
-      case 'intervention_aborted':  this.abortTask(msg); break;
-      case 'ping':                 this.send({ type: 'pong', ts: Date.now() }); break;
+资源锁不要滥用。只有确认资源不能并发时才加入，否则会把系统退化成低吞吐串行。
+
+---
+
+## 六、客户端逻辑单元
+
+客户端内部拆成四个逻辑单元：
+
+| 逻辑单元 | 职责 |
+|---|---|
+| RobotRuntime | 管理机器人运行实例、各 worker 本地 mutex、Playwright 进程、SQLite |
+| MonitorWorker | 主动拉取监控队列，执行监控任务，发现商品后上报服务端 |
+| CollectWorker | 主动拉取采集队列，执行采集任务，数据写本地 SQLite |
+| PublishWorker | 主动拉取发布队列，读取本地 SQLite，执行发布 |
+| HumanTaskWorkspace | 接收和处理验证码、风控、短信、人工判断等任务 |
+
+三个 worker 可以同时存在，且不同类型可以并行；但同一个 `runId + workerType` 必须共享同一把本地锁：
+
+```typescript
+class RobotRuntime {
+  private runningByWorkerType = new Map<RobotTask["type"], string>();
+
+  async tryRun(task: RobotTask, fn: () => Promise<void>) {
+    if (this.runningByWorkerType.has(task.type)) {
+      throw new Error(`${task.type} worker is busy`);
     }
-  }
 
-  private async runTask(msg: TaskAssign) {
-    this.send({ type: 'task_accepted', leaseId: msg.leaseId });
-
-    const runtime = new TaskRuntime(msg, this);
-    this.inFlight.set(msg.leaseId, runtime);
-
+    this.runningByWorkerType.set(task.type, task.taskId);
     try {
-      const result = await this.executors[msg.taskType].run(msg.payload, runtime);
-      this.send({ type: 'task_ack', leaseId: msg.leaseId, result });
-    } catch (e) {
-      if (e instanceof InterventionPending) {
-        // 任务等待人工，不发 ack/fail
-        return;
-      }
-      this.send({
-        type: 'task_fail', leaseId: msg.leaseId,
-        reason: e.message,
-        retryable: !(e instanceof BusinessError),
-        errorCode: e.code,
-      });
+      await fn();
     } finally {
-      if (!this.inFlight.get(msg.leaseId)?.suspended) {
-        this.inFlight.delete(msg.leaseId);
-      }
+      this.runningByWorkerType.delete(task.type);
     }
   }
+}
+```
 
-  // executor 内部检测到 captcha 时调用
-  async requestIntervention(leaseId: string, req: InterventionRequest): Promise<Resolution> {
-    this.send({
-      type: 'intervention_required',
-      leaseId, ...req,
-    });
-    // 返回一个 Promise，等待 intervention_resolved 时 resolve
-    return new Promise((resolve, reject) => {
-      this.inFlight.get(leaseId)!.interventionWaiter = { resolve, reject };
-    });
-  }
+服务端负责不派同类型并发任务，客户端负责防御性兜底。比如同一个 runId 可以同时有一个 monitor、一个 collect、一个 publish 在跑，但不能同时跑两个 collect。
 
-  private resumeTask(msg: any) {
-    const runtime = this.inFlight.get(msg.leaseId);
-    runtime?.interventionWaiter?.resolve(msg.resolution);
+---
+
+## 七、任务获取方式
+
+客户端和服务端建议使用 HTTP 长轮询，而不是普通高频短轮询。
+
+### 7.1 拉取任务接口
+
+```http
+POST /api/robot-runs/{runId}/tasks/poll
+Authorization: Bearer <jwt>
+
+{
+  "workerType": "monitor" | "collect" | "publish",
+  "clientInstanceId": "client-uuid",
+  "busyLeaseId": "lease-xxx-or-null",
+  "timeoutSeconds": 25
+}
+```
+
+服务端返回：
+
+```json
+{
+  "hasTask": true,
+  "leaseId": "lease-uuid",
+  "leaseTtl": 300,
+  "task": {
+    "taskId": "task-uuid",
+    "runId": "run-001",
+    "type": "collect",
+    "payload": {}
   }
+}
+```
+
+没有任务：
+
+```json
+{
+  "hasTask": false
+}
+```
+
+### 7.2 拉取任务时的服务端判断
+
+服务端必须按这个顺序判断：
+
+1. `robot_runs.status` 是否为 `running`。
+2. 是否存在 `robot-run:{runId}:paused`。
+3. 是否存在 `robot-run:{runId}:stopping`。
+4. 是否存在 `robot-run:{runId}:lock:{workerType}`。
+5. 当前 workerType 对应队列是否有任务。
+6. 检查任务声明的 `resourceLocks` 是否都空闲。
+7. 原子创建 lease、workerType lock、resource locks。
+8. 返回任务给客户端。
+
+伪代码：
+
+```go
+func PollTask(runId, workerType string) (*LeaseTask, error) {
+    if !isRunRunning(runId) { return nil, nil }
+    if isPaused(runId) || isStopping(runId) { return nil, nil }
+
+    lockKey := fmt.Sprintf("robot-run:%s:lock:%s", runId, workerType)
+    if rdb.Exists(ctx, lockKey).Val() > 0 {
+        return nil, nil
+    }
+
+    queueKey := queueKey(runId, workerType)
+    task := rdb.RPop(ctx, queueKey).Val()
+    if task == "" { return nil, nil }
+
+    resourceLocks := parseResourceLocks(task)
+    for _, k := range resourceLocks {
+        if rdb.Exists(ctx, resourceLockKey(k)).Val() > 0 {
+            rdb.RPush(ctx, queueKey, task)
+            return nil, nil
+        }
+    }
+
+    leaseId := uuid()
+
+    ok := rdb.SetNX(ctx, lockKey, leaseId, leaseTTL).Val()
+    if !ok {
+        rdb.RPush(ctx, queueKey, task)
+        return nil, nil
+    }
+    for _, k := range resourceLocks {
+        ok := rdb.SetNX(ctx, resourceLockKey(k), leaseId, leaseTTL).Val()
+        if !ok {
+            releaseWorkerAndResourceLocks(leaseId)
+            rdb.RPush(ctx, queueKey, task)
+            return nil, nil
+        }
+    }
+
+    createLease(leaseId, task, "running", leaseTTL)
+    return &LeaseTask{LeaseId: leaseId, Task: task}, nil
+}
+```
+
+实际实现必须用 Lua 脚本保证 `取队列 + 检查 workerType lock + 检查 resource locks + 加锁 + 建 lease` 原子完成。上面的 Go 伪代码只表达业务顺序。
+
+---
+
+## 八、任务执行与回报
+
+### 8.1 接受任务
+
+客户端拿到任务后立即执行，不需要额外 accepted。
+
+如果要增强可观测性，可以保留：
+
+```http
+POST /api/leases/{leaseId}/accepted
+```
+
+### 8.2 心跳
+
+```http
+POST /api/leases/{leaseId}/heartbeat
+
+{
+  "progress": 60,
+  "message": "正在采集 SKU",
+  "clientInstanceId": "client-uuid"
+}
+```
+
+服务端刷新：
+
+- `lease:{leaseId}.expiresAt`
+- `lease:expiry-index`
+- `robot-run:{runId}:lock:{workerType}` TTL
+- 本 lease 持有的所有 `resource-lock:*` TTL
+- `robot_runs.heartbeat_at`
+
+### 8.3 成功
+
+```http
+POST /api/leases/{leaseId}/ack
+
+{
+  "result": {}
+}
+```
+
+服务端动作：
+
+1. 写 `tasks_history`。
+2. 删除 lease。
+3. 删除 `robot-run:{runId}:lock:{task.type}`。
+4. 删除本 lease 持有的所有 `resource-lock:*`。
+5. 根据任务类型编排下一阶段。
+
+### 8.4 失败
+
+```http
+POST /api/leases/{leaseId}/fail
+
+{
+  "reason": "xxx",
+  "retryable": true,
+  "errorCode": "network_timeout"
+}
+```
+
+服务端动作：
+
+- 可重试：attempts + 1，按 backoff 重新入队。
+- 不可重试：进入 DLQ。
+- `local_data_missing`：发布任务回退为重新采集。
+- 无论如何释放 `robot-run:{runId}:lock:{task.type}` 和本 lease 持有的所有 `resource-lock:*`。
+
+---
+
+## 九、启动、暂停、停止
+
+### 9.1 启动机器人
+
+当前登录用户在客户端点击启动机器人：
+
+```text
+客户端 -> 服务端：启动 robot_config
+服务端：
+  1. 校验 robot_config 状态
+  2. 获取 robot-config:{configId}:active-run-lock
+  3. 创建 robot_runs
+  4. 创建队列 namespace
+  5. 如果 monitor_source_type=shop，接收并写入 robot_monitor_shop
+  6. 创建首批 monitor delay task
+  7. 返回 runId、队列信息、当前配置
+客户端：
+  1. 启动 RobotRuntime
+  2. 启动 MonitorWorker / CollectWorker / PublishWorker
+  3. 各 worker 根据 runId 主动 poll
+```
+
+### 9.2 暂停机器人
+
+暂停语义：停止继续获取新任务，但不删除队列。
+
+```text
+服务端：
+  SET robot-run:{runId}:paused = 1
+  robot_runs.status = paused
+
+客户端：
+  当前正在执行的任务可以继续跑完，或者按配置进入 cooperative pause
+  worker 停止 poll
+```
+
+建议：V1 暂停只阻止新任务，当前任务跑完后停住。不要强杀 Playwright，除非用户点的是停止。
+
+### 9.3 停止机器人
+
+停止语义：终止当前运行实例，并处理它所属的所有队列。
+
+```text
+服务端：
+  SET robot-run:{runId}:stopping = 1
+  robot_runs.status = stopping
+  停止发放新的 worker lease
+  等待当前 monitor / collect / publish lease 结束，或分别发送 abort
+  删除 / 归档该 runId 下的 monitor / collect / publish 队列
+  删除各 workerType lock、paused、stopping
+  robot_runs.status = stopped
+```
+
+停止时队列处理策略必须明确：
+
+| 策略 | 适用场景 |
+|---|---|
+| 删除队列 | 用户明确废弃本次运行 |
+| 归档队列 | 需要排查或后续恢复 |
+| 转移队列 | 未来支持运行实例迁移 |
+
+V1 建议使用“归档 + TTL 删除”：
+
+```text
+archive:robot-run:{runId}:monitor
+archive:robot-run:{runId}:collect
+archive:robot-run:{runId}:publish
+```
+
+---
+
+## 十、监控队列与延迟队列
+
+监控任务建议用延迟队列，因为监控通常是周期性的。
+
+```text
+queue:robot-run:{runId}:monitor:delay
+```
+
+延迟队列调度器定时扫描：
+
+```go
+func PromoteMonitorTasks(runId string) {
+    dueTasks := ZRangeByScore(delayQueue, 0, now)
+    for _, task := range dueTasks {
+        ZRem(delayQueue, task)
+        LPush(monitorQueue, task)
+    }
+}
+```
+
+监控任务完成后，根据配置生成下一次监控任务：
+
+```text
+monitor ack
+  -> 发现商品
+  -> enqueue collect tasks
+  -> enqueue next monitor delay task
+```
+
+注意：如果该机器人实例已经有一个 monitor 在执行，新的 monitor 即使到期，也不能并发执行。它只会留在就绪队列里，等 `lock:monitor` 释放后再被取走。collect 和 publish 同理，各自按类型串行。
+
+---
+
+## 十一、任务链路
+
+### 11.0 商品状态机与幂等
+
+服务端需要维护商品维度状态机，避免重复采集、重复发布和链路断裂。
+
+商品状态表命名为 `robot_products`，用于记录机器人发现的源商品和后续发布状态。
+
+```text
+discovered
+  -> collect_queued
+  -> collecting
+  -> collected
+  -> publish_queued
+  -> publishing
+  -> published
+```
+
+失败状态：
+
+```text
+collect_failed
+publish_failed
+dlq
+```
+
+建议幂等键：
+
+```text
+monitor:{runId}:{sourceType}:{cursorOrWindow}
+collect:{runId}:{sourceProductId}
+publish:{runId}:{sourceProductId}:{publishShopId}
+```
+
+幂等表建议结构：
+
+```sql
+idempotency_keys (
+  id                VARCHAR(64) PRIMARY KEY,
+  idempotency_key   VARCHAR(255) NOT NULL,
+  task_id           VARCHAR(64) NULL,
+  run_id            VARCHAR(64) NULL,
+  resource_type     VARCHAR(32),        -- monitor / collect / publish
+  created_at        DATETIME,
+  expires_at        DATETIME NULL,
+  UNIQUE KEY uk_idempotency_key (idempotency_key),
+  INDEX idx_run_resource (run_id, resource_type)
+)
+```
+
+规则：
+
+- monitor 发现商品时，先按 `(robot_config_id, source_product_id)` 去重。
+- collect 入队前，检查商品是否已经 `collect_queued / collecting / collected / publishing / published`。
+- publish 入队前，检查商品是否已经 `publish_queued / publishing / published`。
+- publish 成功后记录 `target_product_id`，后续同商品不再自动发布。
+
+### 11.1 监控
+
+```text
+MonitorWorker poll monitor queue
+  -> 服务端发放 monitor lease
+  -> 如果是店铺监控，payload 带 robotMonitorShopId
+  -> 客户端执行监控
+  -> 返回发现的商品列表
+  -> 服务端写 robot_products
+  -> 服务端生成 collect tasks
+  -> 服务端生成下一次 monitor delay task
+```
+
+### 11.2 采集
+
+```text
+CollectWorker poll collect queue
+  -> 服务端发放 collect lease
+  -> 客户端采集商品详情
+  -> 客户端写本地 SQLite
+  -> 客户端 ack
+  -> 服务端更新商品状态 collected
+  -> 服务端生成 publish task
+```
+
+### 11.3 发布
+
+```text
+PublishWorker poll publish queue
+  -> 服务端发放 publish lease
+  -> 客户端从本地 SQLite 读取采集数据
+  -> 执行发布
+  -> 返回 targetProductId
+  -> 服务端更新商品状态 published
+```
+
+---
+
+## 十二、人工介入
+
+人工任务仍然由服务端统一管理，但要注意：人工介入期间必须继续占用原任务所属的逻辑单元锁。
+
+### 12.1 触发
+
+客户端执行任务时遇到验证码、短信、风控：
+
+```http
+POST /api/leases/{leaseId}/intervention-required
+
+{
+  "blockerType": "captcha_text",
+  "prompt": "请输入验证码",
+  "screenshotRef": "oss://bucket/key",
+  "context": {}
+}
+```
+
+服务端动作：
+
+1. lease state 改为 `suspended`。
+2. 延长 lease 总暂停 SLA。
+3. 保留 `robot-run:{runId}:lock:{task.type}`。
+4. 保留本 lease 持有的所有 `resource-lock:*`。
+5. 创建 human_task。
+6. 自动派发给空闲 app_user，或放入待认领池。
+
+### 12.2 解决
+
+用户处理完成：
+
+```http
+POST /api/human-tasks/{humanTaskId}/resolve
+
+{
+  "resolution": {}
+}
+```
+
+服务端动作：
+
+1. human_task 标记 resolved。
+2. lease state 改回 running。
+3. 客户端任务 poll 或 intervention poll 获取 resolution。
+4. 原任务继续执行。
+
+### 12.3 客户端获取人工结果
+
+如果不用 WebSocket，客户端可以在等待人工结果时长轮询：
+
+```http
+POST /api/leases/{leaseId}/intervention/poll
+
+{
+  "timeoutSeconds": 25
+}
+```
+
+返回：
+
+```json
+{
+  "resolved": true,
+  "resolution": {}
 }
 ```
 
 ---
 
-## 九、错误处理与重试策略
+## 十三、数据存储边界
 
-| 错误类型 | 示例 | 处理 |
+| 数据 | 存储位置 | 原因 |
 |---|---|---|
-| **网络抖动** | 请求超时、连接重置 | 重试（指数退避：5s, 15s, 45s）|
-| **验证码/SMS** | 任何形式的人机校验 | 进人工介入流程；派发 SLA 超时回池等手动认领 |
-| **登录态失效** | Cookie 过期 | V1：进人工介入；V2：远程重登 |
-| **业务失败** | 商品下架、SKU 不存在 | 失败不重试，标记商品 failed |
-| **本地数据丢失** | publish 找不到 collect 数据 | 商品状态回退到 monitored，重新采集 |
-| **客户端崩溃** | 进程死亡 | Lease 超时 → 自动回队列 |
-| **服务端崩溃** | 进程重启 | 客户端 WS 重连，未 ack 任务靠 Sweeper |
-| **人工总超时** | 总暂停 SLA 内无人解决 | 任务进 DLQ + 紧急告警 |
-| **人工标记 unable** | 操作员主动放弃 | 任务进 DLQ + 告警 |
-
-**关键参数：**
-
-| 参数 | 默认值 | 备注 |
-|---|---|---|
-| 任务最大重试次数 | 3 | 不含 `local_data_missing` 这类回退 |
-| Lease TTL (running, 短任务) | 60s | monitor |
-| Lease TTL (running, 长任务) | 300s | collect/publish，配合 heartbeat |
-| Heartbeat 间隔 | 30s | 客户端 → 服务端 |
-| 派发 SLA (captcha) | 1min | 自动派发回收周期 |
-| 派发 SLA (sms/decision) | 5min | 同上 |
-| 总暂停 SLA (captcha) | 30min | 超时强制 abort + DLQ |
-| 总暂停 SLA (其他) | 见 6.1 表 | 配置化 |
-| Sweeper 扫描周期 | 5s | 主 sweeper |
-| Dispatch sweeper 周期 | 2s | 派发 SLA 检查 |
-| 客户端重连最大退避 | 30s | 指数退避 |
-| WS 应用层心跳 | 30s | |
+| 机器人配置 | MySQL | 配置稳定，需要管理后台维护 |
+| 运行实例 | MySQL + Redis | MySQL 留历史，Redis 管运行态 |
+| 队列 | Redis | 高吞吐、易阻塞拉取 |
+| lease | Redis + MySQL history | Redis 管 TTL，MySQL 留审计 |
+| 商品元数据状态 | MySQL | 看板、复盘、编排需要 |
+| 采集详情数据 | 客户端 SQLite | 数据量大，且发布依赖同一客户端环境 |
+| 截图/现场文件 | OSS | 人工任务展示 |
+| 人工任务 | MySQL + Redis pending pool | MySQL 留审计，Redis 做认领池 |
 
 ---
 
-## 十、横向扩展（服务端多实例）
+## 十四、关键缺陷与修正建议
 
-V1 单实例足够（几百客户端单台抗住）。未来多实例时：
+### 14.1 只按队列分 worker 会破坏同类型串行
 
-**Redis Pubsub 转发机制：**
+你的图里有监控、采集、发布三个客户端逻辑单元都在主动拉队列。这个拆分是好的，而且允许不同类型并行；真正需要禁止的是同一个 runId 下同一种 workerType 同时执行多个任务。
 
+修正：
+
+- 服务端用 `robot-run:{runId}:lock:{workerType}` 做同类型串行。
+- 客户端用 `RobotRuntime` 的 `runId + workerType` 本地 mutex 做兜底。
+- 三个 worker 可以同时存在，monitor / collect / publish 可以各自拿到一个 lease。
+- 如果某个类型已经有 active lease，同类型新的 poll 只能返回空。
+
+### 14.2 队列绑定运行实例后，要防止同配置多实例
+
+队列绑定 runId 是合理的，但如果同一个 robot_config 被启动两次，就会有两个 runId、两套队列，最终还是会并发操作同一个账号。
+
+修正：
+
+- 启动时对 `robot_config_id` 加 active-run-lock。
+- MySQL 层查询是否已有 `starting/running/paused/stopping` 的 run。
+- 异常状态用 sweeper 修复。
+
+### 14.3 停止时直接删除队列可能丢业务
+
+你图里写“停止所属运行实例的所有队列处理，且进行删除”。这要区分用户语义。
+
+建议：
+
+- 暂停：不删除队列。
+- 停止：默认归档队列，TTL 后删除。
+- 强制废弃：才立即删除。
+
+否则用户误点停止，会把未发布商品任务直接清掉。
+
+### 14.4 HTTP 轮询可以用，但不要高频短轮询
+
+你的图里写“建议用长轮询”。这个判断对。普通 1 秒轮询在几百机器人下会造成无意义请求。
+
+建议：
+
+- 使用 20-30 秒 HTTP long polling。
+- 有任务立即返回，无任务挂起到 timeout。
+- 客户端失败后指数退避。
+- 人工结果等待也用 long polling。
+
+### 14.5 采集数据本地存时，发布必须粘同一运行环境
+
+发布依赖客户端 SQLite 和登录态，所以 collect 和 publish 必须在同一个 robot run 上完成。
+
+修正：
+
+- publish task payload 只带 `sourceProductId`。
+- 服务端不要把 publish 派给别的 run。
+- 如果本地数据丢失，publish fail 返回 `local_data_missing`，服务端重新生成 collect。
+
+### 14.6 监控延迟队列要考虑暂停期间的堆积
+
+如果暂停很久，延迟队列里多个周期都到期，恢复后可能连续跑很多 monitor。
+
+建议：
+
+- monitor 任务使用合并策略，同一 runId 同一 sourceType 只保留一个待执行 monitor。
+- 恢复时只跑最近一次。
+- cursor 记录上次成功位置，而不是靠堆积任务补偿。
+
+### 14.7 人工介入期间不能释放对应 worker lock
+
+验证码期间 Playwright 页面还停在那里，如果释放对应类型的 lock，服务端会派下一个同类型任务，客户端也可能打开新页面干扰现场。
+
+修正：
+
+- lease state = suspended。
+- `robot-run:{runId}:lock:{task.type}` 继续保留并延长 TTL。
+- 总暂停 SLA 到期后再 abort + DLQ + 释放该 worker lock。
+
+### 14.8 跨类型并行要检查共享资源冲突
+
+当前模型允许同一个 runId 同时跑一个 monitor、一个 collect、一个 publish。这个前提是三类逻辑单元不会互相踩资源。
+
+需要重点确认：
+
+- 是否共用同一个浏览器 profile。
+- 是否共用同一个源账号登录态。
+- 是否共用同一个目标店铺后台页面。
+- 是否会同时写同一个 SQLite 表或同一个商品记录。
+- 采集和发布是否依赖严格先后顺序。
+
+如果存在共享资源，不要退回到 runId 全局锁，而是补充更细的资源锁：
+
+```text
+resource-lock:browser-profile:{profileId}
+resource-lock:monitor-account:{accountId}
+resource-lock:collect-account:{accountId}
+resource-lock:publish-shop:{shopId}
+resource-lock:local-sqlite:{runId}
 ```
-实例 2 想给 robot-A 派任务：
-  PUBLISH "robot-cmd:robot-A" <msg>
 
-所有实例订阅 "robot-cmd:*":
-  实例 1 Hub 里有 robot-A → 转发给 WS
-  其他实例 → 忽略
+这样可以保留不同类型并行能力，同时避免真正有冲突的资源被并发使用。
+
+### 14.9 队列头阻塞会影响吞吐
+
+如果队列使用普通 List，服务端每次只看队首任务，可能出现这种情况：队首任务需要 `publish-shop:A`，但这个资源被占用；队列后面的任务其实不需要这个资源，却也被挡住。
+
+优化：
+
+- V1 可以接受队首阻塞，简单稳定。
+- 如果吞吐不足，把 List 改成 ZSet，按 priority / createdAt 排序，poll 时最多扫描前 N 条可执行任务。
+- 取到可执行任务后用 Lua 原子 `ZREM + 加锁 + 建 lease`。
+- N 建议从 20 开始，避免一次 poll 扫描过大。
+
+### 14.10 客户端重启恢复要带 workerType 状态
+
+客户端重启时不能只告诉服务端 runId，还要上报每个 workerType 的本地状态。
+
+```json
+{
+  "runId": "run-001",
+  "clientInstanceId": "client-001",
+  "resumingLeases": {
+    "monitor": "lease-1",
+    "collect": null,
+    "publish": "lease-3"
+  }
+}
 ```
 
-操作员客户端连接同理（不同操作员连到不同实例时，通过 pubsub 路由弹屏消息）。
+服务端对账：
+
+- 服务端有 lease，客户端也有：继续执行并刷新 TTL。
+- 服务端有 lease，客户端没有：等待 lease 超时，或按策略立即 abort / retry。
+- 客户端有 lease，服务端没有：客户端停止该任务，释放本地资源。
+
+### 14.11 运行实例和任务失败要分开
+
+任务失败不一定代表机器人运行实例失败。比如单个商品下架，只应该让该商品进入 failed，不应该停止整个 run。
+
+建议：
+
+- 业务失败：任务 failed，商品 failed，run 继续。
+- 系统失败：网络、页面崩溃、客户端异常，任务可重试。
+- 环境失败：账号失效、浏览器 profile 损坏、代理不可用，run 标记 degraded 或 failed，停止继续发放任务。
+- 连续系统失败超过阈值，才把 robot_run 从 running 切到 failed。
 
 ---
 
-## 十一、观测与运维
+## 十五、推荐实施路线
 
-### Prometheus 指标
+### M1：基础模型和运行实例
 
+目标：先把机器人配置、启动实例、队列骨架搭起来。
+
+范围：
+
+- `robot_configs`
+- `robot_runs`
+- `robot_monitor_shop`
+- `robot_products`
+- `idempotency_keys`
+- 启动 / 暂停 / 停止接口
+- 启动时创建 `robot_run`
+- 店铺监控类型启动时写入 `robot_monitor_shop`
+- 创建 Redis 队列 namespace
+
+验收：
+
+- 当前用户可以启动一个 robot_config，生成一个 `robot_run`。
+- 同一个 robot_config 不能重复启动 active run。
+- 停止 run 后队列能归档或清理。
+- 数据库能看到本次运行实例和监控店铺快照。
+
+### M2：任务队列和锁机制
+
+目标：让客户端 worker 可以安全取任务。
+
+范围：
+
+- monitor / collect / publish 三类队列。
+- `robot-run:{runId}:lock:{workerType}` 同类型串行。
+- `resource-lock:*`。
+- `lease:{leaseId}`。
+- `lease:expiry-index`。
+- HTTP long polling。
+- Redis Lua 原子 poll。
+- heartbeat / ack / fail。
+- lease sweeper。
+
+验收：
+
+- 同一个 runId 下同类型任务不会并发。
+- 不同类型任务可以并行。
+- 共享资源冲突时会被 resource lock 阻止。
+- 客户端断心跳后，lease 能超时回收。
+- ack / fail 后能正确释放 worker lock 和 resource locks。
+
+### M3：监控链路
+
+目标：跑通 monitor，能发现商品并生成采集任务。
+
+范围：
+
+- monitor delay queue。
+- monitor ready queue。
+- monitor task payload。
+- `robotMonitorShopId`。
+- 监控店铺列表逐个生成任务。
+- monitor 合并策略，避免暂停后堆积补跑。
+- monitor ack 后写入 `robot_products`。
+- collect 幂等键生成。
+
+验收：
+
+- 店铺监控 run 启动后能按 `robot_monitor_shop` 生成 monitor 任务。
+- monitor 执行后发现商品，写入 `robot_products`。
+- 重复发现同一个商品不会重复创建 collect task。
+- 暂停恢复后不会连续补跑大量过期 monitor。
+
+### M4：采集和发布链路
+
+目标：跑通完整 `monitor -> collect -> publish`。
+
+范围：
+
+- CollectWorker。
+- PublishWorker。
+- 本地 SQLite 采集数据写入。
+- collect ack 后更新 `robot_products.status = collected`。
+- publish task 生成。
+- publish queue。
+- publish 读取本地 SQLite。
+- publish 成功后写 `target_product_id`。
+- `local_data_missing` 回退重新采集。
+- publish 幂等键。
+- 商品状态看板。
+
+验收：
+
+- 一个商品可以从发现、采集到发布完整跑通。
+- 重复 collect / publish 不会生成重复任务。
+- 发布成功后不会再次自动发布。
+- 本地采集数据丢失时能回退重新采集。
+
+### M5：人工介入
+
+目标：验证码、风控、短信等阻塞能转人工处理。
+
+范围：
+
+- human_tasks 表。
+- intervention-required。
+- lease `running -> suspended`。
+- 保留 worker lock 和 resource locks。
+- 人工任务自动派发 / 待认领池。
+- 当前 app_user 人工任务工作台。
+- resolve / unable / release。
+- 总暂停 SLA。
+- suspended lease 总 SLA。
+
+验收：
+
+- collect 或 publish 遇到验证码时能创建 human_task。
+- 人工处理后原任务可以继续执行。
+- 人工介入期间同类型任务不会继续派发。
+- 总暂停超时后任务进入 DLQ，并释放锁。
+- app_user 离线或超时后任务能回到待认领池。
+
+### M6：运营化和恢复能力
+
+目标：让系统可观测、可恢复、可排查。
+
+范围：
+
+- DLQ。
+- 任务历史详情。
+- robot_run 看板。
+- robot_products 状态看板。
+- 当前锁和队列深度看板。
+- 客户端重启上报 `resumingLeases`。
+- 服务端对账。
+- 队列归档。
+- 手动重派。
+- 告警指标。
+
+验收：
+
+- 能看到每个 robot_run 当前状态、队列积压、正在执行任务。
+- 能查看商品从 monitor 到 publish 的完整链路。
+- 客户端崩溃重启后能恢复或停止本地残留任务。
+- DLQ 任务能查看原因并手动重派。
+- 锁泄漏、lease 超时、人工超时都有告警。
+
+推荐顺序：
+
+```text
+M1 基础模型
+-> M2 队列和锁
+-> M3 监控链路
+-> M4 采集发布链路
+-> M5 人工介入
+-> M6 运营恢复
 ```
-# 机器人侧
-robot_online_total
-task_queue_depth{robot,type}
-task_inflight_total{type}
-task_completed_total{type,status}
-task_duration_seconds{type}
-task_retry_total{type,reason}
-dlq_depth{type}
-lease_expired_total{state}             # state: running / suspended
 
-# 人工侧
-operator_online_total
-human_task_pending_total{type}
-human_task_pending_pool_depth         # 待认领池深度
-human_task_assigned_total{operator,type}
-human_task_dispatch_timeout_total{type}   # 1min 派发超时次数（不算失败）
-human_task_resolution_seconds{type}
-human_task_total_timeout_total{type}      # 总暂停 SLA 超时（进 DLQ）
-human_task_unable_total{type}
-frozen_robot_type_total                   # 当前冻结的 (robot, type) 数
+最小 MVP 建议：
 
-# 连接侧
-ws_connection_total
-ws_reconnect_total
+```text
+M1 + M2 + M3 的店铺监控 + M4 的采集
 ```
 
-### 必备的运维能力
+先不做完整人工介入和发布自动化，把“运行实例、队列、锁、商品发现、采集”打稳。
 
-- **机器人看板**：在线状态、各店铺最近 24h 监控/采集/发布数
-- **人工看板**：每个 operator 接单量、平均处理时长、派发超时率、unable 率
-- **DLQ 复盘**：查看死信任务完整 payload + 失败原因 + 重试历史
-- **手动重派**：管理员把 DLQ 任务重新入队
-- **强制踢下线**：把异常客户端踢断 WS
-- **traceId 全链路日志**：monitor 入队到 publish 完成串成一条
-- **冻结状态总览**：当前哪些 (robot, type) 处于 frozen，已冻结多久
+### 原实施项归档
+
+- DLQ 复盘。
+- 队列归档。
+- 运行实例异常恢复。
+- 客户端按 workerType 上报 resuming leases。
+- 客户端崩溃后 lease sweeper 回收。
+- 指标和告警。
 
 ---
 
-## 十二、实施路线图
+## 十六、最终建议
 
-### **第一期：骨架 + 单条链路打通**（2 周）
-- Go 服务端 + Redis + MySQL + JWT 鉴权
-- WebSocket Hub（机器人侧）
-- monitor 单一任务端到端跑通
-- 客户端骨架（连接、断线重连、单任务执行）
+你的这版设计方向是可落地的，尤其是“队列绑定机器人运行实例 ID”这一点，比直接绑定机器人配置更适合实际业务。
 
-### **第二期：完整任务链**（1.5 周）
-- 编排器（monitor → collect → publish）
-- 客户端本地 SQLite 持久化采集数据
-- Lease + Sweeper（running 部分）+ 重试 + DLQ
-- 客户端本地数据丢失的回退路径
+但必须补上五件事：
 
-### **第三期：人工介入子系统**（2 周）⭐ 核心
-- human_tasks 表 + operators 表 + 路由表
-- Electron 客户端内嵌操作员弹屏 UI（含 captcha_text / sms_code / risk_review / manual_decision 四种）
-- 自动派发 + 派发 SLA 超时回池 + 手动认领全链路
-- (robot, type) 冻结机制
-- Suspended lease 总 SLA + Sweeper 兜底
-- 待认领池广播
+1. **workerType 维度运行锁**：解决同一个机器人实例下同一种逻辑运行单元并发执行。
+2. **resourceLocks 资源锁**：解决跨类型并行时共享账号、浏览器、店铺、SQLite 的冲突。
+3. **robot config active-run-lock**：解决同一个机器人配置被重复启动。
+4. **商品状态机 + 幂等键**：解决重复采集、重复发布、失败恢复。
+5. **停止队列不要默认硬删除**：默认归档，明确废弃时才删除。
 
-### **第四期：可靠性 + 运营化**（1.5 周）
-- DLQ 复盘 UI
-- 商品状态看板 + 冻结状态总览
-- Prometheus 指标 + Grafana 看板
-- 优雅关闭、客户端踢下线
+最终模型应该是：
 
-### **第五期：远程接管 + 高级 blocker**（按需）
-- captcha_slider、login_required、manual_takeover
-- CDP 隧道（如确有需求）
-- 多 operator 分配策略优化（按 robot 归属优先、按熟悉店铺路由等）
-
----
-
-## 十三、已敲定的运营策略
-
-| 决策 | 选择 | 含义 |
-|---|---|---|
-| **人工工作台形态** | 内嵌在 Electron 客户端 | 不单建 Web 工作台；同一 Electron 进程既跑机器人又显示人工弹屏；操作员登录身份与机器人归属绑定 |
-| **派发 SLA** | 按 blocker 类型差异化 | 验证码类 1min（超时回池，可手动认领），SMS / 决策类 5min；详见 [§6.1](#61-blocker-类型与-sla) |
-| **派发超时是否进 DLQ** | 否 | 派发超时仅释放当前操作员的认领，任务回待认领池，无限期等手动认领；仅总暂停 SLA 超时才进 DLQ |
-| **所有人工离线时** | 任务保持冻结 | 不再向该 (robot, type) 派发新任务；blocker 等任一操作员上线认领；总暂停 SLA 兜底进 DLQ |
-| **单操作员并发** | 严格串行 | 同一时刻一个 human_task，避免漏看；其他任务自动派给空闲操作员 |
-| **客户端分发** | 公司内部操作员使用 | 一人一登录，一台 Electron；其 Electron 同时跑机器人和接弹屏；认证用账号密码 + JWT |
+```text
+机器人配置
+  -> 启动生成机器人运行实例 runId
+  -> runId 创建 monitor / collect / publish 队列
+  -> 客户端各 worker 基于 runId 长轮询
+  -> 服务端用 runId + workerType lock 保证同类型串行
+  -> 服务端用 resourceLocks 保证共享资源不冲突
+  -> 客户端用 runId + workerType 本地 mutex 兜底
+  -> 人工介入 suspended 但不释放对应 worker lock 和 resource locks
+  -> 停止时归档或删除 runId 下所有队列
+```

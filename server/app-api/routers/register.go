@@ -1,6 +1,7 @@
 package routers
 
 import (
+	"app-api/pkg/ai_operation"
 	"app-api/pkg/app_user"
 	"app-api/pkg/category"
 	"app-api/pkg/collect"
@@ -18,6 +19,7 @@ import (
 
 func registerHandler() []routers.Handler {
 	return []routers.Handler{
+		ai_operation.NewAiOperationHandler(),
 		app_user.NewAppUserHandler(),
 		category.NewCategoryHandler(),
 		collect.NewCollectHandler(),

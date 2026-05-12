@@ -4,6 +4,7 @@ import {
   AppstoreOutlined,
   BarcodeOutlined,
   BellOutlined,
+  BulbOutlined,
   DownOutlined,
   LockOutlined,
   LogoutOutlined,
@@ -119,6 +120,12 @@ const navigationItems = [
     label: "分享管理",
     icon: <ShareAltOutlined />,
     description: "选品批次共享与发布",
+  },
+  {
+    key: "/ai-operation",
+    label: "AI运营",
+    icon: <BulbOutlined />,
+    description: "智能诊断与经营动作",
   },
 ] as const;
 
