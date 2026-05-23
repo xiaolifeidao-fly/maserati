@@ -8,8 +8,9 @@ import { PublishWindowApi } from "./publish/publish-window.api";
 import { PublishBatchJobApi } from "./publish/publish-batch-job.api";
 import { PublishCaptchaViewerApi } from "./publish/publish-captcha-viewer.api";
 import { InstallerApi } from "./installer.api";
+import { AiOperationApi } from "./ai-operation/ai-operation.api";
 
-const register: { new(...args: any[]): ElectronApi }[] = [AuthApi, CollectionWorkspaceApi, CollectApi, CommerceApi, PublishApi, PublishWindowApi, PublishBatchJobApi, PublishCaptchaViewerApi, InstallerApi];
+const register: { new(...args: any[]): ElectronApi }[] = [AuthApi, CollectionWorkspaceApi, CollectApi, CommerceApi, PublishApi, PublishWindowApi, PublishBatchJobApi, PublishCaptchaViewerApi, InstallerApi, AiOperationApi];
 
 export function registerApi(){
     return register;

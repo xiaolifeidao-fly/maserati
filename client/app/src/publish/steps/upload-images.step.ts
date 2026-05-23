@@ -2,7 +2,7 @@ import { StepCode, StepStatus, STEP_ORDER } from '../types/publish-task';
 import type { StepResult } from '../core/publish-step';
 import { PublishStep } from '../core/publish-step';
 import type { StepContext } from '../core/step-context';
-import { PublishError, StepSkippedError, CaptchaRequiredError, ScreenshotCaptchaRequiredError } from '../core/errors';
+import { PublishError, StepSkippedError, CaptchaRequiredError, ScreenshotCaptchaRequiredError, LoginRequiredError } from '../core/errors';
 import { CaptchaChecker } from './captcha.step';
 import { requestBackend } from '@src/impl/shared/backend';
 import { TbEngine } from '@src/browser/tb.engine';
@@ -256,7 +256,7 @@ export class UploadImagesStep extends PublishStep {
       }
 
       // ── 获取上传所需 headers（验证码通过后走有头浏览器刷新路径）──────────────
-      const tbEngine = new TbEngine(String(ctx.shopId), true);
+      const tbEngine = new TbEngine(String(ctx.shopId), false);
       tbEngine.bindPublishTask(ctx.taskId);
       const uploadHeaders = await this.getHeadersForUpload(ctx.taskId, ctx.shopId, tbEngine);
       const cookieInHeaders = uploadHeaders['Cookie'] ?? uploadHeaders['cookie'] ?? '';
@@ -330,6 +330,7 @@ export class UploadImagesStep extends PublishStep {
             }
           } catch (error) {
             if (error instanceof CaptchaRequiredError) throw error;
+            if (error instanceof LoginRequiredError) throw error;
             tbUploadFailures.push({
               originalUrl,
               isMain,
@@ -430,7 +431,7 @@ export class UploadImagesStep extends PublishStep {
       return cached;
     }
 
-    // 回退到从 Playwright 无头会话提取 cookie
+    // 回退到从 Playwright 会话提取 cookie
     const cookieStr = await this.getTbCookies(taskId, shopId);
     return cookieStr ? { 'Cookie': cookieStr } : {};
   }
@@ -439,13 +440,13 @@ export class UploadImagesStep extends PublishStep {
    * 打开有头浏览器，导航到淘宝图片空间，拦截 file.query 请求，
    * 提取其完整 request headers（含最新 cookie），用于后续上传。
    *
-   * 有头模式原因：验证码通过后无头会话仍可能被拦截；有头浏览器行为特征更接近真实用户，
+   * 有头模式原因：验证码通过后自动化会话仍可能被拦截；有头浏览器行为特征更接近真实用户，
    * 且若图片空间再次弹出验证码用户可直接在可见窗口中完成。
    */
   private async getHeadersViaHeadedBrowser(
     taskId: number,
     shopId: number,
-    headlessEngine: TbEngine,
+    sourceEngine: TbEngine,
   ): Promise<Record<string, string>> {
     const TB_PICTURE_SPACE_URL = 'https://qn.taobao.com/home.htm/sucai-tu/home';
     const headedEngine = new TbEngine(String(shopId), false);
@@ -457,12 +458,12 @@ export class UploadImagesStep extends PublishStep {
         return this.fallbackToCookieHeaders(taskId, shopId);
       }
 
-      // 将无头浏览器会话中的淘宝 cookie 同步到有头浏览器，确保有头窗口处于已登录状态
+      // 将当前发布会话中的淘宝 cookie 同步到有头浏览器，确保有头窗口处于已登录状态
       try {
-        const headlessContext = await headlessEngine.getContextOnly();
+        const sourceContext = await sourceEngine.getContextOnly();
         const headedContext = await headedEngine.getContextOnly();
-        if (headlessContext && headedContext) {
-          const allCookies = await headlessContext.cookies();
+        if (sourceContext && headedContext) {
+          const allCookies = await sourceContext.cookies();
           const tbCookies = allCookies.filter(c => {
             const d = c.domain ?? '';
             return d.endsWith('.taobao.com') || d === 'taobao.com'
@@ -489,8 +490,8 @@ export class UploadImagesStep extends PublishStep {
       }
 
       // 缓存抓取到的 headers 供后续复用，同时重置验证码标记
-      headlessEngine.setHeader(capturedHeaders);
-      headlessEngine.setValidateAutoTag(true);
+      sourceEngine.setHeader(capturedHeaders);
+      sourceEngine.setValidateAutoTag(true);
 
       return capturedHeaders;
     } catch {
@@ -507,7 +508,7 @@ export class UploadImagesStep extends PublishStep {
    * 直接复用已缓存的 BrowserContext，无需创建 Page，避免额外的 Tab 开销。
    */
   private async getTbCookies(taskId: number, shopId: number): Promise<string | null> {
-    const engine = new TbEngine(String(shopId), true);
+    const engine = new TbEngine(String(shopId), false);
     engine.bindPublishTask(taskId);
     try {
       const context = await Promise.race([
@@ -783,6 +784,7 @@ export class UploadImagesStep extends PublishStep {
         };
       } catch (error) {
         if (error instanceof CaptchaRequiredError) throw error;
+        if (error instanceof LoginRequiredError) throw error;
         publishTaobaoResponseLog(taskId, 'upload-image-error', {
           url: TB_UPLOAD_URL,
           method: 'POST',

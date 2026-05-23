@@ -1,4 +1,4 @@
-import { Page, Route , Request, BrowserContext, Response} from "playwright";
+import type { Page, Route, Request, BrowserContext, Response } from "playwright";
 import { EventEmitter } from 'events';
 import { getUrlParameter } from "@utils/url.util";
 import log from "electron-log";

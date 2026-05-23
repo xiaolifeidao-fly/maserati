@@ -1,6 +1,6 @@
 import { StepCode, StepStatus } from '../types/publish-task';
 import type { StepContext } from './step-context';
-import { CaptchaRequiredError, PublishError, StepSkippedError } from './errors';
+import { CaptchaRequiredError, LoginRequiredError, PublishError, StepSkippedError } from './errors';
 
 export interface StepResult {
   status: StepStatus;
@@ -33,8 +33,11 @@ export abstract class PublishStep {
     try {
       return await this.doExecute(ctx);
     } catch (err) {
-      // 验证码错误：透传给 StepChain 处理，不在此消化
+      // 验证码/登录错误：透传给 StepChain 处理，不在此消化
       if (err instanceof CaptchaRequiredError) {
+        throw err;
+      }
+      if (err instanceof LoginRequiredError) {
         throw err;
       }
       // 步骤主动跳过

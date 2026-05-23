@@ -19,7 +19,6 @@ import { buildPlaceholderRecord, prependPlaceholder, applyRecordUpdate } from ".
 import { saveCollectedToServer } from "./collect.saver";
 import { requestBackend } from "@src/impl/shared/backend";
 import { setGlobal, getGlobal } from "../../../common/utils/store/electron";
-import { normalizePlatform, getSecChUa } from "@src/browser/engine";
 import { TbEngine } from "@src/browser/tb.engine";
 import { PxxEngine } from "@src/browser/pxx.engine";
 
@@ -518,27 +517,21 @@ function createUtilityView(backgroundColor: string) {
 }
 
 function getCenterViewBrowserEnv() {
-  const chromeVersion = process.env.CHROME_VERSION || "1169";
-  const stored = getGlobal("tbk_browserPlatform_" + chromeVersion);
-  if (stored) {
-    try {
-      const platform = normalizePlatform(JSON.parse(stored));
-      if (platform?.userAgent) {
-        return {
-          ua: platform.userAgent as string,
-          secChUa: getSecChUa(platform),
-          secChUaPlatform: (platform.userAgentData?.platform as string) || "macOS",
-        };
-      }
-    } catch (_) {}
-  }
-  // Playwright platform not yet initialized — build fallback from Electron's bundled Chrome version
   const chrome = process.versions.chrome || "136.0.0.0";
   const major = chrome.split(".")[0];
+  const platform = process.platform;
+  const secChUaPlatform = platform === "win32" ? "Windows" : platform === "darwin" ? "macOS" : "Linux";
+  const uaPlatform =
+    platform === "win32"
+      ? "Windows NT 10.0; Win64; x64"
+      : platform === "darwin"
+        ? "Macintosh; Intel Mac OS X 10_15_7"
+        : "X11; Linux x86_64";
+
   return {
-    ua: `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chrome} Safari/537.36`,
+    ua: `Mozilla/5.0 (${uaPlatform}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chrome} Safari/537.36`,
     secChUa: `"Chromium";v="${major}", "Not.A/Brand";v="24", "Google Chrome";v="${major}"`,
-    secChUaPlatform: "macOS",
+    secChUaPlatform,
   };
 }
 
@@ -841,6 +834,10 @@ function getCurrentDriver() {
   return getCollectionPlatformDriver(workspaceState.sourceType);
 }
 
+function delay(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function isTbRawPayload(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && (value as Record<string, unknown>).sourceType === "tb");
 }
@@ -900,6 +897,57 @@ async function captureGoodsSummaryFromStoredRawData(sourceProductId: string, sou
     capturedCount: capturedGoodsSummaryById.size,
   });
   return parsed;
+}
+
+async function captureTbDetailDataFromCenterHtml(sourceProductId: string, sourceUrl: string) {
+  if (workspaceState.sourceType !== "tb") {
+    return false;
+  }
+  const center = workspaceViews?.center;
+  if (!center || center.webContents.isDestroyed()) {
+    return false;
+  }
+
+  try {
+    await delay(2000);
+    if (center.webContents.isDestroyed()) {
+      return false;
+    }
+    const currentUrl = center.webContents.getURL();
+    if (!currentUrl || !currentUrl.includes(sourceProductId)) {
+      return false;
+    }
+
+    const html = await center.webContents.executeJavaScript(
+      `document.documentElement ? document.documentElement.outerHTML : ""`,
+      true,
+    );
+    const rawData = getCurrentDriver().extractRawDataFromResponse(currentUrl, "text/html", String(html || ""));
+    if (!rawData) {
+      log.info("[collection workspace] delayed tb page html regex parse returned no detail data", {
+        sourceProductId,
+        currentUrl,
+      });
+      return false;
+    }
+
+    mergeCollectedRawData(sourceProductId, rawData, workspaceState.sourceType);
+    writeDebugRawDataFile(sourceProductId, workspaceState.sourceType);
+    await captureGoodsSummaryFromStoredRawData(sourceProductId, sourceUrl || currentUrl);
+    await renderSidePanes();
+    log.info("[collection workspace] delayed tb page html detail data captured", {
+      sourceProductId,
+      currentUrl,
+    });
+    return true;
+  } catch (error) {
+    log.warn("[collection workspace] failed to parse delayed tb page html", {
+      sourceProductId,
+      sourceUrl,
+      error,
+    });
+    return false;
+  }
 }
 
 function writeDebugRawDataFile(sourceProductId: string, sourceType: CollectSourceType) {
@@ -1162,35 +1210,9 @@ function bindPlaywrightPageEvents(page: Page) {
         }
       } finally {
         await popup.close().catch(() => null);
-        // Chrome may have brought the window on-screen when the popup
-        // activated.  Move it back off-screen immediately after closing.
-        await movePlaywrightBrowserOffScreen(page);
       }
     })();
   });
-}
-
-async function movePlaywrightBrowserOffScreen(page: Page): Promise<void> {
-  try {
-    const client = await page.context().newCDPSession(page);
-    try {
-      const { windowId } = await client.send("Browser.getWindowForTarget", {}) as { windowId: number };
-      // Find the rightmost edge across all displays so the window is
-      // guaranteed to be off-screen even in multi-monitor setups.
-      const allDisplays = electronScreen.getAllDisplays();
-      const rightEdge = allDisplays.reduce((max, d) => Math.max(max, d.bounds.x + d.bounds.width), 0);
-      const offX = rightEdge + 10;
-      await client.send("Browser.setWindowBounds", {
-        windowId,
-        bounds: { left: offX, top: 0, width: 1280, height: 800 },
-      });
-    } finally {
-      await client.detach();
-    }
-    log.info("[collection workspace] playwright browser window moved off-screen");
-  } catch (error) {
-    log.warn("[collection workspace] failed to minimize playwright browser", { error });
-  }
 }
 
 async function ensureWorkspacePlaywrightPage(initialUrl: string) {
@@ -1198,22 +1220,12 @@ async function ensureWorkspacePlaywrightPage(initialUrl: string) {
   await closeWorkspacePlaywright();
 
   const resourceId = String(workspaceState.batch?.shopId || workspaceState.batch?.id || "default");
-  // 截屏流必须使用有头浏览器；false = headless disabled.
-  // 淘宝 Playwright 选品链路保留为可切换路径，当前默认走 Electron BrowserView。
+  // 采用 --headless=new：Playwright 1.49+ 在 headless=true 时默认使用 Chrome 新版无头模式，
+  // 既支持 page.screenshot 截屏流，又不会产生异常的 screenX / availLeft 指纹。
   const engine = workspaceState.sourceType === "tb"
-    ? new TbEngine(resourceId, false)
-    : new PxxEngine(resourceId, false);
+    ? new TbEngine(resourceId, true)
+    : new PxxEngine(resourceId, true);
   workspacePlaywrightEngine = engine;
-
-  // Tell Chrome to open off-screen from the very first frame by injecting
-  // --window-position into the launch args before the context is created.
-  // Use the rightmost edge across all displays so multi-monitor setups are covered.
-  const allDisplays = electronScreen.getAllDisplays();
-  const rightEdge = allDisplays.reduce((max, d) => Math.max(max, d.bounds.x + d.bounds.width), 0);
-  engine.browserArgs = [
-    ...engine.browserArgs,
-    `--window-position=${rightEdge + 10},0`,
-  ];
 
   const page = await engine.init(desiredUrl);
   if (!page) {
@@ -1223,10 +1235,6 @@ async function ensureWorkspacePlaywrightPage(initialUrl: string) {
   workspacePlaywrightPage = page;
   await resizePlaywrightViewport();
   bindPlaywrightPageEvents(page);
-  await page.bringToFront().catch(() => null);
-  // Ensure the Chrome window is off-screen even when reusing a cached context
-  // (--window-position only takes effect on first launch).
-  await movePlaywrightBrowserOffScreen(page);
   startPlaywrightFrameStream();
 
   return page.url() || desiredUrl;
@@ -1655,9 +1663,10 @@ async function handleCenterNavigation(url: string) {
   }
 
   if (getCurrentDriver().extractSourceProductId(url)) {
+    const sourceProductId = getCurrentDriver().extractSourceProductId(url);
     log.info("[collection workspace] center navigation matched goods detail", {
       url,
-      sourceProductId: getCurrentDriver().extractSourceProductId(url),
+      sourceProductId,
       isScrapingRecord,
     });
     await collectCurrentGoods(url);
@@ -1684,11 +1693,16 @@ function bindCenterViewEvents(view: BrowserView) {
     });
   });
   view.webContents.on("did-finish-load", () => {
+    const url = view.webContents.getURL();
     log.info("[collection workspace] center view did-finish-load", {
       sourceType: workspaceState.sourceType,
-      url: view.webContents.getURL(),
+      url,
       title: view.webContents.getTitle(),
     });
+    const sourceProductId = getCurrentDriver().extractSourceProductId(url);
+    if (workspaceState.sourceType === "tb" && sourceProductId) {
+      void captureTbDetailDataFromCenterHtml(sourceProductId, url);
+    }
   });
   view.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL) => {
     if (errorCode === -3) {
@@ -2110,4 +2124,3 @@ export async function dispatchCollectionPlaywrightInput(input: PlaywrightViewerI
     log.warn("[collection workspace] failed to dispatch playwright input", { inputType: input.type, error });
   }
 }
-

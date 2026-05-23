@@ -49,14 +49,15 @@ type UpdatePublishTaskDTO struct {
 }
 
 type PublishTaskQueryDTO struct {
-	Page           int    `form:"page"`
-	PageIndex      int    `form:"pageIndex"`
-	PageSize       int    `form:"pageSize"`
-	AppUserID      uint64 `form:"appUserId"`
-	ShopID         uint64 `form:"shopId"`
-	CollectBatchID uint64 `form:"collectBatchId"`
-	Status         string `form:"status"`
-	SourceType     string `form:"sourceType"`
+	Page            int    `form:"page"`
+	PageIndex       int    `form:"pageIndex"`
+	PageSize        int    `form:"pageSize"`
+	AppUserID       uint64 `form:"appUserId"`
+	ShopID          uint64 `form:"shopId"`
+	CollectBatchID  uint64 `form:"collectBatchId"`
+	Status          string `form:"status"`
+	SourceType      string `form:"sourceType"`
+	SourceProductID string `form:"sourceProductId"`
 }
 
 type PublishBatchRepublishStatsDTO struct {

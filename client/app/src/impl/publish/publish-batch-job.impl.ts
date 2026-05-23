@@ -26,6 +26,7 @@ import {
 } from '@src/publish/utils/publish-logger';
 import type { PublishProgressEvent } from '@src/publish/types/publish-task';
 import { TaskStatus, StepCode, StepStatus } from '@src/publish/types/publish-task';
+import { createLoginGate } from '@src/publish/runtime/login-gate';
 
 /**
  * PublishBatchJobImpl — 发布批次任务 IPC 实现层
@@ -127,9 +128,18 @@ export class PublishBatchJobImpl extends PublishBatchJobApi {
     while (true) {
       const runner = new PublishRunner(persister);
       let captchaGate: Promise<void> | null = null;
+      let loginGate: Promise<void> | null = null;
 
       runner.onProgress((event: PublishProgressEvent) => {
         onProgress(event);
+
+        // 检测到登录过期：创建门控并广播到前端（前端弹窗让用户处理）
+        if (event.loginRequiredShopId) {
+          loginGate = createLoginGate(taskId);
+          for (const wc of getPublishRelatedWebContents()) {
+            wc.send('publish.onLoginRequired', { taskId, shopId: event.loginRequiredShopId });
+          }
+        }
 
         // 检测到验证码：挂起 gate，等待用户通过后才放行
         if (event.captchaUrl) {
@@ -158,13 +168,21 @@ export class PublishBatchJobImpl extends PublishBatchJobApi {
                   publishInfo(`[batch-task:${taskId}] captcha cookie sync failed, resuming anyway`, { error: String(err) });
                 })
                 .then(() => resolve());
-            });
+            }, shopId);
           });
         }
       });
 
       // FAILED 时 runner.run() 会抛出异常，透传给调用方，当前商品标为失败，继续下一个商品
       await runner.run(taskId);
+
+      if (loginGate !== null) {
+        // 当前商品登录过期（PENDING），整个批次在此挂起，等用户处理完登录
+        publishInfo(`[batch-task:${taskId}] login required, batch paused`);
+        await loginGate;
+        publishInfo(`[batch-task:${taskId}] login resolved, continue current product`);
+        continue;
+      }
 
       if (captchaGate !== null) {
         // 当前商品遇到验证码（PENDING），整个批次在此挂起，不跳下一个商品

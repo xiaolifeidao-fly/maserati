@@ -80,6 +80,10 @@ func normalizeCollectBatchStatus(value string) string {
 
 func normalizeCollectRecordStatus(value string) string {
 	switch strings.ToUpper(strings.TrimSpace(value)) {
+	case "COLLECTED":
+		return "COLLECTED"
+	case "DATA_INCOMPLETE":
+		return "DATA_INCOMPLETE"
 	case "SUCCESS":
 		return "SUCCESS"
 	case "FAILED":

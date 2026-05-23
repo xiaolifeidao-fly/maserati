@@ -11,8 +11,7 @@ import { setupAutoUpdater, checkForUpdates } from './update/update';
 import log from 'electron-log';
 import { registerRpc } from './register/rpc';
 import { init } from './store';
-import { Browser, chromium } from 'playwright';
-import { getPlatform, initPlatform, setPlatform, closeAllBrowserContexts } from '@src/browser/engine';
+import { closeAllBrowserContexts } from '@src/browser/engine';
 
 // ==================== 日志配置：按日期文件夹存储，5M轮转，保留7天 ====================
 (function configureLogging() {
@@ -229,6 +228,14 @@ import { getPlatform, initPlatform, setPlatform, closeAllBrowserContexts } from 
 // ==================== 日志配置结束 ====================
 
 log.info("app load")
+
+function configureChromiumLogging(): void {
+  // Suppress noisy Chromium stderr logs, for example GPU/GLES context errors from captcha pages.
+  // This does not affect electron-log business logs.
+  app.commandLine.appendSwitch('log-level', process.env.CHROMIUM_LOG_LEVEL || '3');
+}
+
+configureChromiumLogging();
 
 function openExternalUrl(url: string) {
   const nextUrl = String(url || '').trim();

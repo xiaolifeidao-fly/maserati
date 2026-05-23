@@ -42,6 +42,8 @@ export async function saveCollectedToServer(
     batchId,
     sourceProductId: summary.sourceProductId,
     productName: summary.productName,
+    status: summary.status,
+    missingFields: summary.missingFields || [],
   });
 
   if (batchId <= 0) {
@@ -87,6 +89,7 @@ export async function saveCollectedToServer(
           sourceSnapshotUrl: sourceUrl,
           rawSourceData: ctx.rawSourceData ? JSON.stringify(ctx.rawSourceData) : undefined,
           status: summary.status,
+          missingFields: JSON.stringify(summary.missingFields || []),
         },
       },
     );
@@ -108,6 +111,7 @@ export async function saveCollectedToServer(
         rawSourceData: ctx.rawSourceData ? JSON.stringify(ctx.rawSourceData) : undefined,
         isFavorite: source === "file",
         status: summary.status,
+        missingFields: JSON.stringify(summary.missingFields || []),
       },
     });
     log.info("[collect.saver] record created", {

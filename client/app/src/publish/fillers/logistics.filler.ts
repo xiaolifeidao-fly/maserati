@@ -345,7 +345,7 @@ async function createTaobaoShippingTemplate(
     shopId,
     url: TB_FREIGHT_TEMPLATE_PAGE,
   });
-  const engine = new TbEngine(String(shopId), true);
+  const engine = new TbEngine(String(shopId), false);
   try {
     const page = await engine.init(TB_FREIGHT_TEMPLATE_PAGE);
     if (!page) {
@@ -420,6 +420,7 @@ async function createTaobaoShippingTemplate(
 
     return templateId;
   } catch (err) {
+    if (err instanceof PublishError) throw err;
     publishWarn(`[task:${taskId}] [LogisticsFiller] create-template: 未捕获异常`, {
       taskId,
       error: err instanceof Error ? err.message : String(err),
@@ -566,11 +567,12 @@ async function postTaobaoAddressTemplate(params: {
   });
 
   if (!data?.success) {
+    const msg = String(data?.msg ?? '淘宝运费模板接口返回失败');
     publishWarn(`[task:${taskId}] [LogisticsFiller] create-template: POST 返回 success=false`, {
       taskId,
-      msg: data?.msg ?? null,
+      msg,
     });
-    return null;
+    throw new PublishError(StepCode.FILL_DRAFT, msg, false, { responseData: data });
   }
 
   // 等待淘宝后端数据同步后再查询列表

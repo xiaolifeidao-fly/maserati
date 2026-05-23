@@ -14,6 +14,7 @@ import {
 } from "@ant-design/icons";
 import {
   Alert,
+  Button,
   Descriptions,
   Input,
   Modal,
@@ -21,6 +22,7 @@ import {
   Progress,
   Radio,
   Select,
+  Space,
   Spin,
   Steps,
   Table,
@@ -157,6 +159,8 @@ interface PublishQueueItem {
   currentStepCode?: string;
   statusText?: string;
   waitingForCaptcha?: boolean;
+  waitingForLogin?: boolean;
+  loginRequiredShopId?: number;
   draftId?: string;
   error?: string;
 }
@@ -256,6 +260,7 @@ interface PublishProgressEvent {
   stepCode: string;
   status: PublishStepStatusValue;
   message?: string;
+  loginRequiredShopId?: number;
 }
 
 interface PublishRuntimeTaskSnapshot {
@@ -270,6 +275,8 @@ interface PublishRuntimeTaskSnapshot {
   errorMessage?: string;
   outerItemId?: string;
   waitingForCaptcha?: boolean;
+  waitingForLogin?: boolean;
+  loginRequiredShopId?: number;
   sourceBatchId?: number;
   sourceBatchName?: string;
   sourceRecordId?: number;
@@ -345,6 +352,8 @@ export function ProductPublishModal({
   const [exportingBatchLogs, setExportingBatchLogs] = useState(false);
   const [publishProgressLoading, setPublishProgressLoading] = useState(directToProgress);
   const [captchaPanelActuallyVisible, setCaptchaPanelActuallyVisible] = useState(false);
+  const [loginRequiredModal, setLoginRequiredModal] = useState<{ taskId: number; shopId: number } | null>(null);
+  const [handlingLogin, setHandlingLogin] = useState(false);
   const [batchStatsMap, setBatchStatsMap] = useState<Record<number, CollectBatchStats | null>>({});
   const [batchStatsLoading, setBatchStatsLoading] = useState(false);
   const runningTableWrapRef = useRef<HTMLDivElement | null>(null);
@@ -951,6 +960,7 @@ export function ProductPublishModal({
             ...item,
             status: "FAILED",
             waitingForCaptcha: false,
+            waitingForLogin: false,
             statusText: "任务已取消",
             error: "任务已取消",
           };
@@ -960,6 +970,7 @@ export function ProductPublishModal({
             ...item,
             status: "FAILED",
             waitingForCaptcha: false,
+            waitingForLogin: false,
             statusText: "任务已停止",
             error: "任务已停止",
           };
@@ -974,6 +985,7 @@ export function ProductPublishModal({
               ...task,
               status: PublishTaskStatus.CANCELLED,
               waitingForCaptcha: false,
+              waitingForLogin: false,
               statusText: "任务已取消",
               errorMessage: task.errorMessage || "任务已取消",
             }
@@ -1147,6 +1159,10 @@ export function ProductPublishModal({
           const onTaskProgress = (event: PublishProgressEvent) => {
             if (publishRunIdRef.current !== runId) return;
             const waitingForCaptcha = event.status === PublishStepStatus.PENDING && isCaptchaPendingMessage(event.message);
+            const waitingForLogin = event.status === PublishStepStatus.PENDING && Boolean(event.loginRequiredShopId);
+            if (waitingForLogin && event.loginRequiredShopId) {
+              setLoginRequiredModal({ taskId: event.taskId, shopId: event.loginRequiredShopId });
+            }
             setPublishQueue((cur) =>
               cur.map((q) =>
                 q.key === item.key
@@ -1154,10 +1170,14 @@ export function ProductPublishModal({
                       ...q,
                       status: event.status === "FAILED" ? "FAILED" : event.status === "SUCCESS" ? "SUCCESS" : "PUBLISHING",
                       currentStepCode: event.stepCode,
-                      statusText: waitingForCaptcha
-                        ? "等待验证码，完成右侧校验后继续发布"
-                        : event.message || q.statusText,
+                      statusText: waitingForLogin
+                        ? "等待登录，请点击处理后重新登录"
+                        : waitingForCaptcha
+                          ? "等待验证码，完成右侧校验后继续发布"
+                          : event.message || q.statusText,
                       waitingForCaptcha,
+                      waitingForLogin,
+                      loginRequiredShopId: event.loginRequiredShopId ?? q.loginRequiredShopId,
                       error: event.status === "FAILED" ? event.message || "发布失败" : undefined,
                     }
                   : q,
@@ -1167,20 +1187,23 @@ export function ProductPublishModal({
 
           let finalTask = await waitForPublishTaskFinish(publishApi, createdTask.id, onTaskProgress);
 
-          // 遇到验证码（PENDING）时：挂起，等验证码通过后继续当前商品，不跳下一个商品
+          // 遇到验证码或登录过期（PENDING）时：挂起，等处理完后继续当前商品，不跳下一个商品
           while (
             finalTask.status === PublishTaskStatus.PENDING &&
             publishRunIdRef.current === runId &&
             !stopRequestedRef.current
           ) {
+            const isPendingForLogin = isLoginPendingMessage(finalTask.errorMessage);
             setPublishQueue((cur) =>
               cur.map((q) =>
                 q.key === item.key
-                  ? { ...q, status: "PUBLISHING", waitingForCaptcha: true, statusText: "等待验证码，完成右侧校验后继续发布" }
+                  ? isPendingForLogin
+                    ? { ...q, status: "PUBLISHING", waitingForLogin: true, statusText: "等待登录，请点击处理后重新登录" }
+                    : { ...q, status: "PUBLISHING", waitingForCaptcha: true, statusText: "等待验证码，完成右侧校验后继续发布" }
                   : q,
               ),
             );
-            // 验证码通过后主进程会自动 resumePublish，任务重回 RUNNING → SUCCESS/FAILED
+            // 验证码/登录通过后主进程会自动 resumePublish，任务重回 RUNNING → SUCCESS/FAILED
             finalTask = await waitForPublishTaskFinish(publishApi, createdTask.id, onTaskProgress);
           }
 
@@ -1204,6 +1227,8 @@ export function ProductPublishModal({
                         ? `淘宝商品 #${finalTask.outerItemId}`
                         : q.statusText,
                     waitingForCaptcha: false,
+                    waitingForLogin: false,
+                    loginRequiredShopId: undefined,
                     error: finalTask.status === PublishTaskStatus.SUCCESS
                       ? undefined
                       : finalTask.status === PublishTaskStatus.CANCELLED
@@ -1223,7 +1248,7 @@ export function ProductPublishModal({
           setPublishQueue((cur) =>
             cur.map((q) =>
                 q.key === item.key
-                ? { ...q, status: "FAILED", waitingForCaptcha: false, error: error instanceof Error ? error.message : "发布失败" }
+                ? { ...q, status: "FAILED", waitingForCaptcha: false, waitingForLogin: false, error: error instanceof Error ? error.message : "发布失败" }
                 : q,
             ),
           );
@@ -1258,6 +1283,7 @@ export function ProductPublishModal({
           ? {
               ...item,
               waitingForCaptcha: false,
+              waitingForLogin: false,
               status: "PUBLISHING",
               statusText: "已提交继续发布，等待任务恢复",
               error: undefined,
@@ -1596,6 +1622,24 @@ export function ProductPublishModal({
   );
 
   const activeCaptchaItem = captchaPendingItems[0] ?? null;
+
+  const loginPendingItems = useMemo(
+    () => publishQueue.filter((item) => item.waitingForLogin && item.taskId),
+    [publishQueue],
+  );
+
+  const handlePublishLogin = async (taskId: number, shopId: number) => {
+    if (handlingLogin) return;
+    setHandlingLogin(true);
+    try {
+      await getPublishApi().handlePublishLoginRequired(taskId, shopId);
+      setLoginRequiredModal(null);
+    } catch {
+      // 失败不关闭弹窗，让用户重试
+    } finally {
+      setHandlingLogin(false);
+    }
+  };
 
   useEffect(() => {
     if (!activeCaptchaItem) {
@@ -2063,6 +2107,32 @@ export function ProductPublishModal({
                       description={`${activeCaptchaItem.title} 需要先在右侧完成淘宝验证码，再点击该行右侧的"继续发布"。`}
                     />
                   ) : null}
+                  {loginPendingItems.length > 0 ? (
+                    <Alert
+                      type="error"
+                      showIcon
+                      style={{ marginBottom: 16 }}
+                      message="发布任务暂停：店铺需要重新登录"
+                      description={
+                        <Space direction="vertical" size={4}>
+                          <span>{loginPendingItems.length} 个任务因淘宝会话过期而暂停，请点击处理后完成登录，任务将自动继续。</span>
+                          <Button
+                            size="small"
+                            type="primary"
+                            loading={handlingLogin}
+                            onClick={() => {
+                              const first = loginPendingItems[0];
+                              if (first?.taskId && first.loginRequiredShopId) {
+                                void handlePublishLogin(first.taskId, first.loginRequiredShopId);
+                              }
+                            }}
+                          >
+                            点击处理
+                          </Button>
+                        </Space>
+                      }
+                    />
+                  ) : null}
                   {/* 发布任务进度 */}
                   <div style={{ marginBottom: 20 }}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, marginBottom: 10 }}>
@@ -2123,6 +2193,34 @@ export function ProductPublishModal({
             </div>
           )}
         </div>
+      </Modal>
+
+      <Modal
+        open={Boolean(loginRequiredModal)}
+        title="店铺登录已过期"
+        onCancel={() => setLoginRequiredModal(null)}
+        footer={[
+          <Button key="cancel" onClick={() => setLoginRequiredModal(null)}>
+            稍后处理
+          </Button>,
+          <Button
+            key="handle"
+            type="primary"
+            loading={handlingLogin}
+            onClick={() => {
+              if (loginRequiredModal) {
+                void handlePublishLogin(loginRequiredModal.taskId, loginRequiredModal.shopId);
+              }
+            }}
+          >
+            点击处理
+          </Button>,
+        ]}
+      >
+        <Space direction="vertical" size={8} style={{ width: "100%" }}>
+          <span>发布任务检测到淘宝会话已过期（未登录），任务已暂停。</span>
+          <span>点击「点击处理」将打开淘宝登录窗口，完成登录后任务将自动从断点继续发布。</span>
+        </Space>
       </Modal>
 
       <style jsx global>{`
@@ -2408,6 +2506,11 @@ function buildRuntimeTaskStatusText(task: PublishRuntimeTaskSnapshot): string {
 function isCaptchaPendingMessage(message?: string): boolean {
   const text = String(message || "").trim();
   return text.includes("等待验证码") || text.includes("需要验证码");
+}
+
+function isLoginPendingMessage(message?: string): boolean {
+  const text = String(message || "").trim();
+  return text.includes("等待登录") || text.includes("需要重新登录");
 }
 
 function localizePublishStepText(text?: string): string | undefined {

@@ -1,6 +1,6 @@
 import type { Page } from "playwright";
 import { requestBackend } from "@src/impl/shared/backend";
-import { PublishError } from "../core/errors";
+import { LoginRequiredError } from "../core/errors";
 import type { StepCode } from "../types/publish-task";
 
 declare const window: any;
@@ -55,7 +55,7 @@ export async function ensureTbShopLoggedIn(
 
 export async function handleTbLoginRequired(stepCode: StepCode, shopId: number): Promise<never> {
   await markShopAsLoggedOut(shopId);
-  throw new PublishError(stepCode, TB_LOGIN_REQUIRED_MESSAGE);
+  throw new LoginRequiredError(stepCode, shopId);
 }
 
 export async function handleTbMaybeLoginRequired(

@@ -68,6 +68,24 @@ export function isCaptchaError(err: unknown): err is CaptchaRequiredError {
   return err instanceof CaptchaRequiredError;
 }
 
+/**
+ * 发布过程中检测到淘宝会话已过期（未登录）时抛出此错误。
+ * StepChain 捕获后暂停流程，等待用户重新登录后由主进程自动恢复。
+ */
+export class LoginRequiredError extends PublishError {
+  readonly shopId: number;
+
+  constructor(stepCode: StepCode, shopId: number) {
+    super(stepCode, '未登录', true);
+    this.name = 'LoginRequiredError';
+    this.shopId = shopId;
+  }
+}
+
+export function isLoginRequiredError(err: unknown): err is LoginRequiredError {
+  return err instanceof LoginRequiredError;
+}
+
 export function isScreenshotCaptchaError(err: unknown): err is ScreenshotCaptchaRequiredError {
   return err instanceof ScreenshotCaptchaRequiredError;
 }

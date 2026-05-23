@@ -2,7 +2,7 @@ import { StepCode, StepStatus, TaskStatus } from '../types/publish-task';
 import type { PublishProgressEvent } from '../types/publish-task';
 import type { PublishStep } from './publish-step';
 import type { StepContext } from './step-context';
-import { CaptchaRequiredError, ScreenshotCaptchaRequiredError, isPublishError } from './errors';
+import { CaptchaRequiredError, LoginRequiredError, ScreenshotCaptchaRequiredError, isPublishError } from './errors';
 import type { IPublishPersister } from './publish-runner';
 import { publishError, publishStepLog, summarizeForLog } from '../utils/publish-logger';
 
@@ -117,6 +117,30 @@ export class StepChain {
         }
 
       } catch (err) {
+        if (err instanceof LoginRequiredError) {
+          // 更新步骤为 PENDING（等待登录）
+          await this.persister?.updateStep(ctx.taskId, stepId, {
+            status: StepStatus.PENDING,
+            errorMessage: '等待登录',
+          });
+          await this.persister?.updateTask(ctx.taskId, {
+            currentStepCode: step.stepCode,
+            errorMessage: '等待登录',
+          });
+          this.emit({
+            taskId: ctx.taskId,
+            stepCode: step.stepCode,
+            status: StepStatus.PENDING,
+            message: '需要重新登录',
+            loginRequiredShopId: err.shopId,
+          });
+          publishStepLog(ctx.taskId, step.stepCode, 'login-required', {
+            shopId: err.shopId,
+            ...this.buildProductMeta(ctx),
+          });
+          // 向上透传，由 PublishRunner 暂停任务
+          throw err;
+        }
         if (err instanceof CaptchaRequiredError) {
           // 更新步骤为 PENDING（等待验证码）
           await this.persister?.updateStep(ctx.taskId, stepId, {

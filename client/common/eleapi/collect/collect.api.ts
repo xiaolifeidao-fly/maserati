@@ -162,6 +162,7 @@ export class CollectRecordPreview {
   rawDataUrl = "";
   isFavorite = false;
   status = "";
+  missingFields?: string;
   active = 1;
   isLoading?: boolean;
   createdTime?: string;
@@ -182,6 +183,7 @@ export interface CollectRecordUpdatePayload {
   productName?: string;
   isFavorite?: boolean;
   status?: string;
+  missingFields?: string;
 }
 
 export interface CollectBatchStats {

@@ -294,10 +294,10 @@ function extractTbSkuList(detailRes: Record<string, unknown>): SkuItem[] {
       spec: specs.map((spec) => spec.value).join(" / ") || String(currentSku.skuName || currentSku.specName || skuId),
       specs,
       price: normalizePrice(
-        firstNonEmpty(subPrice.priceMoney, subPrice.priceText, priceInfo.priceMoney, priceInfo.priceText),
+        firstNonEmpty(subPrice.priceText, priceInfo.priceText, subPrice.priceMoney, priceInfo.priceMoney),
       ),
       originalPrice: normalizePrice(
-        firstNonEmpty(priceInfo.priceMoney, priceInfo.priceText, subPrice.priceMoney, subPrice.priceText),
+        firstNonEmpty(priceInfo.priceText, subPrice.priceText, priceInfo.priceMoney, subPrice.priceMoney),
       ) || undefined,
       stock: Number(skuInfo.quantity || currentSku.stock || currentSku.stockNum || 0),
       imgUrl,
@@ -755,10 +755,10 @@ export function convertPxxToStandard(
             spec: specs.map((spec) => spec.value).join(" / ") || String(currentSku.skuName || currentSku.specName || skuId),
             specs,
             price: normalizePrice(
-              firstNonEmpty(subPrice.priceMoney, subPrice.priceText, priceInfo.priceMoney, priceInfo.priceText),
+              firstNonEmpty(subPrice.priceText, priceInfo.priceText, subPrice.priceMoney, priceInfo.priceMoney),
             ),
             originalPrice: normalizePrice(
-              firstNonEmpty(priceInfo.priceMoney, priceInfo.priceText, subPrice.priceMoney, subPrice.priceText),
+              firstNonEmpty(priceInfo.priceText, subPrice.priceText, priceInfo.priceMoney, subPrice.priceMoney),
             ) || undefined,
             stock: Number(skuInfo.quantity || currentSku.stock || currentSku.stockNum || 0),
             imgUrl,

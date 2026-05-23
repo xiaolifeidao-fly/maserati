@@ -15,7 +15,7 @@ import { SearchCategoryStep } from '../steps/search-category.step';
 import { FillDraftStep } from '../steps/fill-draft.step';
 import { EditDraftStep } from '../steps/edit-draft.step';
 import { PublishFinalStep } from '../steps/publish.step';
-import { CaptchaRequiredError } from './errors';
+import { CaptchaRequiredError, LoginRequiredError } from './errors';
 import {
   clearPublishProductLogs,
   publishError,
@@ -239,6 +239,26 @@ export class PublishRunner {
       });
 
     } catch (err) {
+      if (err instanceof LoginRequiredError) {
+        publishInfo(`[task:${taskId}] publish runner waiting login`, {
+          stepCode: err.stepCode,
+          shopId: err.shopId,
+        });
+        publishInfo(`[task:${taskId}] publish summary pending login`, {
+          shopId: ctx.shopId,
+          sourceProductId: this.getSourceProductId(ctx),
+          productTitle: this.getProductTitle(ctx),
+          stepCode: err.stepCode,
+          durationMs: this.getDurationMs(taskId),
+        });
+        // 登录暂停：不算失败，等待用户重新登录后恢复
+        await this.persister.updateTask(taskId, {
+          status: TaskStatus.PENDING,
+          currentStepCode: err.stepCode as StepCode,
+          errorMessage: '等待登录',
+        });
+        return;
+      }
       if (err instanceof CaptchaRequiredError) {
         publishInfo(`[task:${taskId}] publish runner waiting captcha`, {
           stepCode: err.stepCode,

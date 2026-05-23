@@ -18,6 +18,39 @@ class PublishLogWriter {
   private currentDir = '';
   private cleanupStarted = false;
   private readonly taskProductMap = new Map<number, string>();
+  private readonly taskFileIndex = new Map<number, string>();
+
+  private get taskIndexPath(): string {
+    return path.join(this.baseDir, 'task-log-index.json');
+  }
+
+  private loadTaskIndex(): void {
+    try {
+      if (fs.existsSync(this.taskIndexPath)) {
+        const data = JSON.parse(fs.readFileSync(this.taskIndexPath, 'utf8')) as Record<string, string>;
+        for (const [key, filePath] of Object.entries(data)) {
+          const taskId = Number(key);
+          if (Number.isFinite(taskId) && filePath) {
+            this.taskFileIndex.set(taskId, filePath);
+          }
+        }
+      }
+    } catch {
+      // ignore corrupted index
+    }
+  }
+
+  private saveTaskIndex(): void {
+    try {
+      const data: Record<string, string> = {};
+      for (const [taskId, filePath] of this.taskFileIndex) {
+        data[String(taskId)] = filePath;
+      }
+      fs.writeFileSync(this.taskIndexPath, JSON.stringify(data), 'utf8');
+    } catch {
+      // ignore write failure
+    }
+  }
 
   registerTaskProduct(taskId: number, sourceProductId?: string | null): void {
     const normalized = normalizeSourceProductId(sourceProductId);
@@ -25,10 +58,18 @@ class PublishLogWriter {
       return;
     }
     this.taskProductMap.set(taskId, normalized);
+    this.ensureInitialized();
+    const filePath = this.filePath(normalized);
+    this.taskFileIndex.set(taskId, filePath);
+    this.saveTaskIndex();
   }
 
   unregisterTask(taskId: number): void {
     this.taskProductMap.delete(taskId);
+  }
+
+  getTaskLogFilePath(taskId: number): string | undefined {
+    return this.taskFileIndex.get(taskId);
   }
 
   clearProductLogs(sourceProductId?: string | null): void {
@@ -84,6 +125,35 @@ class PublishLogWriter {
 
     fs.copyFileSync(logFile, filePath);
     return { exported: true, cancelled: false, filePath, count: 1 };
+  }
+
+  async previewProductLog(sourceProductId?: string | null): Promise<PublishLogPreviewResult> {
+    const normalized = normalizeSourceProductId(sourceProductId);
+    if (!normalized) {
+      throw new Error('sourceProductId is required');
+    }
+
+    const logFile = this.findLatestProductLog(normalized);
+    if (!logFile) {
+      throw new Error(`未找到商品 ${sourceProductId} 的发布日志`);
+    }
+
+    const stats = fs.statSync(logFile);
+    const buffer = fs.readFileSync(logFile);
+    const truncated = buffer.length > MAX_TEXT_LENGTH;
+    const content = truncated
+      ? buffer.subarray(Math.max(0, buffer.length - MAX_TEXT_LENGTH)).toString('utf8')
+      : buffer.toString('utf8');
+
+    return {
+      sourceProductId: normalized,
+      filePath: logFile,
+      fileName: path.basename(logFile),
+      content,
+      size: stats.size,
+      modifiedAt: stats.mtime.toISOString(),
+      truncated,
+    };
   }
 
   async exportBatchErrorLogs(
@@ -163,6 +233,15 @@ class PublishLogWriter {
     };
   }
 
+  showLogFileInFolder(taskId: number): { shown: boolean } {
+    const filePath = this.taskFileIndex.get(taskId);
+    if (!filePath) {
+      throw new Error(`未找到发布任务 #${taskId} 的日志文件记录`);
+    }
+    shell.showItemInFolder(filePath);
+    return { shown: true };
+  }
+
   write(line: string, meta?: unknown): void {
     if (!isEnabled()) {
       return;
@@ -205,6 +284,7 @@ class PublishLogWriter {
     this.currentDir = path.join(this.baseDir, this.currentDate);
     fs.mkdirSync(this.currentDir, { recursive: true });
     this.initialized = true;
+    this.loadTaskIndex();
 
     if (!this.cleanupStarted) {
       this.cleanupStarted = true;
@@ -303,6 +383,16 @@ export interface PublishLogExportResult {
   missingCount?: number;
 }
 
+export interface PublishLogPreviewResult {
+  sourceProductId: string;
+  filePath: string;
+  fileName: string;
+  content: string;
+  size: number;
+  modifiedAt: string;
+  truncated: boolean;
+}
+
 export function registerPublishTaskLogFile(taskId: number, sourceProductId?: string | null): void {
   writer.registerTaskProduct(taskId, sourceProductId);
 }
@@ -319,6 +409,10 @@ export function exportPublishProductLog(sourceProductId?: string | null): Promis
   return writer.exportProductLog(sourceProductId);
 }
 
+export function previewPublishProductLog(sourceProductId?: string | null): Promise<PublishLogPreviewResult> {
+  return writer.previewProductLog(sourceProductId);
+}
+
 export function exportPublishBatchErrorLogs(
   batchId: number,
   sourceProductIds: Array<string | null | undefined>,
@@ -328,6 +422,14 @@ export function exportPublishBatchErrorLogs(
 
 export function openPublishLogDirectory(): Promise<{ opened: boolean; path?: string }> {
   return writer.openLogDirectory();
+}
+
+export function showPublishLogFileInFolder(taskId: number): { shown: boolean } {
+  return writer.showLogFileInFolder(taskId);
+}
+
+export function getPublishTaskLogFilePath(taskId: number): string | undefined {
+  return writer.getTaskLogFilePath(taskId);
 }
 
 export function publishInfo(message: string, meta?: unknown): void {

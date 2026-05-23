@@ -25,6 +25,7 @@ type CollectRecord struct {
 	RawDataURL        string `gorm:"column:raw_data_url;type:varchar(1000)" description:"原始数据在 OSS 的地址"`
 	IsFavorite        bool   `gorm:"column:is_favorite;type:tinyint(1);default:0" description:"是否收藏"`
 	Status            string `gorm:"column:status;type:varchar(32)" description:"状态"`
+	MissingFields     string `gorm:"column:missing_fields;type:varchar(1000)" description:"未采集到的字段 JSON 数组"`
 }
 
 func (c *CollectRecord) TableName() string { return "collect_record" }

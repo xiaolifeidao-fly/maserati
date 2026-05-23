@@ -115,6 +115,13 @@ export class ShopLoginStartResult {
   message = "";
 }
 
+export class ShopInfoOpenResult {
+  success = false;
+  shopId = 0;
+  platform = "";
+  message = "";
+}
+
 export class ProductRecord {
   id = 0;
   shopId = 0;
@@ -234,6 +241,11 @@ export class CommerceApi extends ElectronApi {
   @InvokeType(Protocols.INVOKE)
   async startShopLogin(shopId: number): Promise<ShopLoginStartResult> {
     return this.invokeApi("startShopLogin", shopId);
+  }
+
+  @InvokeType(Protocols.INVOKE)
+  async openShopInfo(shopId: number): Promise<ShopInfoOpenResult> {
+    return this.invokeApi("openShopInfo", shopId);
   }
 
   @InvokeType(Protocols.INVOKE)

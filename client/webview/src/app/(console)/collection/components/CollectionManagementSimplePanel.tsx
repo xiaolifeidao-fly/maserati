@@ -668,13 +668,6 @@ export function CollectionManagementSimplePanel() {
             disabled={!canCollect}
             onClick={() => void startCollection(record)}
           />
-          <IconOnlyButton
-            type="text"
-            icon={<BulbOutlined />}
-            tooltip="AI选品"
-            onClick={() => void openAiSelectionModal(record)}
-          />
-          <IconOnlyButton type="text" icon={<EyeOutlined />} tooltip="查看AI选品结果" onClick={() => openAiResultModal(record)} />
           <IconOnlyButton type="text" icon={<EyeOutlined />} tooltip="查看详情" onClick={() => openDetailModal(record)} />
           <IconOnlyButton type="text" icon={<ImportOutlined />} tooltip="导入 zip" onClick={() => openImportModal(record)} />
           <IconOnlyButton
@@ -840,9 +833,6 @@ export function CollectionManagementSimplePanel() {
               }}
             />
             <IconOnlyButton type="primary" icon={<PlusOutlined />} tooltip="新增选品批次" onClick={openCreateModal} />
-            <Button type="primary" icon={<BulbOutlined />} onClick={openAiStrategyDrawer}>
-              AI选品策略
-            </Button>
           </Space>
 
           <Tag style={{ color: "var(--manager-text-soft)", background: "rgba(170,192,238,0.16)", border: "none" }}>

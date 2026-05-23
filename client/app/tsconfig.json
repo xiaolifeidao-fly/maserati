@@ -34,6 +34,12 @@
       ],
       "@enums/*": [
         "../common/enums/*"
+      ],
+      "playwright": [
+        "./node_modules/patchright/index"
+      ],
+      "playwright-core": [
+        "./node_modules/patchright-core/index"
       ]
     }
   },

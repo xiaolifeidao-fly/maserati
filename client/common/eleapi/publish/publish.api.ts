@@ -14,6 +14,7 @@ import type {
 import type { PageResult } from '../commerce/commerce.api';
 
 export type { PageResult };
+export type { PublishStepRecord, PublishTaskRecord };
 
 export interface PublishLogExportResult {
   exported: boolean;
@@ -21,6 +22,16 @@ export interface PublishLogExportResult {
   filePath?: string;
   count: number;
   missingCount?: number;
+}
+
+export interface PublishLogPreviewResult {
+  sourceProductId: string;
+  filePath: string;
+  fileName: string;
+  content: string;
+  size: number;
+  modifiedAt: string;
+  truncated: boolean;
 }
 
 export interface PublishDraftRecord {
@@ -122,6 +133,15 @@ export class PublishApi extends ElectronApi {
     return this.invokeApi('cancelPublish', taskId);
   }
 
+  /**
+   * 用户点击"处理"后调用：打开指定店铺的淘宝登录窗口（Playwright）。
+   * 登录成功后主进程自动恢复暂停中的发布任务。
+   */
+  @InvokeType(Protocols.INVOKE)
+  async handlePublishLoginRequired(taskId: number, shopId: number): Promise<{ handled: boolean }> {
+    return this.invokeApi('handlePublishLoginRequired', taskId, shopId);
+  }
+
   @InvokeType(Protocols.INVOKE)
   async getPublishCenterState(): Promise<PublishCenterState> {
     return this.invokeApi('getPublishCenterState');
@@ -130,6 +150,11 @@ export class PublishApi extends ElectronApi {
   @InvokeType(Protocols.INVOKE)
   async exportPublishErrorLog(sourceProductId: string): Promise<PublishLogExportResult> {
     return this.invokeApi('exportPublishErrorLog', sourceProductId);
+  }
+
+  @InvokeType(Protocols.INVOKE)
+  async getPublishLogPreview(sourceProductId: string): Promise<PublishLogPreviewResult> {
+    return this.invokeApi('getPublishLogPreview', sourceProductId);
   }
 
   @InvokeType(Protocols.INVOKE)
@@ -143,6 +168,16 @@ export class PublishApi extends ElectronApi {
   @InvokeType(Protocols.INVOKE)
   async openPublishLogDirectory(): Promise<{ opened: boolean; path?: string }> {
     return this.invokeApi('openPublishLogDirectory');
+  }
+
+  @InvokeType(Protocols.INVOKE)
+  async showPublishLogFileInFolder(taskId: number): Promise<{ shown: boolean }> {
+    return this.invokeApi('showPublishLogFileInFolder', taskId);
+  }
+
+  @InvokeType(Protocols.INVOKE)
+  async getPublishTaskLogFilePath(taskId: number): Promise<string | undefined> {
+    return this.invokeApi('getPublishTaskLogFilePath', taskId);
   }
 
   @InvokeType(Protocols.INVOKE)
@@ -169,5 +204,10 @@ export class PublishApi extends ElectronApi {
   @InvokeType(Protocols.TRRIGER)
   async onPublishCenterStateChanged(callback: (state: PublishCenterState) => void): Promise<void> {
     return this.onMessage('onPublishCenterStateChanged', callback);
+  }
+
+  @InvokeType(Protocols.TRRIGER)
+  async onLoginRequired(callback: (payload: { taskId: number; shopId: number }) => void): Promise<void> {
+    return this.onMessage('onLoginRequired', callback);
   }
 }

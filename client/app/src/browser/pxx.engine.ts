@@ -9,6 +9,7 @@ declare const window: any;
 type PersistShopLogin = (payload: ShopLoginPayload) => Promise<void>;
 
 const PXX_PROFILE_URL = "https://mobile.yangkeduo.com/personal_profile.html";
+const PXX_MERCHANT_HOME_URL = "https://mms.pinduoduo.com/home/";
 
 export class PxxEngine extends DoorEngine {
   getNamespace(): string {
@@ -69,6 +70,17 @@ export class PxxEngine extends DoorEngine {
     return page;
   }
 
+  async openShopInfoWorkspace(shop: ShopRecord): Promise<Page | undefined> {
+    const page = await this.init();
+    if (!page) {
+      return undefined;
+    }
+
+    await page.goto(getPxxShopInfoUrl(shop), { waitUntil: "domcontentloaded" });
+    await page.bringToFront();
+    return page;
+  }
+
   async openCollectionWorkspace(batch: CollectBatchRecord, records: CollectRecordPreview[]): Promise<Page | undefined> {
     const page = await this.init("https://mobile.yangkeduo.com/");
     if (!page) {
@@ -110,6 +122,10 @@ export class PxxEngine extends DoorEngine {
       log.warn("[PxxEngine] failed to capture pxx login state from page", error);
     }
   }
+}
+
+function getPxxShopInfoUrl(shop: ShopRecord): string {
+  return normalizeShopUsage(shop.shopUsage) === "PUBLISH" ? PXX_MERCHANT_HOME_URL : PXX_PROFILE_URL;
 }
 
 function buildShopLoginPayload(shop: ShopRecord, rawData: unknown): ShopLoginPayload | null {
@@ -168,6 +184,17 @@ function buildShopLoginPayload(shop: ShopRecord, rawData: unknown): ShopLoginPay
     platformShopId: normalizedPlatformShopId,
     businessId: normalizedBusinessId,
   };
+}
+
+function normalizeShopUsage(shopUsage: string): string {
+  const normalized = (shopUsage || "").trim().toUpperCase();
+  if (normalized === "PUBLISH" || normalized === "发布") {
+    return "PUBLISH";
+  }
+  if (normalized === "COLLECT" || normalized === "采集" || normalized === "选品") {
+    return "COLLECT";
+  }
+  return "COLLECT";
 }
 
 function extractRawDataFromHtml(html: string): unknown {

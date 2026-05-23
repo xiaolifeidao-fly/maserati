@@ -1,5 +1,5 @@
 import log from 'electron-log';
-import type { Page, Response } from 'playwright';
+import type { Page, Request, Response } from 'playwright';
 import type {
   AiSelectionShopLinkRecord,
   AiSelectionShopProductRecord,
@@ -12,11 +12,15 @@ import type { ShopRecord } from '@eleapi/commerce/commerce.api';
 import { normalizeCollectSourceType } from '@eleapi/collect/collect.platform';
 import { TbEngine } from '@src/browser/tb.engine';
 import { aiSelectionResultsDb } from './ai-selection-results.db';
+import { aiSelectionShopSpmCacheDb } from './ai-selection-shop-spm-cache.db';
 import { requestBackend } from '@src/impl/shared/backend';
+import { robotMonitorShopLinksDb } from '@src/ai-operation/robot-monitor-shop-links.db';
 
 declare const document: any;
+declare const window: any;
 
 const TB_NEW_ITEM_API = 'mtop.taobao.shop.simple.item.fetch';
+const TB_QUERY_BAG_COUNT_API = 'mtop.trade.querybagcount';
 
 export interface AiSelectionRunnerContext {
   batch: CollectBatchRecord;
@@ -41,6 +45,27 @@ interface TaobaoShopProduct {
     itemSkuUrl?: string;
     skuPropertyText?: string;
   }>;
+}
+
+export interface TaobaoShopNewItemsResult {
+  platformShopId: string;
+  products: AiSelectionShopProductRecord[];
+}
+
+export interface TaobaoShopNewItemsOptions {
+  shopId: number | string;
+  shopUrl: string;
+  /** monitor 任务 ID，写入 mtop 上下文时关联，供 collect 任务精准反查 */
+  monitorTaskId?: string;
+  batchId?: number;
+  strategyId?: number;
+  stopItemId?: string;
+  signal: AbortSignal;
+}
+
+interface ShopSpmReadResult {
+  spmPrefix: string;
+  diagnostics: Record<string, unknown>;
 }
 
 export async function runAiSelectionStrategy(context: AiSelectionRunnerContext): Promise<void> {
@@ -82,56 +107,181 @@ async function collectTaobaoShopNewItems(context: AiSelectionRunnerContext, link
   }
 
   const latest = await fetchLatestServerProduct('tb', platformShopId);
-  const engine = new TbEngine(String(context.shop.id), false);
+  const result = await collectTaobaoShopNewItemsFromUrl({
+    shopId: context.shop.id,
+    shopUrl: link.shopUrl,
+    batchId: context.batch.id,
+    strategyId: context.strategy.id,
+    stopItemId: latest?.itemId,
+    signal: context.signal,
+  });
+  if (result.products.length === 0) {
+    return 0;
+  }
+
+  const upsertResult = await requestBackend<{ insertedCount: number; skippedCount: number; data: AiSelectionShopProductRecord[] }>(
+    'POST',
+    '/ai-selection-shop-products/batch-upsert',
+    {
+      data: {
+        platform: 'tb',
+        platformShopId,
+        products: result.products,
+      },
+    },
+  );
+  const insertedProducts = (upsertResult.data || []).map((item) => ({
+    ...item,
+    collectBatchId: context.batch.id,
+    strategyId: context.strategy.id,
+    shopUrl: link.shopUrl,
+  }));
+  aiSelectionResultsDb.upsertMany(insertedProducts);
+  return insertedProducts.length;
+}
+
+export async function collectTaobaoShopNewItemsFromUrl(options: TaobaoShopNewItemsOptions): Promise<TaobaoShopNewItemsResult> {
+  const shopUrl = String(options.shopUrl || '').trim();
+  log.info('[ai-selection] collectTaobaoShopNewItemsFromUrl entered', {
+    shopId: options.shopId,
+    shopUrl,
+    batchId: options.batchId,
+    strategyId: options.strategyId,
+    stopItemId: options.stopItemId,
+  });
+  const platformShopId = extractTbShopId(shopUrl);
+  if (!platformShopId) {
+    throw new Error(`无法识别淘宝店铺ID：${shopUrl}`);
+  }
+
+  const engine = new TbEngine(String(options.shopId), false);
   const page = await engine.createPage();
   if (!page) {
     throw new Error('无法创建淘宝选品页面');
   }
 
   try {
-    const responsePromise = waitForTaobaoNewItemResponse(page, context.signal);
-    await page.goto(link.shopUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-    throwIfStopped(context.signal);
-    await clickNewItemTag(page);
-    const payload = await responsePromise;
-    throwIfStopped(context.signal);
-    await page.waitForTimeout(800).catch(() => undefined);
-
-    const priceMap = await readRenderedPriceMap(page);
-    const products = normalizeTaobaoProducts(payload, {
-      batchId: context.batch.id,
-      strategyId: context.strategy.id,
+    const { stop: stopQueryBagCountCapture, waitForCapture } = captureQueryBagCountMtopContext(page, {
+      shopUrl,
       platformShopId,
-      shopUrl: link.shopUrl,
-      stopItemId: latest?.itemId,
-      priceMap,
+      monitorTaskId: options.monitorTaskId,
     });
-    if (products.length === 0) {
-      return 0;
-    }
+    const responsePromise = waitForTaobaoNewItemResponse(page, options.signal);
+    try {
+      log.info('[ai-selection] opening taobao shop page before reading spm', {
+        shopId: options.shopId,
+        platformShopId,
+        shopUrl,
+      });
+      await page.goto(shopUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+      throwIfStopped(options.signal);
+      await waitForShopBodyDataSpm(page, shopUrl);
+      const spmRead = await readShopSpmPrefix(page, shopUrl);
+      const spmPrefix = spmRead.spmPrefix;
+      await cacheShopSpmPrefix({
+        platformShopId,
+        shopUrl,
+        spmPrefix,
+        diagnostics: spmRead.diagnostics,
+      });
+      log.info('[ai-selection] read shop spm prefix completed', {
+        shopId: options.shopId,
+        platformShopId,
+        shopUrl,
+        spmPrefix,
+      });
+      await clickNewItemTag(page);
+      const payload = await responsePromise;
+      throwIfStopped(options.signal);
+      await page.waitForTimeout(800).catch(() => undefined);
 
-    const upsertResult = await requestBackend<{ insertedCount: number; skippedCount: number; data: AiSelectionShopProductRecord[] }>(
-      'POST',
-      '/ai-selection-shop-products/batch-upsert',
-      {
-        data: {
-          platform: 'tb',
-          platformShopId,
-          products,
-        },
-      },
-    );
-    const insertedProducts = (upsertResult.data || []).map((item) => ({
-      ...item,
-      collectBatchId: context.batch.id,
-      strategyId: context.strategy.id,
-      shopUrl: link.shopUrl,
-    }));
-    aiSelectionResultsDb.upsertMany(insertedProducts);
-    return insertedProducts.length;
+      const priceMap = await readRenderedPriceMap(page);
+      const products = normalizeTaobaoProducts(payload, {
+        batchId: Number(options.batchId || 0),
+        strategyId: Number(options.strategyId || 0),
+        platformShopId,
+        shopUrl,
+        stopItemId: options.stopItemId,
+        priceMap,
+        spmPrefix,
+      });
+      // 等待 mtop 上下文写入 DB 完成（最多 5s），确保后续采集任务能读到
+      await Promise.race([waitForCapture(), new Promise<void>((r) => setTimeout(r, 5000))]);
+      return { platformShopId, products };
+    } finally {
+      stopQueryBagCountCapture();
+    }
   } finally {
     await engine.closePage().catch(() => undefined);
   }
+}
+
+function captureQueryBagCountMtopContext(
+  page: Page,
+  options: { shopUrl: string; platformShopId: string; monitorTaskId?: string },
+): { stop: () => void; waitForCapture: () => Promise<void> } {
+  let captured = false;
+  let resolveCapture: (() => void) | null = null;
+  const capturePromise = new Promise<void>((resolve) => {
+    resolveCapture = resolve;
+  });
+
+  const onRequest = (request: Request) => {
+    const requestUrl = request.url();
+    if (captured || !requestUrl.toLowerCase().includes(TB_QUERY_BAG_COUNT_API)) {
+      return;
+    }
+    captured = true;
+    void (async () => {
+      try {
+        const parsed = new URL(requestUrl);
+        const headers = request.headers();
+        const cookie = headers.cookie || await buildCookieHeaderFromPage(page);
+        const appKey = trimString(parsed.searchParams.get('appKey'));
+        if (!cookie || !appKey) {
+          return;
+        }
+        await robotMonitorShopLinksDb.ensureInit();
+        robotMonitorShopLinksDb.upsertMtopContext({
+          shopUrl: options.shopUrl,
+          platformShopId: options.platformShopId,
+          taskId: options.monitorTaskId || '',
+          jsv: trimString(parsed.searchParams.get('jsv')),
+          appKey,
+          ttid: trimString(parsed.searchParams.get('ttid')),
+          cookie,
+          userAgent: trimString(headers['user-agent']),
+          referer: trimString(headers.referer) || options.shopUrl,
+        });
+        log.info('[ai-selection] cached monitor shop mtop context from querybagcount', {
+          shopUrl: options.shopUrl,
+          platformShopId: options.platformShopId,
+          hasJsv: Boolean(parsed.searchParams.get('jsv')),
+          hasAppKey: Boolean(appKey),
+          hasTtid: Boolean(parsed.searchParams.get('ttid')),
+          hasCookie: Boolean(cookie),
+        });
+      } catch (error) {
+        log.warn('[ai-selection] failed to cache querybagcount mtop context', {
+          shopUrl: options.shopUrl,
+          platformShopId: options.platformShopId,
+          error,
+        });
+      } finally {
+        resolveCapture?.();
+        resolveCapture = null;
+      }
+    })();
+  };
+  page.on('request', onRequest);
+  return {
+    stop: () => {
+      page.off('request', onRequest);
+      resolveCapture?.();
+      resolveCapture = null;
+    },
+    waitForCapture: () => capturePromise,
+  };
 }
 
 function buildProgress(context: AiSelectionRunnerContext, total: number, processed: number, message: string): AiSelectionTaskState {
@@ -233,6 +383,134 @@ async function readRenderedPriceMap(page: Page): Promise<Record<string, string>>
   }
 }
 
+async function cacheShopSpmPrefix(options: {
+  platformShopId: string;
+  shopUrl: string;
+  spmPrefix: string;
+  diagnostics: unknown;
+}): Promise<void> {
+  try {
+    await aiSelectionShopSpmCacheDb.ensureInit();
+    aiSelectionShopSpmCacheDb.upsert({
+      platform: 'tb',
+      platformShopId: options.platformShopId,
+      shopUrl: options.shopUrl,
+      spmPrefix: options.spmPrefix,
+      diagnostics: options.diagnostics,
+    });
+    log.info('[ai-selection] cached shop spm prefix', {
+      platformShopId: options.platformShopId,
+      shopUrl: options.shopUrl,
+      spmPrefix: options.spmPrefix,
+    });
+  } catch (error) {
+    log.warn('[ai-selection] failed to cache shop spm prefix', {
+      platformShopId: options.platformShopId,
+      shopUrl: options.shopUrl,
+      error,
+    });
+  }
+}
+
+async function waitForShopBodyDataSpm(page: Page, shopUrl: string): Promise<void> {
+  try {
+    const dataSpm = await page.waitForFunction(
+      () => String(document.body?.getAttribute('data-spm') || '').trim(),
+      undefined,
+      { timeout: 5000 },
+    );
+    const value = await dataSpm.jsonValue().catch(() => '');
+    log.info('[ai-selection] shop body data-spm ready', {
+      shopUrl,
+      bodyDataSpm: String(value || ''),
+    });
+  } catch (error) {
+    log.warn('[ai-selection] wait shop body data-spm timeout', {
+      shopUrl,
+      error,
+    });
+  }
+}
+
+async function readShopSpmPrefix(page: Page, shopUrl: string): Promise<ShopSpmReadResult> {
+  try {
+    const preSpm = extractPreSpmFromShopUrl(shopUrl);
+    const diagnostics = await page.evaluate((input: { preSpm: string; shopUrl: string }) => {
+      const selector = '.container--lZzhSRmX';
+      const elements = Array.from(document.querySelectorAll(selector)) as any[];
+      const el = elements[0];
+      const spmAnchorId = el ? el.getAttribute('data-spm-anchor-id') || '' : '';
+      const parts = spmAnchorId.split('.');
+      const bodyDataSpm = String(document.body?.getAttribute('data-spm') || '').trim();
+      return {
+        url: window.location.href,
+        shopUrl: input.shopUrl,
+        preSpm: input.preSpm,
+        bodyDataSpm,
+        spmPrefix: input.preSpm && bodyDataSpm ? `${input.preSpm}.${bodyDataSpm}` : '',
+        selector,
+        elementCount: elements.length,
+        spmAnchorId,
+        parts,
+        legacySpmPrefix: parts.length >= 2 ? `${parts[0]}.${parts[1]}` : '',
+        bodyOuterHtml: document.body ? String(document.body.outerHTML || '').slice(0, 500) : '',
+        firstElementTag: el ? el.tagName : '',
+        firstElementClassName: el ? String(el.getAttribute('class') || '') : '',
+        firstElementOuterHtml: el ? String(el.outerHTML || '').slice(0, 500) : '',
+        dataSpmAnchorElements: (Array.from(document.querySelectorAll('[data-spm-anchor-id]')) as any[])
+          .slice(0, 8)
+          .map((item) => ({
+            tagName: item.tagName,
+            className: String(item.getAttribute('class') || ''),
+            spmAnchorId: String(item.getAttribute('data-spm-anchor-id') || ''),
+          })),
+      };
+    }, { preSpm, shopUrl });
+    log.info('[ai-selection] readShopSpmPrefix diagnostics', diagnostics);
+    return {
+      spmPrefix: String(diagnostics.spmPrefix || ''),
+      diagnostics,
+    };
+  } catch (error) {
+    log.warn('[ai-selection] readShopSpmPrefix failed', error);
+    return {
+      spmPrefix: '',
+      diagnostics: {
+        error: error instanceof Error ? error.message : String(error),
+      },
+    };
+  }
+}
+
+function extractPreSpmFromShopUrl(shopUrl: string): string {
+  const text = String(shopUrl || '').trim();
+  if (!text) {
+    return '';
+  }
+  try {
+    const url = new URL(text);
+    const spm = String(url.searchParams.get('spm') || '').trim();
+    return spm.split('.')[0] || '';
+  } catch {
+    const match = text.match(/[?&]spm=([^&#]+)/);
+    const spm = match?.[1] ? decodeURIComponent(match[1]) : '';
+    return spm.split('.')[0] || '';
+  }
+}
+
+function buildEnhancedItemUrl(rawItemUrl: string, itemId: string, spmPrefix: string): string {
+  const base = rawItemUrl || `https://item.taobao.com/item.htm?id=${itemId}`;
+  if (!spmPrefix) return base;
+  try {
+    const url = new URL(base);
+    url.searchParams.set('spm', `${spmPrefix}.0.0`);
+    url.searchParams.set('xxc', 'shop');
+    return url.toString();
+  } catch {
+    return `${base}&spm=${spmPrefix}.0.0&xxc=shop`;
+  }
+}
+
 function normalizeTaobaoProducts(
   payload: unknown,
   options: {
@@ -242,6 +520,7 @@ function normalizeTaobaoProducts(
     shopUrl: string;
     stopItemId?: string;
     priceMap: Record<string, string>;
+    spmPrefix?: string;
   },
 ): AiSelectionShopProductRecord[] {
   const data = (payload as any)?.data?.data;
@@ -275,7 +554,7 @@ function normalizeTaobaoProducts(
       price,
       vagueSold365: String(row.vagueSold365 || '').trim(),
       image: String(row.image || '').trim(),
-      itemUrl: String(row.itemUrl || '').trim(),
+      itemUrl: buildEnhancedItemUrl(String(row.itemUrl || '').trim(), itemId, options.spmPrefix || ''),
       skuInfoList: (Array.isArray(row.skuInfoList) ? row.skuInfoList : []).map((sku) => ({
         skuId: String(sku.skuId || ''),
         skuImageUrl: String(sku.skuImageUrl || ''),
@@ -358,6 +637,20 @@ function extractTbShopId(shopUrl: string): string {
   } catch {
     return '';
   }
+}
+
+async function buildCookieHeaderFromPage(page: Page): Promise<string> {
+  const cookies = await page.context().cookies([
+    'https://taobao.com',
+    'https://www.taobao.com',
+    'https://item.taobao.com',
+    'https://h5api.m.taobao.com',
+  ]).catch(() => []);
+  return cookies.map((cookie) => `${cookie.name}=${cookie.value}`).join('; ');
+}
+
+function trimString(value: unknown): string {
+  return value == null ? '' : String(value).trim();
 }
 
 function throwIfStopped(signal: AbortSignal): void {

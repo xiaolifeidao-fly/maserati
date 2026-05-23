@@ -142,6 +142,7 @@
     "module-alias": "^2.2.3",
     "ms": "^2.1.3",
     "node-machine-id": "^1.1.12",
+    "patchright": "^1.58.2",
     "pino": "^9.5.0",
     "platform-specific": "^1.1.0",
     "playwright": "^1.58.2",

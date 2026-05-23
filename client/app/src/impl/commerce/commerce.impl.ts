@@ -10,6 +10,7 @@ import {
   type ShopAuthorizePayload,
   type ShopListQuery,
   type ShopLoginPayload,
+  ShopInfoOpenResult,
   ShopLoginStartResult,
   type ShopPayload,
   type CategoryRecord,
@@ -19,6 +20,8 @@ import {
   type WorkspaceOverview,
 } from "@eleapi/commerce/commerce.api";
 import { normalizeCollectSourceType } from "@eleapi/collect/collect.platform";
+import { PxxEngine } from "@src/browser/pxx.engine";
+import { TbEngine } from "@src/browser/tb.engine";
 import { getShopLoginPlatformDriver } from "@src/commerce-login/platforms/registry";
 import { requestBackend } from "../shared/backend";
 import { generateShopSignature, saveShopSignature } from "../shared/shop-signature";
@@ -96,6 +99,37 @@ export class CommerceImpl extends CommerceApi {
     const platform = normalizeCollectSourceType(shop.platform);
     const driver = getShopLoginPlatformDriver(platform);
     return driver.startLogin(shop);
+  }
+
+  async openShopInfo(shopId: number): Promise<ShopInfoOpenResult> {
+    if (!Number.isFinite(shopId) || shopId <= 0) {
+      throw new Error("shop id is invalid");
+    }
+
+    const shop = await requestBackend<ShopRecord>("GET", `/shops/${shopId}`);
+    const platform = normalizeCollectSourceType(shop.platform);
+    if (platform === "tb") {
+      const engine = new TbEngine(String(shop.id), false);
+      const page = await engine.openShopInfoWorkspace(shop);
+      if (!page) {
+        throw new Error("打开淘宝店铺信息页失败");
+      }
+    } else if (platform === "pxx") {
+      const engine = new PxxEngine(String(shop.id), false);
+      const page = await engine.openShopInfoWorkspace(shop);
+      if (!page) {
+        throw new Error("打开拼多多店铺信息页失败");
+      }
+    } else {
+      throw new Error(`暂不支持的平台：${String(shop.platform || "unknown")}`);
+    }
+
+    return Object.assign(new ShopInfoOpenResult(), {
+      success: true,
+      shopId: shop.id,
+      platform,
+      message: "店铺信息页已打开",
+    });
   }
 
   async deleteShop(id: number): Promise<{ deleted: boolean }> {

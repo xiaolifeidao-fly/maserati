@@ -8,6 +8,7 @@ import { PublishWindowImpl } from "@src/impl/publish/publish-window.impl";
 import { PublishBatchJobImpl } from "@src/impl/publish/publish-batch-job.impl";
 import { PublishCaptchaViewerImpl } from "@src/impl/publish/publish-captcha-viewer.impl";
 import { InstallerImpl } from "@src/impl/installer/installer.impl";
+import { AiOperationImpl } from "@src/impl/ai-operation/ai-operation.impl";
 
 const register : { new(...args: any[]): ElectronApi }[] = [
     AuthImpl,
@@ -19,6 +20,7 @@ const register : { new(...args: any[]): ElectronApi }[] = [
     PublishBatchJobImpl,
     PublishCaptchaViewerImpl,
     InstallerImpl,
+    AiOperationImpl,
 ]
 
 export function registerApiImpl() {

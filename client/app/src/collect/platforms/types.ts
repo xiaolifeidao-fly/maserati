@@ -4,6 +4,7 @@ export interface CollectedGoodsSummary {
   productName: string;
   sourceProductId: string;
   status: string;
+  missingFields?: string[];
 }
 
 export interface CollectionPlatformDriver {

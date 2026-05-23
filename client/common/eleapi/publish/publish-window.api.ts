@@ -14,6 +14,7 @@ export interface PublishWindowOpenOptions {
   batch?: PublishWindowBatchSnapshot;
   entryScene?: 'collection' | 'product';
   initialView?: 'default' | 'progress';
+  shopId?: number;
 }
 
 /**

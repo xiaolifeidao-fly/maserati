@@ -76,6 +76,7 @@ export async function requestBackend<T>(
       taskId?: number;
       label?: string;
     };
+    timeout?: number;
   },
 ): Promise<T> {
   const session = readAuthSession();
@@ -98,7 +99,7 @@ export async function requestBackend<T>(
       data: options?.data,
       params: options?.params,
       headers: Object.keys(requestHeaders).length > 0 ? requestHeaders : undefined,
-      timeout: 10000,
+      timeout: options?.timeout ?? 10000,
       httpAgent,
       httpsAgent,
     });

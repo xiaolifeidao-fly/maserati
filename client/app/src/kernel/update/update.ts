@@ -10,6 +10,28 @@ let updateFlag = false;
 let isUpdateAvailable = false;
 let isAutoUpdaterEnabled = false;
 
+function resolveUpdatePath(): string | null {
+  if (process.platform === 'darwin') {
+    if (process.arch === 'arm64') {
+      return '/app/updates/mac/arm/';
+    }
+    if (process.arch === 'x64') {
+      return '/app/updates/mac/x64/';
+    }
+  }
+
+  if (process.platform === 'win32') {
+    if (process.arch === 'x64') {
+      return '/app/updates/win/x64/';
+    }
+    log.warn('自动更新暂不支持当前 Windows 架构:', process.arch);
+    return null;
+  }
+
+  log.info('自动更新暂不支持当前系统:', process.platform);
+  return null;
+}
+
 function resolveFeedURL(): string | null {
   const configuredFeedURL = process.env.FEED_URL?.trim() || process.env.UPDATE_FEED_URL?.trim();
   if (configuredFeedURL) {
@@ -21,16 +43,23 @@ function resolveFeedURL(): string | null {
     }
   }
 
-  const qiniuYunURL = process.env.QINIU_YUN_URL?.trim();
-  if (!qiniuYunURL) {
-    log.info('未配置 QINIU_YUN_URL 或 FEED_URL，跳过自动更新');
+  const ossBaseURL = process.env.ALIYUN_OSS_URL?.trim() || process.env.OSS_URL?.trim();
+  if (!ossBaseURL) {
+    log.info('未配置 ALIYUN_OSS_URL、OSS_URL 或 FEED_URL，跳过自动更新');
+    return null;
+  }
+
+  const updatePath = resolveUpdatePath();
+  if (!updatePath) {
     return null;
   }
 
   try {
-    return new URL('/app/updates/', qiniuYunURL).toString();
+    const feedURL = new URL(updatePath, ossBaseURL).toString();
+    log.info('自动更新 FEED_URL:', feedURL);
+    return feedURL;
   } catch (error) {
-    log.warn('QINIU_YUN_URL 配置无效，跳过自动更新:', qiniuYunURL, error);
+    log.warn('阿里云 OSS 更新地址配置无效，跳过自动更新:', ossBaseURL, error);
     return null;
   }
 }

@@ -5,6 +5,7 @@ import {
   BarcodeOutlined,
   BellOutlined,
   BulbOutlined,
+  CustomerServiceOutlined,
   DownOutlined,
   LockOutlined,
   LogoutOutlined,
@@ -93,9 +94,15 @@ interface PasswordFormValues {
 const navigationItems = [
   {
     key: "/workspace",
-    label: "工作台",
+    label: "首页",
     icon: <AppstoreOutlined />,
     description: "实时经营看板",
+  },
+  {
+    key: "/human-task",
+    label: "任务工作台",
+    icon: <CustomerServiceOutlined />,
+    description: "人工干预任务处理",
   },
   {
     key: "/shop",

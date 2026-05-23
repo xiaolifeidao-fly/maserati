@@ -1,5 +1,6 @@
 import path from 'path';
-import { BrowserView, BrowserWindow, shell, type WebContents } from 'electron';
+import fs from 'fs';
+import { BrowserView, BrowserWindow, shell, type CookiesSetDetails, type WebContents } from 'electron';
 import log from 'electron-log';
 import { mainWindow } from '@src/kernel/windows';
 import { getLatestCaptchaTask } from './runtime/publish-center';
@@ -22,6 +23,8 @@ let captchaPanelVisible = false;
 let captchaSolvedCallback: (() => void) | null = null;
 /** 展示验证码前保存的窗口外框宽度，用于恢复 */
 let captchaOriginalBoundsWidth: number | null = null;
+/** 验证码面板版本号，用于废弃旧的异步导航/监听。 */
+let captchaPanelVersion = 0;
 
 // ─── 截屏流验证码状态 ─────────────────────────────────────────────────────────
 
@@ -113,8 +116,173 @@ function buildPublishWindowUrl(options?: PublishWindowOpenOptions): string {
   if (options?.initialView) {
     pageUrl.searchParams.set('initialView', options.initialView);
   }
+  if (Number(options?.shopId) > 0) {
+    pageUrl.searchParams.set('shopId', String(options?.shopId));
+  }
 
   return pageUrl.toString();
+}
+
+function focusPublishWindow(): void {
+  if (!publishBrowserWindow || publishBrowserWindow.isDestroyed()) {
+    return;
+  }
+  if (publishBrowserWindow.isMinimized()) {
+    publishBrowserWindow.restore();
+  }
+  publishBrowserWindow.show();
+  publishBrowserWindow.focus();
+  publishBrowserWindow.moveTop();
+  publishBrowserWindow.setAlwaysOnTop(true);
+  setTimeout(() => {
+    if (publishBrowserWindow && !publishBrowserWindow.isDestroyed()) {
+      publishBrowserWindow.setAlwaysOnTop(false);
+    }
+  }, 1200);
+}
+
+function toElectronCookieUrl(cookie: { domain?: string; path?: string; secure?: boolean }): string {
+  const hostname = String(cookie.domain || '').replace(/^\./, '').trim();
+  if (!hostname) {
+    return '';
+  }
+  const pathname = String(cookie.path || '/').startsWith('/') ? String(cookie.path || '/') : `/${cookie.path}`;
+  return `${cookie.secure === false ? 'http' : 'https'}://${hostname}${pathname}`;
+}
+
+function toElectronSameSite(sameSite?: string): CookiesSetDetails['sameSite'] | undefined {
+  if (sameSite === 'Strict') return 'strict';
+  if (sameSite === 'Lax') return 'lax';
+  if (sameSite === 'None') return 'no_restriction';
+  return undefined;
+}
+
+function convertStorageCookies(cookies?: Array<{
+  name?: string;
+  value?: string;
+  domain?: string;
+  path?: string;
+  expires?: number;
+  httpOnly?: boolean;
+  secure?: boolean;
+  sameSite?: string;
+}>): CookiesSetDetails[] {
+  return (cookies || [])
+    .map((cookie) => {
+      const url = toElectronCookieUrl(cookie);
+      if (!url || !cookie.name) {
+        return null;
+      }
+      const details: CookiesSetDetails = {
+        url,
+        name: cookie.name,
+        value: String(cookie.value ?? ''),
+        domain: cookie.domain,
+        path: cookie.path || '/',
+        secure: cookie.secure,
+        httpOnly: cookie.httpOnly,
+        sameSite: toElectronSameSite(cookie.sameSite),
+      };
+      if (Number.isFinite(cookie.expires) && Number(cookie.expires) > 0) {
+        details.expirationDate = Number(cookie.expires);
+      }
+      return details;
+    })
+    .filter((cookie): cookie is CookiesSetDetails => Boolean(cookie));
+}
+
+async function applyCookies(view: BrowserView, cookies: CookiesSetDetails[]): Promise<void> {
+  const cookieStore = view.webContents.session.cookies;
+  for (const cookie of cookies) {
+    try {
+      await cookieStore.set(cookie);
+    } catch (error) {
+      log.warn('[publish-window] failed to set shared cookie', { name: cookie.name, url: cookie.url, error });
+    }
+  }
+}
+
+async function applyOriginStorage(
+  view: BrowserView,
+  originStorage?: Array<{ origin?: string; localStorage?: Array<{ name?: string; value?: string }> }>,
+): Promise<void> {
+  const items = (originStorage || []).filter((item) => {
+    const origin = String(item.origin || '').trim();
+    const entries = Array.isArray(item.localStorage) ? item.localStorage : [];
+    return Boolean(origin && entries.length > 0);
+  });
+  if (items.length === 0) {
+    return;
+  }
+
+  const storageWindow = new BrowserWindow({
+    show: false,
+    width: 1,
+    height: 1,
+    webPreferences: {
+      session: view.webContents.session,
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+
+  try {
+    for (const item of items) {
+      const origin = String(item.origin || '').trim();
+      const entries = Array.isArray(item.localStorage) ? item.localStorage : [];
+      try {
+        await storageWindow.webContents.loadURL(origin);
+        await storageWindow.webContents.executeJavaScript(
+          `(function(){const entries=${JSON.stringify(entries)};for(const entry of entries){if(entry&&typeof entry.name==="string"){window.localStorage.setItem(entry.name,String(entry.value ?? ""));}}})();`,
+          true,
+        );
+      } catch (error) {
+        log.warn('[publish-window] failed to apply shared localStorage', { origin, error });
+      }
+    }
+  } finally {
+    if (!storageWindow.isDestroyed()) {
+      storageWindow.destroy();
+    }
+  }
+}
+
+async function applyTbSharedStorage(view: BrowserView, shopId?: number | string): Promise<void> {
+  const resourceId = String(shopId || '').trim();
+  if (!resourceId) {
+    return;
+  }
+
+  const engine = new TbEngine(resourceId, false);
+  await engine.saveContextStateIfOpen().catch(() => {});
+  let sessionPath = await engine.getSessionPath().catch(() => undefined);
+  if (!sessionPath) {
+    await engine.readAndSaveStorageStateFromHeadedDir().catch(() => {});
+    sessionPath = await engine.getSessionPath().catch(() => undefined);
+  }
+  if (!sessionPath || !fs.existsSync(sessionPath)) {
+    log.warn('[publish-window] tb shared storage state not found', { shopId: resourceId });
+    return;
+  }
+
+  try {
+    const storageState = JSON.parse(fs.readFileSync(sessionPath, 'utf8')) as {
+      cookies?: Parameters<typeof convertStorageCookies>[0];
+      origins?: Array<{ origin?: string; localStorage?: Array<{ name?: string; value?: string }> }>;
+    };
+    const cookies = convertStorageCookies(storageState.cookies);
+    if (cookies.length > 0) {
+      await applyCookies(view, cookies);
+    }
+    await applyOriginStorage(view, storageState.origins);
+    log.info('[publish-window] applied tb shared storage to captcha view', {
+      shopId: resourceId,
+      cookieCount: cookies.length,
+      originCount: storageState.origins?.length || 0,
+    });
+  } catch (error) {
+    log.warn('[publish-window] failed to apply tb shared storage', { shopId: resourceId, sessionPath, error });
+  }
 }
 
 // ─── 截屏流验证码 HTML ────────────────────────────────────────────────────────
@@ -273,10 +441,10 @@ export function openPublishWindow(options?: PublishWindowOpenOptions): void {
         log.error('[publish-window] failed to reload left view', err);
       });
     }
-    publishBrowserWindow.focus();
+    focusPublishWindow();
     const captchaTask = getLatestCaptchaTask();
     if (captchaTask?.captchaUrl) {
-      showCaptchaPanel(captchaTask.captchaUrl);
+      showCaptchaPanel(captchaTask.captchaUrl, undefined, captchaTask.shopId);
     }
     return;
   }
@@ -343,10 +511,10 @@ export function openPublishWindow(options?: PublishWindowOpenOptions): void {
   // 左侧页面加载完成后显示窗口
   leftBrowserView.webContents.once('did-finish-load', () => {
     if (publishBrowserWindow && !publishBrowserWindow.isDestroyed()) {
-      publishBrowserWindow.show();
+      focusPublishWindow();
       const captchaTask = getLatestCaptchaTask();
       if (captchaTask?.captchaUrl) {
-        showCaptchaPanel(captchaTask.captchaUrl);
+        showCaptchaPanel(captchaTask.captchaUrl, undefined, captchaTask.shopId);
       }
     }
   });
@@ -367,7 +535,7 @@ export function openPublishWindow(options?: PublishWindowOpenOptions): void {
  * 在右侧并排展示验证码面板。
  * 直接加载验证码 URL（淘宝验证码页面）；验证码页面跳转离开后自动调用 onSolved。
  */
-export function showCaptchaPanel(captchaUrl: string, onSolved?: () => void): void {
+export function showCaptchaPanel(captchaUrl: string, onSolved?: () => void, shopId?: number): void {
   if (!publishBrowserWindow || publishBrowserWindow.isDestroyed()) {
     log.warn('[publish-window] showCaptchaPanel: publish window is not open');
     return;
@@ -379,6 +547,7 @@ export function showCaptchaPanel(captchaUrl: string, onSolved?: () => void): voi
 
   // 清除上一次的监听器和回调
   rightBrowserView.webContents.removeAllListeners('did-navigate');
+  const currentPanelVersion = ++captchaPanelVersion;
   captchaSolvedCallback = onSolved ?? null;
 
   // 保存当前窗口外框宽度，并向右扩展 CAPTCHA_PANEL_WIDTH
@@ -395,9 +564,16 @@ export function showCaptchaPanel(captchaUrl: string, onSolved?: () => void): voi
   syncBounds();
   broadcastCaptchaPanelVisibility(true);
 
-  if (captchaSolvedCallback) {
-    const webContents = rightBrowserView.webContents;
+  const webContents = rightBrowserView.webContents;
+  const attachSolvedListener = (): void => {
+    if (!captchaSolvedCallback || currentPanelVersion !== captchaPanelVersion || webContents.isDestroyed()) {
+      return;
+    }
     const onNavigate = (_event: Electron.Event, url: string): void => {
+      if (currentPanelVersion !== captchaPanelVersion) {
+        webContents.removeListener('did-navigate', onNavigate);
+        return;
+      }
       if (!url || url === 'about:blank') return;
       // 忽略验证码页面本身及其重定向
       if (/captcha|checkcode/i.test(url)) return;
@@ -409,14 +585,26 @@ export function showCaptchaPanel(captchaUrl: string, onSolved?: () => void): voi
       cb?.();
     };
     webContents.on('did-navigate', onNavigate);
-  }
+  };
 
-  rightBrowserView.webContents.loadURL(captchaUrl).catch((err) => {
-    log.error('[publish-window] failed to load captcha url', err);
-  });
+  void applyTbSharedStorage(rightBrowserView, shopId)
+    .then(() => {
+      if (
+        currentPanelVersion !== captchaPanelVersion ||
+        !rightBrowserView ||
+        rightBrowserView.webContents.isDestroyed()
+      ) {
+        return undefined;
+      }
+      attachSolvedListener();
+      return rightBrowserView.webContents.loadURL(captchaUrl);
+    })
+    .catch((err) => {
+      log.error('[publish-window] failed to load captcha url', err);
+    });
 
-  publishBrowserWindow.focus();
-  log.info('[publish-window] captcha panel shown', { captchaUrl });
+  focusPublishWindow();
+  log.info('[publish-window] captcha panel shown', { captchaUrl, shopId });
 }
 
 /**
@@ -424,6 +612,7 @@ export function showCaptchaPanel(captchaUrl: string, onSolved?: () => void): voi
  * 若当前处于截屏流模式，同时停止截屏流。
  */
 export function hideCaptchaPanel(): void {
+  captchaPanelVersion += 1;
   captchaPanelVisible = false;
   if (rightBrowserView && !rightBrowserView.webContents.isDestroyed()) {
     rightBrowserView.webContents.removeAllListeners('did-navigate');
@@ -452,7 +641,7 @@ export function hideCaptchaPanel(): void {
  * 不同于 showCaptchaPanel（在 Electron BrowserView 里直接加载验证码 URL），
  * 此函数：
  *  1. 在右侧面板加载 canvas 截屏流查看器 HTML
- *  2. 通过同 shopId 的 headless TbEngine Playwright 上下文导航到 captchaUrl
+ *  2. 通过同 shopId 的有头 TbEngine Playwright 上下文导航到 captchaUrl
  *  3. 每 200ms 截帧并推送到 canvas
  *  4. 监听 Playwright 页面导航，验证码通过后调用 onSolved
  */
@@ -499,9 +688,9 @@ export async function showScreenshotCaptchaPanel(
     log.warn('[publish-window] showScreenshotCaptchaPanel: failed to load viewer html', err);
   });
 
-  // 初始化 headless TbEngine，导航到验证码 URL
+  // 初始化有头 TbEngine，导航到验证码 URL
   try {
-    const engine = new TbEngine(String(shopId), true);
+    const engine = new TbEngine(String(shopId), false);
     engine.bindPublishTask(taskId);
     screenshotCaptchaEngine = engine;
 
@@ -539,7 +728,7 @@ export async function showScreenshotCaptchaPanel(
     stopScreenshotCaptchaStream();
   }
 
-  publishBrowserWindow.focus();
+  focusPublishWindow();
   log.info('[publish-window] screenshot captcha panel shown', { captchaUrl, shopId });
 }
 

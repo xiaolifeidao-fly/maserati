@@ -3,6 +3,7 @@ import type { Page } from 'playwright';
 import type { TbDraftContext } from '../types/draft';
 import {
   publishInfo,
+  publishWarn,
   publishTaobaoRequestLog,
   publishTaobaoResponseLog,
   summarizeForLog,
@@ -485,7 +486,7 @@ export async function submitDraftToTaobao(
 ): Promise<NormalizedTbResponse> {
   let headers: Record<string, string>;
   try {
-    headers = await buildTaobaoHeaders(page, page.url() || 'https://item.upload.taobao.com/sell/v2/draft.htm');
+    headers = await buildTaobaoHeaders(page, page.url() || 'https://item.upload.taobao.com/sell/v2/draft.htm', draftContext);
   } catch (error) {
     if (error instanceof Error && error.message.includes('Cookie')) {
       await handleTbLoginRequired(StepCode.FILL_DRAFT, shopId);
@@ -550,7 +551,7 @@ export async function syncCustomSalePropsToTaobao(
 ): Promise<NormalizedTbResponse> {
   let headers: Record<string, string>;
   try {
-    headers = await buildTaobaoHeaders(page, page.url() || 'https://item.upload.taobao.com/sell/v2/draft.htm');
+    headers = await buildTaobaoHeaders(page, page.url() || 'https://item.upload.taobao.com/sell/v2/draft.htm', draftContext);
   } catch (error) {
     if (error instanceof Error && error.message.includes('Cookie')) {
       await handleTbLoginRequired(StepCode.FILL_DRAFT, shopId);
@@ -614,7 +615,7 @@ export async function publishToTaobao(
 ): Promise<NormalizedTbResponse> {
   let headers: Record<string, string>;
   try {
-    headers = await buildTaobaoHeaders(page, page.url() || 'https://item.upload.taobao.com/sell/v2/draft.htm');
+    headers = await buildTaobaoHeaders(page, page.url() || 'https://item.upload.taobao.com/sell/v2/draft.htm', draftContext);
   } catch (error) {
     if (error instanceof Error && error.message.includes('Cookie')) {
       await handleTbLoginRequired(StepCode.PUBLISH, shopId);
@@ -909,7 +910,7 @@ export async function fetchTbCatPropAsyncOpt(
 
   let headers: Record<string, string>;
   try {
-    headers = await buildTaobaoHeaders(page, referer);
+    headers = await buildTaobaoHeaders(page, referer, draftContext);
   } catch (error) {
     if (error instanceof Error && error.message.includes('Cookie')) {
       await handleTbLoginRequired(StepCode.FILL_DRAFT, shopId);
@@ -988,7 +989,32 @@ export async function fetchTbCatPropAsyncOpt(
   return [];
 }
 
-async function buildTaobaoHeaders(page: Page, referer: string): Promise<Record<string, string>> {
+function getHeaderValue(headers: Record<string, string> | undefined, name: string): string {
+  if (!headers) {
+    return '';
+  }
+  const target = name.toLowerCase();
+  for (const [key, value] of Object.entries(headers)) {
+    if (key.toLowerCase() === target && String(value || '').trim()) {
+      return String(value).trim();
+    }
+  }
+  return '';
+}
+
+function getCapturedXsrfToken(draftContext?: TbDraftContext): string {
+  return (
+    getHeaderValue(draftContext?.updateDraftRequestHeaders, 'x-xsrf-token') ||
+    getHeaderValue(draftContext?.addDraftRequestHeaders, 'x-xsrf-token') ||
+    String(draftContext?.csrfToken || '').trim()
+  );
+}
+
+async function buildTaobaoHeaders(
+  page: Page,
+  referer: string,
+  draftContext?: TbDraftContext,
+): Promise<Record<string, string>> {
   const context = page.context();
   const cookies = await context.cookies([
     'https://taobao.com',
@@ -1000,28 +1026,113 @@ async function buildTaobaoHeaders(page: Page, referer: string): Promise<Record<s
     throw new Error('无法获取淘宝登录态 Cookie');
   }
 
-  const { userAgent, csrfToken } = await page.evaluate(() => {
+  const capturedXsrfToken = getCapturedXsrfToken(draftContext);
+  if (!capturedXsrfToken) {
+    await page.waitForLoadState('domcontentloaded', { timeout: 5000 }).catch(() => undefined);
+    await page.waitForFunction(
+      () => {
+        const csrfToken = (globalThis as {
+          window?: {
+            csrfToken?: unknown;
+          };
+          csrfToken?: unknown;
+        }).window?.csrfToken ?? (globalThis as { csrfToken?: unknown }).csrfToken;
+
+        if (typeof csrfToken === 'string') {
+          return Boolean(csrfToken.trim());
+        }
+        if (!csrfToken || typeof csrfToken !== 'object') {
+          return false;
+        }
+        const record = csrfToken as Record<string, unknown>;
+        return ['tokenValue', 'value', 'token', 'csrfToken'].some((key) => {
+          const value = record[key];
+          return typeof value === 'string' && Boolean(value.trim());
+        });
+      },
+      undefined,
+      { timeout: 5000 },
+    ).catch(() => undefined);
+  }
+
+  const { userAgent, csrfToken, debug } = await page.evaluate(() => {
+    const readTokenValue = (value: unknown): string => {
+      if (typeof value === 'string') {
+        return value.trim();
+      }
+      if (!value || typeof value !== 'object') {
+        return '';
+      }
+      const record = value as Record<string, unknown>;
+      const candidates = [
+        record.tokenValue,
+        record.value,
+        record.token,
+        record.csrfToken,
+      ];
+      for (const candidate of candidates) {
+        if (typeof candidate === 'string' && candidate.trim()) {
+          return candidate.trim();
+        }
+      }
+      return '';
+    };
+
     const pageGlobal = globalThis as {
       navigator?: {
         userAgent?: string;
       };
       window?: {
-        csrfToken?: {
-          tokenValue?: string;
-        };
+        csrfToken?: unknown;
       };
-      csrfToken?: {
-        tokenValue?: string;
+      csrfToken?: unknown;
+      location?: {
+        href?: string;
+      };
+      document?: {
+        readyState?: string;
+        title?: string;
       };
     };
+
+    const windowCsrfToken = pageGlobal.window?.csrfToken;
+    const globalCsrfToken = pageGlobal.csrfToken;
+    const token = readTokenValue(windowCsrfToken) || readTokenValue(globalCsrfToken);
 
     return {
       userAgent: pageGlobal.navigator?.userAgent ?? '',
-      csrfToken: pageGlobal.window?.csrfToken?.tokenValue ?? pageGlobal.csrfToken?.tokenValue ?? '',
+      csrfToken: token,
+      debug: {
+        href: pageGlobal.location?.href ?? '',
+        title: pageGlobal.document?.title ?? '',
+        readyState: pageGlobal.document?.readyState ?? '',
+        windowCsrfTokenType: typeof windowCsrfToken,
+        globalCsrfTokenType: typeof globalCsrfToken,
+        hasWindowTokenValue: Boolean(
+          windowCsrfToken &&
+          typeof windowCsrfToken === 'object' &&
+          typeof (windowCsrfToken as Record<string, unknown>).tokenValue === 'string' &&
+          String((windowCsrfToken as Record<string, unknown>).tokenValue).trim(),
+        ),
+        hasGlobalTokenValue: Boolean(
+          globalCsrfToken &&
+          typeof globalCsrfToken === 'object' &&
+          typeof (globalCsrfToken as Record<string, unknown>).tokenValue === 'string' &&
+          String((globalCsrfToken as Record<string, unknown>).tokenValue).trim(),
+        ),
+      },
     };
   });
+  const xsrfToken = capturedXsrfToken || csrfToken;
 
-  if (!csrfToken) {
+  if (!xsrfToken) {
+    publishWarn('[TB] failed to resolve x-xsrf-token', {
+      referer,
+      pageUrl: page.url(),
+      hasCapturedUpdateHeader: Boolean(getHeaderValue(draftContext?.updateDraftRequestHeaders, 'x-xsrf-token')),
+      hasCapturedAddHeader: Boolean(getHeaderValue(draftContext?.addDraftRequestHeaders, 'x-xsrf-token')),
+      pageDebug: debug,
+    });
     throw new Error('无法获取淘宝页面 x-xsrf-token');
   }
 
@@ -1034,7 +1145,7 @@ async function buildTaobaoHeaders(page: Page, referer: string): Promise<Record<s
     Referer: referer,
     'User-Agent': userAgent,
     'X-Requested-With': 'XMLHttpRequest',
-    'x-xsrf-token': csrfToken,
+    'x-xsrf-token': xsrfToken,
   };
 }
 

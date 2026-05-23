@@ -6,8 +6,11 @@ import (
 	"common/middleware/redis"
 	"common/middleware/storage/oss"
 	"common/middleware/vipper"
+	"context"
 	"fmt"
 	"log"
+	aiOperationService "service/ai_operation"
+	aiOperationConsumer "service/ai_operation/consumer"
 )
 
 // InitOrder 定义初始化顺序
@@ -22,6 +25,7 @@ const (
 	IpManagerV2Init    // 新增V2版本初始化
 	IpManagerShortInit // 新增Short版本初始化
 	DeviceManagerInit
+	ConsumerInit
 	RouterInit
 )
 
@@ -101,6 +105,16 @@ var initializers = []Initializer{
 	// 	Name:   "IP Manager Short",
 	// 	InitFn: ipBiz.InitIpManagerShort,
 	// },
+	{
+		Order: ConsumerInit,
+		Name:  "Consumer",
+		InitFn: func() error {
+			svc := aiOperationService.NewAiOperationService()
+			aiOperationConsumer.StartLeaseSweeper(context.Background(), svc)
+			aiOperationConsumer.StartHumanTaskSweeper(context.Background(), svc)
+			return nil
+		},
+	},
 	{
 		Order: RouterInit,
 		Name:  "Router",

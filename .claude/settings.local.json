@@ -60,7 +60,19 @@
       "Bash(git commit -m ' *)",
       "Bash(git -C /Users/fly/Documents/develop/private/maserati/.claude/worktrees/serene-davinci-99e452 log --oneline -3)",
       "Bash(git -C /Users/fly/Documents/develop/private/maserati/.claude/worktrees/serene-davinci-99e452 show --stat HEAD)",
-      "Bash(git -C /Users/fly/Documents/develop/private/maserati/.claude/worktrees/serene-davinci-99e452 branch)"
+      "Bash(git -C /Users/fly/Documents/develop/private/maserati/.claude/worktrees/serene-davinci-99e452 branch)",
+      "Bash(go build *)",
+      "Bash(npm view *)",
+      "Bash(npm install *)",
+      "Bash(grep -n \"export function getSecChUaPlatform\\\\|class.*Engine\\\\|^}$\" client/app/src/browser/engine.ts)",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\(json.dumps\\({k:d[k] for k in ['scripts','dependencies','devDependencies'] if k in d}, indent=2\\)\\)\")",
+      "Bash(node -e \"require\\('/Users/fly/Documents/develop/project/private/taobao/maserati/client/app/node_modules/patchright'\\); console.log\\('ok'\\)\")",
+      "Bash(node scripts/check-headless.mjs)",
+      "Bash(\"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome\" --version)",
+      "Bash(sw_vers -productVersion)",
+      "Skill(client-publish-flow)",
+      "Skill(client-publish-flow:*)",
+      "Bash(xargs ls -la)"
     ]
   }
 }

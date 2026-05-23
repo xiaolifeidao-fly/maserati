@@ -1,6 +1,11 @@
 import path from 'path';
 import fs from 'fs'
-import { Browser, chromium, devices,firefox, BrowserContext, Page, Route ,Request, Response} from 'playwright';
+import { execSync } from 'child_process';
+import type { Browser, BrowserContext, Page, Route, Request, Response } from 'playwright';
+// 使用 patchright 替换原生 playwright 的 chromium：
+// patchright 是 playwright 的 drop-in 替换，去除了 __pwInitScripts__、utility world、
+// CDP Runtime.enable 等可被 aplus_v2 / umsdk 反爬脚本探测到的自动化痕迹。
+import { chromium } from 'patchright';
 import { getGlobal, removeGlobal, setGlobal } from '@utils/store/electron';
 import { app, screen as electronScreen } from 'electron';
 import { Monitor, MonitorChain, MonitorRequest, MonitorResponse } from './monitor/monitor';
@@ -25,6 +30,63 @@ declare const performance: any;
 const browserMap = new Map<string, Browser>();
 
 const contextMap = new Map<string, BrowserContext>();
+
+// ─── 从 Chrome 自身读取真实 UA，只修掉 HeadlessChrome 标识 ──────────────────
+const chromeUACache = new Map<string, string>();
+
+async function getRealChromeUA(chromePath?: string): Promise<string> {
+    const cacheKey = chromePath ?? '__default__';
+    if (chromeUACache.has(cacheKey)) return chromeUACache.get(cacheKey)!;
+
+    const tmpDir = path.join(os.tmpdir(), `cr-ua-probe-${Date.now()}`);
+    let tempCtx: any;
+    try {
+        tempCtx = await chromium.launchPersistentContext(tmpDir, {
+            headless: true,
+            executablePath: chromePath,
+            args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+        });
+        const page = await tempCtx.newPage();
+        const rawUA: string = await page.evaluate(() => navigator.userAgent);
+        // 只修掉 HeadlessChrome → Chrome，其余（macOS版本、Chrome版本）全部保留真实值
+        const fixedUA = rawUA.replace('HeadlessChrome/', 'Chrome/');
+        chromeUACache.set(cacheKey, fixedUA);
+        log.info('[Engine] real Chrome UA:', fixedUA);
+        return fixedUA;
+    } catch (error) {
+        log.warn('[Engine] UA probe failed, using fallback:', error);
+        // fallback：用 chrome --version 拼一个
+        let version = '136.0.0.0';
+        if (chromePath) {
+            try {
+                const out = execSync(`"${chromePath}" --version 2>/dev/null`, { timeout: 5000 }).toString().trim();
+                const m = out.match(/(\d+\.\d+\.\d+\.\d+)/);
+                if (m) version = m[1];
+            } catch { /* ignore */ }
+        }
+        const p = os.platform();
+        const ua = p === 'darwin'
+            ? `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${version} Safari/537.36`
+            : p === 'win32'
+            ? `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${version} Safari/537.36`
+            : `Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${version} Safari/537.36`;
+        chromeUACache.set(cacheKey, ua);
+        return ua;
+    } finally {
+        try { await tempCtx?.close(); } catch { }
+        try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { }
+    }
+}
+
+function buildSecChUaHeaders(userAgent: string, uaPlatform: string): Record<string, string> {
+    const m = userAgent.match(/Chrome\/(\d+)/);
+    const majorVersion = m ? m[1] : '136';
+    return {
+        'sec-ch-ua': `"Chromium";v="${majorVersion}", "Google Chrome";v="${majorVersion}", "Not A(Brand";v="24"`,
+        'sec-ch-ua-mobile': '?0',
+        'sec-ch-ua-platform': `"${uaPlatform}"`,
+    };
+}
 
 /**
  * 将 Electron BrowserView session 的 cookie 注入到指定店铺的 Playwright context。
@@ -358,6 +420,17 @@ export abstract class DoorEngine<T = any> {
         return this.timeout;
     }
 
+    private getViewportConfig() {
+        return this.headless ? { width: this.width, height: this.height } : null;
+    }
+
+    private async setInitialViewport(page: Page) {
+        if (!this.headless) {
+            return;
+        }
+        await page.setViewportSize({ width: this.width, height: this.height });
+    }
+
     /**
      * 创建 Page 但不导航（用于在 goto 前注册响应监听器）。
      * 调用方完成监听器注册后，自行调用 page.goto(url)。
@@ -375,7 +448,7 @@ export abstract class DoorEngine<T = any> {
         const timeout = await this.buildTimeout();
         this.timeout = timeout;
         const page = await this.context.newPage();
-        await page.setViewportSize({ width: this.width, height: this.height });
+        await this.setInitialViewport(page);
         this.onRequest(page);
         this.onResponse(page);
         this.page = page;
@@ -400,7 +473,7 @@ export abstract class DoorEngine<T = any> {
         const timeout = await this.buildTimeout();
         this.timeout = timeout;
         const page = await this.context.newPage();
-        await page.setViewportSize({ width: this.width, height: this.height });
+        await this.setInitialViewport(page);
         if(url){
             await page.goto(url, {
                 timeout: timeout,
@@ -424,7 +497,7 @@ export abstract class DoorEngine<T = any> {
             return undefined;
         }
         const page = await this.context.newPage();
-        await page.setViewportSize({ width: this.width, height: this.height });
+        await this.setInitialViewport(page);
         if(url){
             await page.goto(url);
         }
@@ -452,50 +525,40 @@ export abstract class DoorEngine<T = any> {
         }
         const userDataDir = this.getUserDataDir();
         clearChromeLockFiles(userDataDir);
-        const platform = await ensurePlatform();
+
+        const osPlatform = os.platform();
+        const uaPlatform = osPlatform === 'darwin' ? 'macOS' : osPlatform === 'win32' ? 'Windows' : 'Linux';
+        const userAgent = await getRealChromeUA(storeBrowserPath);
+        const secChUaHeaders = buildSecChUaHeaders(userAgent, uaPlatform);
 
         const contextConfig: any = {
             headless: this.headless,
             executablePath: storeBrowserPath,
+            userAgent,
+            viewport: this.getViewportConfig(),
             args: [
                 ...this.browserArgs,
                 `--window-size=${this.width},${this.height}`,
-                // 明确禁用沙箱相关参数
-                '--disable-sandbox=false',
-                '--enable-sandbox',
-                '--disable-dev-shm-usage',
-                // '--disable-gpu-sandbox',
-                '--no-first-run',
-                '--no-default-browser-check',
-                '--disable-default-apps',
-                '--disable-features=TranslateUI',
-                // 添加新的反检测参数
-                '--disable-automation',
-                '--disable-blink-features',
-                '--disable-web-security',
-                '--allow-running-insecure-content',
-                '--disable-features=VizDisplayCompositor'
             ],
             ignoreDefaultArgs: [
-                '--enable-automation', 
-                // '--disable-blink-features=AutomationControlled',  // 禁用浏览器自动化控制特性 - 已过时
+                '--enable-automation',
                 '--enable-blink-features=IdleDetection',
-                '--no-sandbox',  // 明确忽略 --no-sandbox
-                '--disable-setuid-sandbox'  // 明确忽略 --disable-setuid-sandbox
+                '--hide-scrollbars',
+                '--mute-audio',
             ],
-            extraHTTPHeaders: {
-                'sec-ch-ua': getSecChUa(platform),
-                'sec-ch-ua-mobile': '?0', // 设置为移动设备
-                'sec-ch-ua-platform': `"${getSecChUaPlatform(platform)}"`,
-            },
-            userAgent: platform.userAgent,
-
+            extraHTTPHeaders: secChUaHeaders,
             bypassCSP : true,
             locale: 'zh-CN',
+            timezoneId: 'Asia/Shanghai',
         };
         try{
             const context = await chromium.launchPersistentContext(userDataDir, contextConfig);
             contextMap.set(key, context);
+            try {
+                await this.addAntiDetectionScript(context, userAgent, uaPlatform);
+            } catch (injectError) {
+                log.warn('[Engine] failed to inject anti-detection script (persistent)', injectError);
+            }
             // 恢复上次保存的 session cookie（session cookie 不会随持久化 context 的关闭写入磁盘）
             const sessionPath = await this.getSessionPath();
             if (sessionPath && fs.existsSync(sessionPath)) {
@@ -1185,64 +1248,44 @@ export abstract class DoorEngine<T = any> {
         }
         
         const storeBrowserPath = await this.getRealChromePath();
-        const platform = await ensurePlatform();
+        const osPlatformCtx = os.platform();
+        const uaPlatformCtx = osPlatformCtx === 'darwin' ? 'macOS' : osPlatformCtx === 'win32' ? 'Windows' : 'Linux';
+        const userAgentCtx = await getRealChromeUA(storeBrowserPath);
+        const secChUaHeadersCtx = buildSecChUaHeaders(userAgentCtx, uaPlatformCtx);
         // let context;
         const contextConfig : any = {
             bypassCSP : true,
             locale: 'zh-CN',
+            timezoneId: 'Asia/Shanghai',
+            userAgent: userAgentCtx,
+            viewport: this.getViewportConfig(),
+            extraHTTPHeaders: secChUaHeadersCtx,
             args: [
                 ...this.browserArgs,
                 `--window-size=${this.width},${this.height}`,
-                // 明确禁用沙箱相关参数
-                '--disable-sandbox=false',
-                '--enable-sandbox',
-                '--disable-dev-shm-usage',
-                // '--disable-gpu-sandbox',
-                '--no-first-run',
-                '--no-default-browser-check',
-                '--disable-default-apps',
-                '--disable-features=TranslateUI',
-                // 添加新的反检测参数
-                '--disable-automation',
-                '--disable-blink-features',
-                '--disable-web-security',
-                '--allow-running-insecure-content',
-                '--disable-features=VizDisplayCompositor'
             ],
             ignoreDefaultArgs: [
-                '--enable-automation', 
-                // '--disable-blink-features=AutomationControlled',  // 禁用浏览器自动化控制特性 - 已过时
+                '--enable-automation',
                 '--enable-blink-features=IdleDetection',
-                '--no-sandbox',  // 明确忽略 --no-sandbox
-                '--disable-setuid-sandbox'  // 明确忽略 --disable-setuid-sandbox
+                '--hide-scrollbars',
+                '--mute-audio',
             ],
-            extraHTTPHeaders: {
-                'sec-ch-ua': getSecChUa(platform),
-                'sec-ch-ua-mobile': '?0', // 设置为移动设备
-                'sec-ch-ua-platform': `"${getSecChUaPlatform(platform)}"`,
-            }
         }
         if(storeBrowserPath){
             contextConfig.executablePath = storeBrowserPath;
         }
-        // contextConfig.screen = {
-        //     width: this.width,
-        //     height: this.height
-        // }
         const sessionPath = await this.getSessionPath();
         if(sessionPath){
             contextConfig.storageState = sessionPath;
         }
-        if(platform){
-            contextConfig.userAgent = platform.userAgent;
-            contextConfig.extraHTTPHeaders = {
-                'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8,zh-TW;q=0.7',
-                'sec-ch-ua': getSecChUa(platform),
-                'sec-ch-ua-mobile': '?0', // 设置为移动设备
-                'sec-ch-ua-platform': `"${getSecChUaPlatform(platform)}"`,
-            };
-        }
         const context = await this.browser?.newContext(contextConfig);
+        if(context){
+            try {
+                await this.addAntiDetectionScript(context, userAgentCtx, uaPlatformCtx);
+            } catch (injectError) {
+                log.warn('[Engine] failed to inject anti-detection script (non-persistent)', injectError);
+            }
+        }
         contextMap.set(key, context);
         return context;
     }
@@ -1394,624 +1437,336 @@ export abstract class DoorEngine<T = any> {
             headless: this.headless,
             executablePath: storeBrowserPath,
             args: args,
+            ignoreDefaultArgs: [
+                '--enable-automation',
+                '--enable-blink-features=IdleDetection',
+            ],
         });
         log.info("init browser end is by ", this.resourceId);
     browserMap.set(key, browser);
         return browser;
     }
 
-    // 添加网络请求拦截方法
-    async setupNetworkInterception(context: BrowserContext) {
-        await context.route('**/*', async route => {
-            const request = route.request();
-            const headers = await request.allHeaders();
-            
-            // 修改请求头，增加更多人类特征
-            const customHeaders = {
-                'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8,zh-TW;q=0.7',
-                'sec-ch-ua': '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
-                'sec-ch-ua-mobile': '?0',
-                'sec-ch-ua-platform': '"macOS"',
-                'sec-fetch-dest': 'empty',
-                'sec-fetch-mode': 'cors',
-                'sec-fetch-site': 'same-site'
-            };
-            
-            // 合并头部信息
-            const mergedHeaders = { ...headers, ...customHeaders };
-            
-            // 监听与验证相关的请求，记录详细日志
-            if (request.url().includes('captcha') || 
-                request.url().includes('verify') || 
-                request.url().includes('check') || 
-                request.url().includes('report') || 
-                request.url().includes('punish') || 
-                request.url().includes('_____tmd_____')) {
-                log.info(`发现验证相关请求: ${request.url()}`);
-                log.info(`请求方法: ${request.method()}`);
-                
-                try {
-                    const postData = request.postData();
-                    if (postData) {
-                        log.info(`请求数据: ${postData}`);
-                    }
-                } catch (e) {
-                    log.info(`无法获取请求数据: ${e}`);
-                }
-            }
-            
-            try {
-                // 继续请求，但使用修改后的头部
-                await route.continue({ headers: mergedHeaders });
-            } catch (e) {
-                // 如果修改失败，则以原始方式继续
-                await route.continue();
-            }
-        });
-    }
 
     // 添加新方法：注入反检测脚本
-    async addAntiDetectionScript(context: BrowserContext) {
-        await context.addInitScript(() => {
+    async addAntiDetectionScript(context: BrowserContext, userAgent?: string, uaPlatform?: string) {
+        const osPlatform = os.platform();
+        const resolvedUaPlatform = uaPlatform ?? (osPlatform === 'darwin' ? 'macOS' : osPlatform === 'win32' ? 'Windows' : 'Linux');
+        const antiArgs = {
+            userAgent: userAgent ?? '',
+            uaPlatform: resolvedUaPlatform,
+        };
+        await context.addInitScript((args: any) => {
             // =================== 关键浏览器指纹伪装 ===================
-            
-            // 1. 覆盖navigator对象的关键属性
-            const overrideNavigator = () => {
-                // 覆盖webdriver属性
-                Object.defineProperty(navigator, 'webdriver', {
-                    get: () => false
-                });
-                
-                // 语言伪装
-                Object.defineProperty(navigator, 'languages', {
-                    get: function() {
-                        return ['zh-CN', 'zh', 'en-US', 'en'];
-                    }
-                });
-                
-                // 硬件并发伪装
-                Object.defineProperty(navigator, 'hardwareConcurrency', {
-                    get: function() {
-                        return 8; // 大多数普通用户的值
-                    }
-                });
-                
-                // deviceMemory
-                Object.defineProperty(navigator, 'deviceMemory', {
-                    get: function() {
-                        return 8; // 常见值
-                    }
-                });
-                
-                // 连接类型伪装
-                // @ts-ignore
-                if (navigator.connection) {
-                    // @ts-ignore
-                    Object.defineProperty(navigator.connection, 'rtt', {
-                        get: function() {
-                            return 50 + Math.floor(Math.random() * 40);
-                        }
-                    });
-                }
-                
-                // 阻止权限查询
-                const originalPermissions = navigator.permissions;
-                if (originalPermissions) {
-                    // 完全绕过TypeScript类型检查来修改权限API
-                    Object.defineProperty(navigator.permissions, 'query', {
-                        // @ts-ignore - 必须忽略类型检查以实现反检测
-                        value: function() {
-                            return Promise.resolve({
-                                state: "prompt",
-                                onchange: null
-                            });
-                        }
-                    });
-                }
-            };
-            
-            // 2. 覆盖WebGL指纹
-            const overrideWebGL = () => {
+            const __antiArgs: { userAgent?: string; uaPlatform?: string } = args || {};
+            const __uaPlatform: string = (__antiArgs.uaPlatform || '').toString();
+            const __isMac = __uaPlatform === 'macOS';
+            const __isWin = __uaPlatform === 'Windows';
+
+            // ---------- Function.prototype.toString 隐身 ----------
+            // 所有我们手动替换/包装过的函数都通过 __markNative 注册到 WeakSet 里；
+            // 其 toString() 返回 `function <name>() { [native code] }`，避免被 creepjs 等指纹脚本通过源码匹配抓现行。
+            const __patchedFns: WeakSet<Function> = new WeakSet();
+            const __nativeFnToString = Function.prototype.toString;
+            const __markNative = <F extends Function>(fn: F, name?: string): F => {
                 try {
-                    // 伪装WebGL
-                    const getParameterProto = WebGLRenderingContext.prototype.getParameter;
-                    // @ts-ignore
-                    WebGLRenderingContext.prototype.getParameter = function(parameter) {
-                        // 扰乱指纹值
-                        if (parameter === 37445) {
-                            return 'Intel Open Source Technology Center';
-                        }
-                        if (parameter === 37446) {
-                            return 'Mesa DRI Intel(R) HD Graphics 630 (Kaby Lake GT2)';
-                        }
-                        return getParameterProto.apply(this, [...arguments]);
-                    };
+                    if (name) {
+                        try { Object.defineProperty(fn, 'name', { value: name, configurable: true }); } catch (e) {}
+                    }
+                    __patchedFns.add(fn);
+                } catch (e) {}
+                return fn;
+            };
+            try {
+                const toStringProxy: any = new Proxy(__nativeFnToString, {
+                    apply(target: any, thisArg: any, argumentsList: any) {
+                        try {
+                            if (typeof thisArg === 'function' && __patchedFns.has(thisArg)) {
+                                const n = (thisArg as Function).name || '';
+                                return 'function ' + n + '() { [native code] }';
+                            }
+                        } catch (e) {}
+                        return Reflect.apply(target, thisArg, argumentsList);
+                    }
+                });
+                // Proxy 自身 toString 也要看起来 native
+                __patchedFns.add(toStringProxy);
+                Function.prototype.toString = toStringProxy;
+            } catch (e) {}
+
+            const __defProtoGetter = (proto: any, key: string, getter: () => any) => {
+                try {
+                    __markNative(getter, 'get ' + key);
+                    Object.defineProperty(proto, key, {
+                        get: getter,
+                        set: () => {},
+                        configurable: true,
+                        enumerable: true,
+                    });
                 } catch (e) {}
             };
             
-            // 3. 覆盖Chrome特有属性
-            const overrideChrome = () => {
-                // @ts-ignore
-                window.chrome = {
-                    runtime: {},
-                    loadTimes: function() {
-                        return {
-                            firstPaintTime: 0,
-                            firstPaintAfterLoadTime: 0,
-                            navigationType: "Other",
-                            requestTime: Date.now() / 1000,
-                            startLoadTime: Date.now() / 1000,
-                            finishDocumentLoadTime: Date.now() / 1000,
-                            finishLoadTime: Date.now() / 1000,
-                            firstPaintChromeTime: Date.now() / 1000,
-                            wasAlternateProtocolAvailable: false,
-                            wasFetchedViaSpdy: false,
-                            wasNpnNegotiated: false,
-                            npnNegotiatedProtocol: "http/1.1",
-                            connectionInfo: "h2",
+            // 1. 覆盖 navigator 关键属性 —— 全部挂到 Navigator.prototype 上，避免实例 own descriptor 暴露
+            const overrideNavigator = () => {
+                try {
+                    // @ts-ignore
+                    const NavProto: any = (window as any).Navigator && (window as any).Navigator.prototype;
+                    if (!NavProto) return;
+
+                    // webdriver：清掉实例 own，再到 prototype 上挂 getter
+                    try { delete (navigator as any).webdriver; } catch (e) {}
+                    __defProtoGetter(NavProto, 'webdriver', () => false);
+                } catch (e) {}
+
+                // permissions.query：仅对 notifications 做一致性兜底，其余查询透传原函数。
+                // 「全部返回 prompt」会与 Notification.permission 不一致，是 creepjs / browserscan 的经典 bot 信号。
+                try {
+                    if (navigator.permissions && navigator.permissions.query) {
+                        const originalQuery: any = navigator.permissions.query.bind(navigator.permissions);
+                        const patchedQuery: any = function(parameters: any) {
+                            try {
+                                if (parameters && parameters.name === 'notifications') {
+                                    // @ts-ignore
+                                    const perm = ((window as any).Notification && (window as any).Notification.permission) || 'default';
+                                    return Promise.resolve({ state: perm, onchange: null });
+                                }
+                            } catch (e) {}
+                            return originalQuery(parameters);
                         };
-                    },
-                    app: {
-                        isInstalled: false,
-                        getDetails: function(){},
-                        getIsInstalled: function(){},
-                        installState: function(){
-                            return "disabled";
-                        },
-                        runningState: function(){
-                            return "cannot_run";
-                        }
-                    },
-                    csi: function() {
-                        return {
-                            startE: Date.now(),
-                            onloadT: Date.now(),
-                            pageT: Date.now(),
-                            tran: 15
-                        };
+                        __markNative(patchedQuery, 'query');
+                        Object.defineProperty(navigator.permissions, 'query', {
+                            value: patchedQuery,
+                            configurable: true,
+                            writable: true,
+                        });
                     }
-                };
+                } catch (e) {}
             };
             
-            // 4. 伪装通知API
-            const overrideNotification = () => {
-                if (window.Notification) {
-                    Object.defineProperty(window.Notification, 'permission', {
-                        get: () => "default"
-                    });
+            // 2. 覆盖 WebGL/WebGL2 的 vendor/renderer —— 必须与 UA 平台一致，避免「macOS UA + Linux Mesa GPU」这种强 bot 信号
+            const overrideWebGL = () => {
+                let vendor = 'Google Inc. (Intel)';
+                let renderer = 'ANGLE (Intel, Mesa Intel(R) UHD Graphics 630 (KBL GT2), OpenGL 4.6)';
+                if (__isMac) {
+                    vendor = 'Google Inc. (Apple)';
+                    renderer = 'ANGLE (Apple, ANGLE Metal Renderer: Apple M1 Pro, Unspecified Version)';
+                } else if (__isWin) {
+                    vendor = 'Google Inc. (Intel)';
+                    renderer = 'ANGLE (Intel, Intel(R) UHD Graphics 630 Direct3D11 vs_5_0 ps_5_0, D3D11)';
                 }
+                const patch = (Ctor: any) => {
+                    if (!Ctor || !Ctor.prototype || !Ctor.prototype.getParameter) return;
+                    const original = Ctor.prototype.getParameter;
+                    const patched: any = function(this: any, parameter: number) {
+                        // UNMASKED_VENDOR_WEBGL = 37445, UNMASKED_RENDERER_WEBGL = 37446
+                        if (parameter === 37445) return vendor;
+                        if (parameter === 37446) return renderer;
+                        return original.apply(this, arguments as any);
+                    };
+                    __markNative(patched, 'getParameter');
+                    Ctor.prototype.getParameter = patched;
+                };
+                try { patch((window as any).WebGLRenderingContext); } catch (e) {}
+                try { patch((window as any).WebGL2RenderingContext); } catch (e) {}
             };
             
-            // 5. 伪造Canvas指纹
+            // 3/4. 不再整体替换 window.chrome、不再锁死 Notification.permission。
+            // 原因：
+            //  - window.chrome 整体替换后 chrome.runtime 变成空对象（真实 Chrome 有 connect/sendMessage/id），
+            //    且 loadTimes/csi 在新版 Chrome 已删除，重新加回反成强 stealth 信号。
+            //  - Notification.permission 锁定为 'default' 会与 permissions.query({name:'notifications'}) 不一致。
+            //  patchright + --headless=new 已经提供了与真实 Chrome 一致的 chrome 对象与 Notification.permission，
+            //  在此基础上不要再叠加自己的版本。
+            
+            // 5. Canvas 指纹弱噪声 —— 直接 patch CanvasRenderingContext2D.prototype.getImageData，
+            //    避免之前「在 getContext 返回值上叠加」每次 getContext 都重复包装的隐患。
+            //    去掉 fillText 加空格的逻辑（会破坏正常文字渲染），仅在非透明像素上轻微扰动 RGB。
             const overrideCanvas = () => {
                 try {
-                    const originalGetContext = HTMLCanvasElement.prototype.getContext;
-                    // @ts-ignore
-                    HTMLCanvasElement.prototype.getContext = function(contextType) {
-                        const contextId = arguments[0];
-                        const options = arguments.length > 1 ? arguments[1] : undefined;
-                        const context = originalGetContext.call(this, contextId, options);
-                        
-                        if (contextType === '2d' && context) {
-                            // @ts-ignore
-                            const originalFillText = context.fillText;
-                            // @ts-ignore
-                            context.fillText = function() {
-                                const args = Array.from(arguments);
-                                if (args.length > 0 && typeof args[0] === 'string') {
-                                    args[0] = args[0] + ' '; // 添加空格来改变文本
+                    const Ctx2d: any = (window as any).CanvasRenderingContext2D;
+                    if (!Ctx2d || !Ctx2d.prototype) return;
+                    const originalGetImageData = Ctx2d.prototype.getImageData;
+                    const patched: any = function(this: any) {
+                        const imageData = originalGetImageData.apply(this, arguments as any);
+                        try {
+                            if (imageData && imageData.data && imageData.data.length >= 4) {
+                                const data = imageData.data;
+                                const totalPixels = data.length / 4;
+                                for (let i = 0; i < 10; i++) {
+                                    const pixel = Math.floor(Math.random() * totalPixels);
+                                    const base = pixel * 4;
+                                    if (data[base + 3] === 0) continue;
+                                    const channel = Math.floor(Math.random() * 3);
+                                    data[base + channel] = data[base + channel] ^ 1;
                                 }
-                                return originalFillText.apply(this, args);
-                            };
-                            
-                            // @ts-ignore
-                            const originalGetImageData = context.getImageData;
-                            // @ts-ignore
-                            context.getImageData = function() {
-                                const args = Array.from(arguments);
-                                const imageData = originalGetImageData.apply(this, args);
-                                if (imageData && imageData.data && imageData.data.length > 0) {
-                                    // 轻微修改像素数据，使其更难被追踪
-                                    for (let i = 0; i < 10; i++) {
-                                        const offset = Math.floor(Math.random() * imageData.data.length);
-                                        imageData.data[offset] = imageData.data[offset] ^ 1; // 改变一个位
-                                    }
-                                }
-                                return imageData;
-                            };
-                        }
-                        return context;
+                            }
+                        } catch (e) {}
+                        return imageData;
                     };
-                } catch (e) {
-                    log.info('Canvas指纹修改失败，但继续执行', e);
-                }
+                    __markNative(patched, 'getImageData');
+                    Ctx2d.prototype.getImageData = patched;
+                } catch (e) {}
             };
             
-            // 6. 隐藏自动化特征
+            // 6. 隐藏自动化特征 —— 仅保留必要的、且不会引入新信号的覆盖
+            //
+            // 已移除的过度伪装（这些反而会被检测）：
+            //   - window.outerWidth/Height = innerWidth/Height（真浏览器 outer > inner，相等是 bot 信号）
+            //   - Element.prototype.querySelectorAll 拦截 :target 返回 <div>（返回类型错误）
+            //   - window.Notification = {...} 残缺替换
+            //   - navigator.connection = {...} 假对象（真值由 patchright/headless=new 提供）
+            //   - navigator.mediaDevices = {...} 残缺替换（缺 getUserMedia 等方法极易识破）
+            //   - 重复的 navigator.userAgent 覆盖（已统一在 overrideNavigator 中处理）
             const hideAutomationFeatures = () => {
-                // 隐藏Playwright特征
-                Object.defineProperty(window, 'outerWidth', {
-                    get: function() { return window.innerWidth; }
-                });
-                Object.defineProperty(window, 'outerHeight', {
-                    get: function() { return window.innerHeight; }
-                });
-                
-                // 阻止检测自动化的navigator特性
-                Object.defineProperty(navigator, 'plugins', {
-                    get: function() {
-                        // 常见插件
-                        const fakePlugins = [];
-                        const flash = { name: 'Shockwave Flash', description: 'Shockwave Flash 32.0 r0', filename: 'internal-flash.plugin', version: '32.0.0' };
-                        const pdf = { name: 'Chrome PDF Plugin', description: 'Portable Document Format', filename: 'internal-pdf.plugin', version: '1.0' };
-                        const pdfViewer = { name: 'Chrome PDF Viewer', description: '', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai', version: '1.0' };
-                        
-                        // @ts-ignore
-                        fakePlugins.push(flash, pdf, pdfViewer);
-                        
-                        // 添加可迭代性
-                        // @ts-ignore
-                        fakePlugins.item = function(index) { return this[index]; };
-                        // @ts-ignore
-                        fakePlugins.namedItem = function(name) { 
-                            // @ts-ignore
-                            return this.find(p => p.name === name); 
+                try {
+                    // @ts-ignore - 这些 DOM 全局只在浏览器侧存在
+                    const PluginArrayCtor: any = (window as any).PluginArray;
+                    // @ts-ignore
+                    const PluginCtor: any = (window as any).Plugin;
+                    // @ts-ignore
+                    const NavigatorCtor: any = (window as any).Navigator;
+                    if (navigator.plugins.length === 0 && PluginArrayCtor && PluginCtor && NavigatorCtor) {
+                        const pluginData = [
+                            { name: 'PDF Viewer', description: 'Portable Document Format', filename: 'internal-pdf-viewer' },
+                            { name: 'Chrome PDF Viewer', description: 'Portable Document Format', filename: 'internal-pdf-viewer' },
+                            { name: 'Chromium PDF Viewer', description: 'Portable Document Format', filename: 'internal-pdf-viewer' },
+                        ];
+                        const makePlugin = (data: any) => {
+                            const p: any = Object.create(PluginCtor.prototype);
+                            Object.defineProperty(p, 'name', { value: data.name, enumerable: true, configurable: true });
+                            Object.defineProperty(p, 'description', { value: data.description, enumerable: true, configurable: true });
+                            Object.defineProperty(p, 'filename', { value: data.filename, enumerable: true, configurable: true });
+                            Object.defineProperty(p, 'length', { value: 0, enumerable: false, configurable: true });
+                            Object.defineProperty(p, 'item', { value: () => null, enumerable: false, configurable: true });
+                            Object.defineProperty(p, 'namedItem', { value: () => null, enumerable: false, configurable: true });
+                            return p;
                         };
-                        // @ts-ignore
-                        fakePlugins.refresh = function() {};
-                        
-                        return fakePlugins;
+                        const plugins = pluginData.map(makePlugin);
+                        const pluginArray: any = Object.create(PluginArrayCtor.prototype);
+                        plugins.forEach((p: any, i: number) => {
+                            Object.defineProperty(pluginArray, i, { value: p, enumerable: true, configurable: true });
+                            Object.defineProperty(pluginArray, p.name, { value: p, enumerable: false, configurable: true });
+                        });
+                        Object.defineProperty(pluginArray, 'length', { value: plugins.length, enumerable: false, configurable: true });
+                        Object.defineProperty(pluginArray, 'item', { value: (i: number) => pluginArray[i] || null, enumerable: false, configurable: true });
+                        Object.defineProperty(pluginArray, 'namedItem', { value: (n: string) => pluginArray[n] || null, enumerable: false, configurable: true });
+                        Object.defineProperty(pluginArray, 'refresh', { value: () => {}, enumerable: false, configurable: true });
+                        __defProtoGetter(NavigatorCtor.prototype, 'plugins', () => pluginArray);
                     }
-                });
-                
-                // 伪造指纹特征
-                const originalQuery = Element.prototype.querySelectorAll;
-                // @ts-ignore
-                Element.prototype.querySelectorAll = function(selector) {
-                    if (selector && selector.includes(':target')) {
-                        // 扰乱指纹
-                        return document.createElement('div');
-                    }
-                    return originalQuery.apply(this, [...arguments]);
-                };
-                
-                // 无头模式特殊修复 - 修复window.Notification
-                if (window.Notification === undefined) {
-                    // @ts-ignore
-                    window.Notification = {
-                        permission: 'default',
-                        requestPermission: function() {
-                            return Promise.resolve('default');
-                        }
-                    };
-                }
-                
-                // 修复headless Chrome检测
-                // 模拟浏览器连接
-                // @ts-ignore
-                if (!navigator.connection) {
-                    // @ts-ignore
-                    navigator.connection = {
-                        downlink: 10 + Math.random() * 5,
-                        effectiveType: "4g",
-                        onchange: null,
-                        rtt: 50 + Math.random() * 30,
-                        saveData: false
-                    };
-                }
-                
-                // 修复无头WebDriver检测
-                Object.defineProperty(navigator, 'userAgent', {
-                    get: function() {
-                        return 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
-                    }
-                });
-                
-                // 模拟媒体设备
-                if (navigator.mediaDevices === undefined) {
-                    // @ts-ignore
-                    navigator.mediaDevices = {
-                        enumerateDevices: function() {
-                            return Promise.resolve([
-                                {kind: 'audioinput', deviceId: 'default', groupId: 'default', label: ''},
-                                {kind: 'videoinput', deviceId: 'default', groupId: 'default', label: ''}
-                            ]);
-                        }
-                    };
-                }
+                } catch (e) {}
             };
             
             // 7. 阻止指纹收集
             const blockFingerprinting = () => {
-                // 阻止FP收集常用的脚本
-                Object.defineProperty(performance, 'mark', {
-                    value: function() {
-                        // 记录性能但如果调用与fingerprint相关就扰乱
-                        const args = Array.from(arguments);
-                        if (args.length > 0 && typeof args[0] === 'string' && 
-                            (args[0].includes('finger') || args[0].includes('detect') || args[0].includes('bot'))) {
-                            return null;
-                        }
-                        return performance.mark.apply(this, args as unknown as [string, any?]);
-                    }
-                });
-                
-                // 干扰AudioContext指纹
-                if (window.AudioContext || (window as any).webkitAudioContext) {
-                    const OriginalAudioContext = window.AudioContext || (window as any).webkitAudioContext;
-                    // @ts-ignore
-                    window.AudioContext = (window as any).webkitAudioContext = function() {
-                        const audioContext = new OriginalAudioContext();
-                        const originalGetChannelData = audioContext.createAnalyser().getFloatFrequencyData;
-                        // @ts-ignore
-                        audioContext.createAnalyser().getFloatFrequencyData = function(array) {
-                            const result = originalGetChannelData.apply(this, [...arguments]);
-                            // 轻微改变音频数据
-                            if (array && array.length > 0) {
-                                for (let i = 0; i < array.length; i += 200) {
-                                    array[i] = array[i] + Math.random() * 0.01;
-                                }
-                            }
-                            return result;
-                        };
-                        return audioContext;
-                    };
-                }
-                
-                // 无头模式特殊处理 - 修复语音合成
-                if (window.speechSynthesis === undefined) {
-                    // @ts-ignore
-                    window.speechSynthesis = {
-                        pending: false,
-                        speaking: false,
-                        paused: false,
-                        onvoiceschanged: null,
-                        getVoices: function() { return []; },
-                        speak: function() {},
-                        cancel: function() {},
-                        pause: function() {},
-                        resume: function() {}
-                    };
-                }
+                // 注意：曾经在此处覆盖 performance.mark 以「阻止指纹收集」。但原实现里
+                // `return performance.mark.apply(this, args)` 调用的是覆盖后的 mark 自身，
+                // 会立刻触发 Maximum call stack size exceeded（browserscan / 任何调用
+                // performance.mark 的页面进站即崩）。且指纹检测并不依赖 performance.mark，
+                // 该覆盖既无收益又破坏 Web API 兼容（mark 必须返回 PerformanceMark 实例），
+                // 故彻底移除。
+
+                // 原有 AudioContext 包装存在 bug：createAnalyser() 在 originalGetChannelData 与
+                // 后续赋值时分别返回两个不同的 AnalyserNode 实例，假装注入的噪声对消费者完全不可见，
+                // 同时 `instanceof AudioContext` 会因 prototype 不一致而失败。指纹检测里 AudioContext
+                // 噪声不是淘宝级风控核心信号，宁可不做也不要做错，整段移除。
+                //
+                // window.speechSynthesis 仅在真 headless（无 --headless=new）下为 undefined；
+                // 我们已统一切到 headless=new，真值可用，残缺替换反而暴露。
             };
             
             // 8. 无头浏览器专用反检测
+            //   - screen.availWidth/Height/width/height 不再强行 = window.innerWidth/Height：
+            //     真值是显示器整体尺寸（远大于窗口内尺寸），相等是 bot 信号。--headless=new 自带真值。
+            //   - WebGL2 vendor/renderer 已统一在 overrideWebGL 中按平台处理，这里不再重复覆盖。
             const antiHeadlessDetection = () => {
-                // 模拟物理屏幕尺寸
-                Object.defineProperty(screen, 'availWidth', {
-                    get: function() { return window.innerWidth; }
-                });
-                Object.defineProperty(screen, 'availHeight', {
-                    get: function() { return window.innerHeight; }
-                });
-                Object.defineProperty(screen, 'width', {
-                    get: function() { return window.innerWidth; }
-                });
-                Object.defineProperty(screen, 'height', {
-                    get: function() { return window.innerHeight; }
-                });
-                
-                // 模拟WebGL2
-                if (window.WebGL2RenderingContext) {
-                    const getParameterProto = WebGL2RenderingContext.prototype.getParameter;
+                // mimeTypes：仅在真值为空时基于 MimeTypeArray.prototype / MimeType.prototype 兜底
+                try {
+                    // @ts-ignore - 仅在浏览器侧存在
+                    const MimeTypeArrayCtor: any = (window as any).MimeTypeArray;
                     // @ts-ignore
-                    WebGL2RenderingContext.prototype.getParameter = function(parameter) {
-                        if (parameter === 37445) {
-                            return 'Intel Open Source Technology Center';
-                        }
-                        if (parameter === 37446) {
-                            return 'Mesa DRI Intel(R) HD Graphics 630 (Kaby Lake GT2)';
-                        }
-                        return getParameterProto.apply(this, [...arguments]);
-                    };
-                }
-                
-                // 处理无头模式中navigator.plugins和mimeTypes
-                if (navigator.plugins.length === 0) {
-                    Object.defineProperty(navigator, 'plugins', {
-                        get: function() {
-                            const ChromePDFPlugin = { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer', description: 'Portable Document Format' };
-                            const FakeMimeType = { type: 'application/pdf', suffixes: 'pdf', description: 'Portable Document Format' };
-                            
-                            // @ts-ignore
-                            ChromePDFPlugin.__proto__ = MimeType.prototype;
-                            const pluginArray = [ChromePDFPlugin];
-                            
-                            // @ts-ignore
-                            pluginArray.item = function(index) { return this[index]; };
-                            // @ts-ignore
-                            pluginArray.namedItem = function(name) { return this[0].name === name ? this[0] : null; };
-                            // @ts-ignore
-                            pluginArray.refresh = function() {};
-                            // @ts-ignore
-                            pluginArray.length = 1;
-                            
-                            return pluginArray;
-                        }
-                    });
-                }
-                
-                if (navigator.mimeTypes.length === 0) {
-                    Object.defineProperty(navigator, 'mimeTypes', {
-                        get: function() {
-                            const mimeTypes = [
-                                { type: 'application/pdf', suffixes: 'pdf', description: 'Portable Document Format', enabledPlugin: {} }
-                            ];
-                            
-                            // @ts-ignore
-                            mimeTypes.item = function(index) { return this[index]; };
-                            // @ts-ignore
-                            mimeTypes.namedItem = function(name) { return this[0].type === name ? this[0] : null; };
-                            // @ts-ignore
-                            mimeTypes.length = 1;
-                            
-                            return mimeTypes;
-                        }
-                    });
-                }
+                    const MimeTypeCtor: any = (window as any).MimeType;
+                    // @ts-ignore
+                    const NavigatorCtor: any = (window as any).Navigator;
+                    if (navigator.mimeTypes.length === 0 && MimeTypeArrayCtor && MimeTypeCtor && NavigatorCtor) {
+                        const mimeData = [
+                            { type: 'application/pdf', suffixes: 'pdf', description: 'Portable Document Format' },
+                            { type: 'text/pdf', suffixes: 'pdf', description: 'Portable Document Format' },
+                        ];
+                        const mimes = mimeData.map((d: any) => {
+                            const m: any = Object.create(MimeTypeCtor.prototype);
+                            Object.defineProperty(m, 'type', { value: d.type, enumerable: true, configurable: true });
+                            Object.defineProperty(m, 'suffixes', { value: d.suffixes, enumerable: true, configurable: true });
+                            Object.defineProperty(m, 'description', { value: d.description, enumerable: true, configurable: true });
+                            return m;
+                        });
+                        const mimeArray: any = Object.create(MimeTypeArrayCtor.prototype);
+                        mimes.forEach((m: any, i: number) => {
+                            Object.defineProperty(mimeArray, i, { value: m, enumerable: true, configurable: true });
+                            Object.defineProperty(mimeArray, m.type, { value: m, enumerable: false, configurable: true });
+                        });
+                        Object.defineProperty(mimeArray, 'length', { value: mimes.length, enumerable: false, configurable: true });
+                        Object.defineProperty(mimeArray, 'item', { value: (i: number) => mimeArray[i] || null, enumerable: false, configurable: true });
+                        Object.defineProperty(mimeArray, 'namedItem', { value: (n: string) => mimeArray[n] || null, enumerable: false, configurable: true });
+                        __defProtoGetter(NavigatorCtor.prototype, 'mimeTypes', () => mimeArray);
+                    }
+                } catch (e) {}
             };
             
-            // 执行所有伪装
+            // WebRTC 本地/真实 IP 泄漏屏蔽：阻止 host/srflx 候选地址回流到 JS
+            const blockWebRTCLeak = () => {
+                try {
+                    // @ts-ignore
+                    const RTC = (window as any).RTCPeerConnection || (window as any).webkitRTCPeerConnection || (window as any).mozRTCPeerConnection;
+                    if (!RTC) return;
+                    const OriginalRTC = RTC;
+                    const PatchedRTC: any = function(this: any, ...args: any[]) {
+                        const pc = new OriginalRTC(...args);
+                        const origAddIce = pc.addIceCandidate && pc.addIceCandidate.bind(pc);
+                        if (origAddIce) {
+                            const patchedAddIce: any = function(candidate: any, ...rest: any[]) {
+                                const c = candidate && (candidate.candidate || (candidate.toJSON && candidate.toJSON().candidate));
+                                if (typeof c === 'string' && /(host|srflx)/i.test(c)) {
+                                    return Promise.resolve();
+                                }
+                                return origAddIce(candidate, ...rest);
+                            };
+                            __markNative(patchedAddIce, 'addIceCandidate');
+                            pc.addIceCandidate = patchedAddIce;
+                        }
+                        const origCreateOffer = pc.createOffer && pc.createOffer.bind(pc);
+                        if (origCreateOffer) {
+                            const patchedCreateOffer: any = function(opts: any) {
+                                const merged = Object.assign({}, opts, { offerToReceiveAudio: false, offerToReceiveVideo: false });
+                                return origCreateOffer(merged);
+                            };
+                            __markNative(patchedCreateOffer, 'createOffer');
+                            pc.createOffer = patchedCreateOffer;
+                        }
+                        return pc;
+                    };
+                    PatchedRTC.prototype = OriginalRTC.prototype;
+                    __markNative(PatchedRTC, 'RTCPeerConnection');
+                    (window as any).RTCPeerConnection = PatchedRTC;
+                    if ((window as any).webkitRTCPeerConnection) (window as any).webkitRTCPeerConnection = PatchedRTC;
+                    if ((window as any).mozRTCPeerConnection) (window as any).mozRTCPeerConnection = PatchedRTC;
+                } catch (e) {
+                    // ignore
+                }
+            };
+
+            // 执行所有伪装。已删除的 overrideChrome / overrideNotification 不再调用 ——
+            // 那两块整体替换反而暴露，详见函数定义处注释。
             try {
                 overrideNavigator();
-                overrideWebGL();
-                overrideChrome();
-                overrideNotification();
                 overrideCanvas();
                 hideAutomationFeatures();
                 blockFingerprinting();
                 antiHeadlessDetection();
+                blockWebRTCLeak();
             } catch (err) {
                 // 忽略错误继续执行
             }
-        });
+        }, antiArgs);
     }
 
-}
-
-export function getSecChUa(platform : any){
-    if(!platform){
-        return "";
-    }
-    const brands = Array.isArray(platform.userAgentData?.brands) ? platform.userAgentData.brands : [];
-    const result = [];
-    for(const brand of brands){
-        result.push(`"${brand.brand}";v="${brand.version}"`);
-    }
-    return result.join(", ");
-}
-
-export function getSecChUaPlatform(platform: any){
-    const uaPlatform = platform?.userAgentData?.platform;
-    if(uaPlatform){
-        return uaPlatform;
-    }
-    const navigatorPlatform = platform?.platform;
-    if(typeof navigatorPlatform !== 'string' || navigatorPlatform.length === 0){
-        return "";
-    }
-    if(navigatorPlatform.startsWith('Mac')){
-        return 'macOS';
-    }
-    if(navigatorPlatform.startsWith('Win')){
-        return 'Windows';
-    }
-    if(navigatorPlatform.includes('Linux')){
-        return 'Linux';
-    }
-    return navigatorPlatform;
-}
-
-export function normalizePlatform(platform : any){
-    if(!platform){
-        return platform;
-    }
-    const userAgentData = platform.userAgentData || {};
-    return {
-        ...platform,
-        userAgentData: {
-            brands: Array.isArray(userAgentData.brands) ? userAgentData.brands : [],
-            mobile: typeof userAgentData.mobile === 'boolean' ? userAgentData.mobile : false,
-            platform: userAgentData.platform || getSecChUaPlatform(platform),
-        }
-    };
-}
-
-export async function initPlatform(){
-    let browser : Browser | undefined = undefined;
-    try{
-        let platform = await getPlatform();
-        if(platform){
-            return platform;
-        }
-        let storeBrowserPath = await getChromePath();
-
-        browser = await chromium.launch({
-            headless: false,
-            executablePath: storeBrowserPath,
-            args: [
-            '--disable-accelerated-2d-canvas', '--disable-webgl', '--disable-software-rasterizer',
-            '--no-sandbox', // 取消沙箱，某些网站可能会检测到沙箱模式
-            '--disable-setuid-sandbox',
-            '--disable-blink-features=AutomationControlled',  // 禁用浏览器自动化控制特性
-          ]
-         });
-        const context = await browser.newContext();
-        const page = await context.newPage();
-        await page.goto("https://www.baidu.com");
-        platform = await setPlatform(page);
-        return platform;
-    }catch(error){
-        log.error("initPlatform error", error);
-    }finally{
-        if(browser){
-            await browser.close();
-        }
-    }
-}
-
-export async function setPlatform(page : Page){
-    const platform = await page.evaluate(() => {
-        // @ts-ignore
-        const navigatorObj = navigator;
-        const result : any = {};
-        for(let key in navigatorObj){
-            result[key] = navigatorObj[key];
-        }
-        result.userAgent = navigator.userAgent;
-        result.platform = navigator.platform;
-        result.language = navigator.language;
-        result.languages = navigator.languages;
-        result.userAgentData = {
-            brands: Array.isArray(navigator.userAgentData?.brands) ? navigator.userAgentData.brands : [],
-            mobile: typeof navigator.userAgentData?.mobile === 'boolean' ? navigator.userAgentData.mobile : false,
-            platform: navigator.userAgentData?.platform || navigator.platform || '',
-        };
-        return result;
-    });
-    const normalizedPlatform = normalizePlatform(platform);
-    setGlobal("tbk_browserPlatform_" + (process.env.CHROME_VERSION || '1169'), JSON.stringify(normalizedPlatform));
-    return normalizedPlatform;
-}
-
-export async function getPlatform(){
-    const chromeVersion = process.env.CHROME_VERSION || '1169';
-    const browserPlatform = await getGlobal("tbk_browserPlatform_" + chromeVersion);
-    if(browserPlatform){
-        return normalizePlatform(JSON.parse(browserPlatform));
-    }
-    return undefined;
-}
-
-async function ensurePlatform(){
-    const currentPlatform = await getPlatform();
-    if(currentPlatform){
-        return currentPlatform;
-    }
-
-    const initializedPlatform = await initPlatform();
-    if(initializedPlatform){
-        return normalizePlatform(initializedPlatform);
-    }
-
-    return getDefaultPlatform();
-}
-
-function getDefaultPlatform(){
-    return normalizePlatform({
-        userAgent:
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
-        platform: "MacIntel",
-        language: "zh-CN",
-        languages: ["zh-CN", "zh", "en-US", "en"],
-        userAgentData: {
-            brands: [
-                { brand: "Chromium", version: "136" },
-                { brand: "Google Chrome", version: "136" },
-                { brand: "Not.A/Brand", version: "24" },
-            ],
-            mobile: false,
-            platform: "macOS",
-        },
-    });
 }

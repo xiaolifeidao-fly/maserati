@@ -7,8 +7,10 @@ import {
   deleteShop,
   fetchShop,
   fetchShops,
+  openShopInfo,
   startShopLogin,
   updateShop,
+  type ShopInfoOpenResult,
   type ShopLoginStartResult,
   type ShopAuthorizePayload,
   type ShopListQuery,
@@ -112,6 +114,15 @@ export function useShopManagement() {
     }
   };
 
+  const viewShopInfo = async (id: number): Promise<ShopInfoOpenResult> => {
+    setSubmitting(true);
+    try {
+      return await openShopInfo(id);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   const monitorShopLogin = async (id: number, currentShop?: ShopRecord) => {
     const startedAt = Date.now();
     while (Date.now() - startedAt < 180000) {
@@ -163,6 +174,7 @@ export function useShopManagement() {
     saveShop,
     bindActivationCode,
     openShopLogin,
+    viewShopInfo,
     removeShop,
     loginNotice,
     setLoginNotice,

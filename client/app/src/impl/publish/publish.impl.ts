@@ -2,9 +2,12 @@ import {
   PublishApi,
   type PublishDraftRecord,
   type PublishLogExportResult,
+  type PublishLogPreviewResult,
 } from '@eleapi/publish/publish.api';
 import { TbEngine } from '@src/browser/tb.engine';
 import { requestBackend } from '../shared/backend';
+import { resolveLoginGate } from '@src/publish/runtime/login-gate';
+import type { ShopLoginPayload, ShopRecord } from '@eleapi/commerce/commerce.api';
 import { PublishRunner } from '@src/publish/core/publish-runner';
 import { HttpPublishPersister } from '@src/publish/core/http-publish-persister';
 import { showCaptchaPanel, showScreenshotCaptchaPanel, getCaptchaBrowserCookies } from '@src/publish/publish-window';
@@ -28,9 +31,12 @@ import {
   exportPublishBatchErrorLogs,
   exportPublishProductLog,
   openPublishLogDirectory,
+  previewPublishProductLog,
   publishError,
   publishInfo,
   registerPublishTaskLogFile,
+  getPublishTaskLogFilePath,
+  showPublishLogFileInFolder,
   summarizeForLog,
   unregisterPublishTaskLogFile,
 } from '@src/publish/utils/publish-logger';
@@ -188,14 +194,21 @@ export class PublishImpl extends PublishApi {
 
     runner.onProgress((event: PublishProgressEvent) => {
       PublishImpl.syncProgress(taskId, event);
+      // 检测到登录过期：广播事件，前端弹窗提示用户点击处理
+      if (event.loginRequiredShopId) {
+        PublishImpl.broadcast('publish.onLoginRequired', {
+          taskId,
+          shopId: event.loginRequiredShopId,
+        });
+      }
       // 检测到验证码时，自动在发布窗口右侧展示验证码；验证通过后自动继续发布
       if (event.captchaUrl) {
         if (event.captchaMode === 'screenshot') {
-          // 图片上传验证码：通过 Playwright 截屏流呈现，验证码直接在 headless 会话中完成，
+          // 图片上传验证码：通过 Playwright 截屏流呈现，验证码直接在有头会话中完成，
           // 无需将 Electron BrowserView cookie 注入 Playwright
           void showScreenshotCaptchaPanel(event.captchaUrl, task.shopId, taskId, () => {
             // 重置 validateAutoTag，让上传步骤恢复后直接使用 Playwright 会话 cookie
-            const engine = new TbEngine(String(task.shopId), true);
+            const engine = new TbEngine(String(task.shopId), false);
             engine.setValidateAutoTag(true);
             void this.resumePublish(taskId);
           });
@@ -220,7 +233,7 @@ export class PublishImpl extends PublishApi {
                 publishInfo(`[task:${taskId}] captcha cookie sync failed, resuming anyway`, { error: String(err) });
               })
               .then(() => this.resumePublish(taskId));
-          });
+          }, task.shopId);
         }
       }
     });
@@ -324,6 +337,10 @@ export class PublishImpl extends PublishApi {
     return exportPublishProductLog(sourceProductId);
   }
 
+  async getPublishLogPreview(sourceProductId: string): Promise<PublishLogPreviewResult> {
+    return previewPublishProductLog(sourceProductId);
+  }
+
   async exportPublishBatchErrorLogs(
     batchId: number,
     sourceProductIds?: string[],
@@ -363,6 +380,14 @@ export class PublishImpl extends PublishApi {
     return openPublishLogDirectory();
   }
 
+  async showPublishLogFileInFolder(taskId: number): Promise<{ shown: boolean }> {
+    return showPublishLogFileInFolder(taskId);
+  }
+
+  async getPublishTaskLogFilePath(taskId: number): Promise<string | undefined> {
+    return getPublishTaskLogFilePath(taskId);
+  }
+
   async getProductDraftBySource(shopId: number, sourceProductId: string): Promise<PublishDraftRecord | null> {
     const normalizedSourceProductId = String(sourceProductId || '').trim();
     if (!shopId || !normalizedSourceProductId) {
@@ -388,5 +413,36 @@ export class PublishImpl extends PublishApi {
     if (page) {
       await page.bringToFront();
     }
+  }
+
+  async handlePublishLoginRequired(taskId: number, shopId: number): Promise<{ handled: boolean }> {
+    if (!Number.isFinite(shopId) || shopId <= 0) {
+      return { handled: false };
+    }
+
+    let shop: ShopRecord;
+    try {
+      shop = await requestBackend<ShopRecord>('GET', `/shops/${shopId}`);
+    } catch {
+      return { handled: false };
+    }
+
+    const engine = new TbEngine(String(shopId), false);
+    // 与店铺管理登录逻辑完全一致：打开 Playwright 登录窗口，监听登录成功后持久化
+    void engine.openLoginWorkspace(shop, async (payload: ShopLoginPayload) => {
+      try {
+        await requestBackend<ShopRecord>('POST', '/shops/login', { data: payload });
+      } catch {
+        // 持久化失败不阻塞任务恢复
+      }
+      // 批次任务：放行门控让循环继续
+      const hadGate = resolveLoginGate(taskId);
+      if (!hadGate) {
+        // 单任务：重新启动 runner（从断点步骤 UPLOAD_IMAGES 恢复）
+        await this.resumePublish(taskId);
+      }
+    });
+
+    return { handled: true };
   }
 }

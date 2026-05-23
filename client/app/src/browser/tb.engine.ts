@@ -11,6 +11,7 @@ type PersistShopLogin = (payload: ShopLoginPayload) => Promise<void>;
 const TB_LOGIN_URL = "https://myseller.taobao.com/home.htm/QnworkbenchHome/";
 const TB_COLLECT_LOGIN_URL = "https://login.taobao.com/havanaone/login/login.htm?bizName=taobao&f=top&redirectURL=https%3A%2F%2Fwww.taobao.com%2F";
 const TB_SHOP_CENTER_URL = "https://myseller.taobao.com/home.htm/shop-manage/shop-center";
+const TB_COLLECT_ACCOUNT_URL = "https://i.taobao.com/my_taobao.htm";
 const TB_SHOP_INFO_API = "mtop.taobao.jdy.resource.shop.info.get";
 const TB_COLLECT_USER_API = "h5/mtop.user.getusersimple";
 const TB_LOGIN_COOKIE_KEYS = ["cookie2", "cookie3_bak", "cookie1", "login", "uc1", "wk_cookie2", "sgcookie"];
@@ -29,6 +30,17 @@ export class TbEngine extends DoorEngine {
     await page.goto(getTbLoginUrl(shop), { waitUntil: "domcontentloaded" });
     await page.bringToFront();
     void this.captureLoginLifecycle(page, shop, persistShopLogin);
+    return page;
+  }
+
+  async openShopInfoWorkspace(shop: ShopRecord): Promise<Page | undefined> {
+    const page = await this.init();
+    if (!page) {
+      return undefined;
+    }
+
+    await page.goto(getTbShopInfoUrl(shop), { waitUntil: "domcontentloaded" });
+    await page.bringToFront();
     return page;
   }
 
@@ -265,6 +277,10 @@ function buildTbShopLoginPayload(shop: ShopRecord, rawData: unknown): ShopLoginP
 
 function getTbLoginUrl(shop: ShopRecord): string {
   return normalizeShopUsage(shop.shopUsage) === "COLLECT" ? TB_COLLECT_LOGIN_URL : TB_LOGIN_URL;
+}
+
+function getTbShopInfoUrl(shop: ShopRecord): string {
+  return normalizeShopUsage(shop.shopUsage) === "COLLECT" ? TB_COLLECT_ACCOUNT_URL : TB_SHOP_CENTER_URL;
 }
 
 function normalizeShopUsage(shopUsage: string): string {

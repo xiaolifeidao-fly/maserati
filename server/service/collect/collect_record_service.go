@@ -115,6 +115,7 @@ func (s *CollectService) CreateCollectRecord(req *collectDTO.CreateCollectRecord
 		RawDataURL:        rawDataURL,
 		IsFavorite:        req.IsFavorite,
 		Status:            normalizeCollectRecordStatus(req.Status),
+		MissingFields:     normalizeCollectMissingFields(req.MissingFields),
 	})
 	if err != nil {
 		return nil, err
@@ -192,11 +193,43 @@ func (s *CollectService) UpdateCollectRecord(id uint, req *collectDTO.UpdateColl
 	if req.Status != nil {
 		entity.Status = normalizeCollectRecordStatus(*req.Status)
 	}
+	if req.MissingFields != nil {
+		entity.MissingFields = normalizeCollectMissingFields(*req.MissingFields)
+	}
 	saved, err := s.collectRecordRepository.SaveOrUpdate(entity)
 	if err != nil {
 		return nil, err
 	}
 	return db.ToDTO[collectDTO.CollectRecordDTO](saved), nil
+}
+
+func normalizeCollectMissingFields(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	var fields []string
+	if err := json.Unmarshal([]byte(value), &fields); err == nil {
+		normalized := make([]string, 0, len(fields))
+		seen := map[string]struct{}{}
+		for _, field := range fields {
+			field = strings.TrimSpace(field)
+			if field == "" {
+				continue
+			}
+			if _, ok := seen[field]; ok {
+				continue
+			}
+			seen[field] = struct{}{}
+			normalized = append(normalized, field)
+		}
+		if len(normalized) == 0 {
+			return ""
+		}
+		raw, _ := json.Marshal(normalized)
+		return string(raw)
+	}
+	return value
 }
 
 func (s *CollectService) UpdateCollectRecordForUser(id uint, appUserID uint64, req *collectDTO.UpdateCollectRecordDTO) (*collectDTO.CollectRecordDTO, error) {

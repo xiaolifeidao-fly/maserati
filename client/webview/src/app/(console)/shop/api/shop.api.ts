@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  ShopInfoOpenResult,
   ShopLoginStartResult,
   type ShopAuthorizePayload,
   type ShopListQuery,
@@ -11,7 +12,7 @@ import {
 import { getCommerceApi } from "@/utils/commerce";
 
 export type { ShopAuthorizePayload, ShopListQuery, ShopLoginPayload, ShopPayload, ShopRecord };
-export { ShopLoginStartResult };
+export { ShopInfoOpenResult, ShopLoginStartResult };
 
 export async function fetchShops(query: ShopListQuery) {
   return getCommerceApi().listShops(query);
@@ -43,4 +44,8 @@ export async function loginShop(payload: ShopLoginPayload) {
 
 export async function startShopLogin(shopId: number) {
   return getCommerceApi().startShopLogin(shopId) as Promise<ShopLoginStartResult>;
+}
+
+export async function openShopInfo(shopId: number) {
+  return getCommerceApi().openShopInfo(shopId) as Promise<ShopInfoOpenResult>;
 }

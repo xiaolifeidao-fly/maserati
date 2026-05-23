@@ -52,6 +52,7 @@ type CollectRecordDTO struct {
 	RawDataURL        string `json:"rawDataUrl"`
 	IsFavorite        bool   `json:"isFavorite"`
 	Status            string `json:"status"`
+	MissingFields     string `json:"missingFields"`
 }
 
 type CollectRecordRawDataDTO struct {
@@ -73,6 +74,7 @@ type CreateCollectRecordDTO struct {
 	RawSourceData     string `json:"rawSourceData"`
 	IsFavorite        bool   `json:"isFavorite"`
 	Status            string `json:"status"`
+	MissingFields     string `json:"missingFields"`
 }
 
 type UpdateCollectRecordDTO struct {
@@ -87,6 +89,7 @@ type UpdateCollectRecordDTO struct {
 	RawSourceData     *string `json:"rawSourceData,omitempty"`
 	IsFavorite        *bool   `json:"isFavorite,omitempty"`
 	Status            *string `json:"status,omitempty"`
+	MissingFields     *string `json:"missingFields,omitempty"`
 }
 
 type CollectRecordQueryDTO struct {

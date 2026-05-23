@@ -209,6 +209,77 @@ select {
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9);
 }
 
+.ai-operation-metric-card {
+  position: relative;
+  min-height: 96px;
+  padding: 16px;
+  border-radius: 12px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(255, 249, 243, 0.88));
+  border: 1px solid rgba(191, 143, 108, 0.14);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.92);
+  overflow: hidden;
+  transition: border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
+}
+
+.ai-operation-metric-card.is-changed {
+  border-color: rgba(217, 107, 43, 0.48);
+  box-shadow:
+    0 12px 28px rgba(217, 107, 43, 0.14),
+    inset 0 1px 0 rgba(255, 255, 255, 0.92);
+  animation: aiOperationMetricPulse 900ms ease-out;
+}
+
+.ai-operation-metric-card.is-changed::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(240, 174, 77, 0.18), transparent);
+  transform: translateX(-100%);
+  animation: aiOperationMetricSweep 900ms ease-out;
+  pointer-events: none;
+}
+
+.ai-operation-metric-delta {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 1;
+  min-width: 34px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 20px;
+  text-align: center;
+  background: rgba(22, 119, 255, 0.1);
+  color: #1677ff;
+  animation: aiOperationMetricDelta 900ms ease-out both;
+}
+
+.ai-operation-metric-delta.is-up {
+  background: rgba(56, 158, 13, 0.12);
+  color: #389e0d;
+}
+
+.ai-operation-metric-delta.is-down {
+  background: rgba(207, 19, 34, 0.1);
+  color: #cf1322;
+}
+
+.ai-operation-inline-metric {
+  display: inline-flex;
+  align-items: center;
+  min-width: 48px;
+  border-radius: 6px;
+  transition: background-color 180ms ease, transform 180ms ease;
+}
+
+.ai-operation-inline-metric.is-changed {
+  padding: 0 4px;
+  background: rgba(240, 174, 77, 0.18);
+  animation: aiOperationInlineMetricPop 720ms ease-out;
+}
+
 .manager-step-strip {
   display: flex;
   gap: 10px;
@@ -655,8 +726,8 @@ select {
 
 .manager-commerce-nav {
   display: grid;
-  grid-template-columns: repeat(5, minmax(128px, 1fr));
-  gap: 10px;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 7px;
   width: 100%;
   overflow-x: auto;
   padding-bottom: 2px;
@@ -665,10 +736,10 @@ select {
 .manager-commerce-nav-item {
   border: 1px solid rgba(191, 143, 108, 0.16);
   background: rgba(255, 250, 244, 0.92);
-  border-radius: 22px;
-  padding: 12px 14px;
+  border-radius: 16px;
+  padding: 8px 10px;
   display: flex;
-  gap: 12px;
+  gap: 8px;
   align-items: center;
   text-align: left;
   cursor: pointer;
@@ -684,15 +755,15 @@ select {
 .manager-commerce-nav-item strong {
   display: block;
   color: var(--manager-text);
-  font-size: 15px;
+  font-size: 13px;
   white-space: nowrap;
 }
 
 .manager-commerce-nav-item small {
   display: block;
-  margin-top: 4px;
+  margin-top: 2px;
   color: var(--manager-text-faint);
-  font-size: 12px;
+  font-size: 11px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -711,7 +782,7 @@ select {
 }
 
 .manager-commerce-nav-icon {
-  font-size: 18px;
+  font-size: 16px;
   color: var(--manager-primary-strong);
 }
 
@@ -946,7 +1017,7 @@ select {
 
   .manager-commerce-nav {
     width: 100%;
-    grid-template-columns: repeat(5, minmax(128px, 1fr));
+    grid-template-columns: repeat(7, minmax(0, 1fr));
   }
 
   .manager-commerce-dashboard-grid,
@@ -967,7 +1038,7 @@ select {
 
   .manager-commerce-nav {
     width: 100%;
-    grid-template-columns: repeat(5, minmax(128px, 1fr));
+    grid-template-columns: repeat(7, minmax(0, 1fr));
   }
 
   .manager-commerce-feed-item {
@@ -1057,6 +1128,51 @@ select {
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+@keyframes aiOperationMetricPulse {
+  0% {
+    transform: translateY(0) scale(1);
+  }
+  35% {
+    transform: translateY(-2px) scale(1.015);
+  }
+  100% {
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes aiOperationMetricSweep {
+  to {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes aiOperationMetricDelta {
+  0% {
+    opacity: 0;
+    transform: translateY(8px) scale(0.92);
+  }
+  25% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-10px) scale(0.96);
+  }
+}
+
+@keyframes aiOperationInlineMetricPop {
+  0% {
+    transform: scale(1);
+  }
+  35% {
+    transform: scale(1.08);
+  }
+  100% {
+    transform: scale(1);
   }
 }
 

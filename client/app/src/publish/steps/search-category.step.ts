@@ -264,7 +264,7 @@ export class SearchCategoryStep extends PublishStep {
     ctx: StepContext,
     params: { title: string; category?: string },
   ): Promise<TbCategoryInfo> {
-    const engine = new TbEngine(String(ctx.shopId), true);
+    const engine = new TbEngine(String(ctx.shopId), false);
     engine.bindPublishTask(ctx.taskId);
     try {
       const page = await engine.init(TB_CATEGORY_SEARCH_PAGE_URL);

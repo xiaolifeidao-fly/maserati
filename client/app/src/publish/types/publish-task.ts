@@ -146,6 +146,7 @@ export interface PublishTaskQuery {
   collectBatchId?: number;
   status?: TaskStatus;
   sourceType?: SourceType;
+  sourceProductId?: string;
 }
 
 export interface PublishBatchRepublishStats {
@@ -173,6 +174,8 @@ export interface PublishProgressEvent {
    *  - 'screenshot'：通过 Playwright 截屏流呈现，用于图片上传步骤
    */
   captchaMode?: 'browser' | 'screenshot';
+  /** 淘宝会话过期（未登录）时携带店铺 ID，前端据此展示登录弹窗 */
+  loginRequiredShopId?: number;
 }
 
 export type PublishEntryScene = 'collection' | 'product';
@@ -193,6 +196,8 @@ export interface PublishRuntimeTaskSnapshot {
   waitingForCaptcha?: boolean;
   captchaUrl?: string;
   validateUrl?: string;
+  waitingForLogin?: boolean;
+  loginRequiredShopId?: number;
   sourceBatchId?: number;
   sourceBatchName?: string;
   sourceRecordId?: number;

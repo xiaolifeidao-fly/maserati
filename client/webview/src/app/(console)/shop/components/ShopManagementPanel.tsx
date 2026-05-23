@@ -6,6 +6,7 @@ import {
   ArrowRightOutlined,
   DeleteOutlined,
   EditOutlined,
+  EyeOutlined,
   KeyOutlined,
   LinkOutlined,
   PlusOutlined,
@@ -73,6 +74,7 @@ export function ShopManagementPanel() {
     saveShop,
     bindActivationCode,
     openShopLogin,
+    viewShopInfo,
     removeShop,
     loginNotice,
     setLoginNotice,
@@ -88,6 +90,7 @@ export function ShopManagementPanel() {
   const [authorizeOpen, setAuthorizeOpen] = useState(false);
   const [authorizeTarget, setAuthorizeTarget] = useState<ShopRecord | null>(null);
   const [loggingShopId, setLoggingShopId] = useState(0);
+  const [viewingShopId, setViewingShopId] = useState(0);
   const safeShops = Array.isArray(shops) ? shops : [];
   const activePlatform = query.platform || "tb";
 
@@ -128,6 +131,18 @@ export function ShopManagementPanel() {
       message.error(error instanceof Error ? error.message : "打开登录窗口失败");
     } finally {
       setLoggingShopId(0);
+    }
+  };
+
+  const handleViewShopInfo = async (record: ShopRecord) => {
+    setViewingShopId(record.id);
+    try {
+      const result = await viewShopInfo(record.id);
+      message.success(result.message || "店铺信息页已打开");
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "打开店铺信息页失败");
+    } finally {
+      setViewingShopId(0);
     }
   };
 
@@ -259,6 +274,13 @@ export function ShopManagementPanel() {
             tooltip="打开外部登录"
             loading={loggingShopId === record.id}
             onClick={() => void handleLogin(record)}
+          />
+          <IconOnlyButton
+            type="text"
+            icon={<EyeOutlined />}
+            tooltip="查看店铺信息"
+            loading={viewingShopId === record.id}
+            onClick={() => void handleViewShopInfo(record)}
           />
           {normalizeShopUsage(record.shopUsage) !== "COLLECT" && (
             <IconOnlyButton type="text" icon={<KeyOutlined />} tooltip="激活码授权" onClick={() => openAuthorizeModal(record)} />

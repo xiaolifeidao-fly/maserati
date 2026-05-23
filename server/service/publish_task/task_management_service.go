@@ -145,6 +145,16 @@ func (s *PublishTaskManagementService) CreateTask(req *publishTaskDTO.CreatePubl
 	if req.SourceRecordID == 0 {
 		return nil, fmt.Errorf("sourceRecordId is required")
 	}
+	sourceRecord, err := s.collectRecordRepository.FindById(uint(req.SourceRecordID))
+	if err != nil {
+		return nil, err
+	}
+	if sourceRecord.Active == 0 {
+		return nil, fmt.Errorf("collect record not found")
+	}
+	if !isCollectRecordComplete(sourceRecord) {
+		return nil, fmt.Errorf("collect record data is incomplete, missing fields: %s", strings.TrimSpace(sourceRecord.MissingFields))
+	}
 	collectBatchID, err := s.resolveCollectBatchID(req.CollectBatchID, req.SourceRecordID)
 	if err != nil {
 		return nil, err
@@ -179,6 +189,17 @@ func (s *PublishTaskManagementService) CreateTask(req *publishTaskDTO.CreatePubl
 		return nil, err
 	}
 	return db.ToDTO[publishTaskDTO.PublishTaskDTO](entity), nil
+}
+
+func isCollectRecordComplete(record *collectRepository.CollectRecord) bool {
+	if record == nil {
+		return false
+	}
+	status := strings.ToUpper(strings.TrimSpace(record.Status))
+	if status == "DATA_INCOMPLETE" {
+		return false
+	}
+	return strings.TrimSpace(record.MissingFields) == ""
 }
 
 func (s *PublishTaskManagementService) UpdateTask(id uint, req *publishTaskDTO.UpdatePublishTaskDTO) (*publishTaskDTO.PublishTaskDTO, error) {

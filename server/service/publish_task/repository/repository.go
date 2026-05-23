@@ -44,6 +44,9 @@ func (r *PublishTaskRepository) CountByQuery(query publishTaskDTO.PublishTaskQue
 	if v := strings.TrimSpace(query.SourceType); v != "" {
 		dbQuery = dbQuery.Where("source_type = ?", v)
 	}
+	if v := strings.TrimSpace(query.SourceProductID); v != "" {
+		dbQuery = dbQuery.Where("source_product_id = ?", v)
+	}
 	var total int64
 	if err := dbQuery.Count(&total).Error; err != nil {
 		return 0, err
@@ -70,6 +73,9 @@ func (r *PublishTaskRepository) ListByQuery(query publishTaskDTO.PublishTaskQuer
 	}
 	if v := strings.TrimSpace(query.SourceType); v != "" {
 		dbQuery = dbQuery.Where("source_type = ?", v)
+	}
+	if v := strings.TrimSpace(query.SourceProductID); v != "" {
+		dbQuery = dbQuery.Where("source_product_id = ?", v)
 	}
 	var entities []*PublishTask
 	if err := dbQuery.Order("id DESC").Offset((pageIndex - 1) * pageSize).Limit(pageSize).Find(&entities).Error; err != nil {
