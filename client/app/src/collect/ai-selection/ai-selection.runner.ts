@@ -627,9 +627,15 @@ function parseJsonOrJsonp(rawText: string): unknown {
 
 function extractTbShopId(shopUrl: string): string {
   const text = String(shopUrl || '').trim();
-  const hostMatch = text.match(/shop(\d+)\.taobao\.com/i);
-  if (hostMatch?.[1]) {
-    return hostMatch[1];
+  // shop{digits}.taobao.com → 只取数字部分（兼容旧格式）
+  const numericMatch = text.match(/shop(\d+)\.taobao\.com/i);
+  if (numericMatch?.[1]) {
+    return numericMatch[1];
+  }
+  // {任意子域名}.taobao.com → 子域名即店铺 ID（兼容 appUid 等新格式）
+  const subdomainMatch = text.match(/^https?:\/\/([^./]+)\.taobao\.com/i);
+  if (subdomainMatch?.[1]) {
+    return subdomainMatch[1];
   }
   try {
     const url = new URL(text);

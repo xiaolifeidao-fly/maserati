@@ -49,6 +49,7 @@ import type { UploadFile, UploadProps } from "antd/es/upload/interface";
 import {
   type AiOperationRobotPayload,
   type AiOperationRobotRecord,
+  type AiOperationQueueType,
   type CollectAccountOption,
   type DLQListQuery,
   type DLQTaskRecord,
@@ -65,6 +66,9 @@ import {
   fetchRunTaskHistory,
   fetchDLQTasks,
   redispatchDLQTask,
+  directTriggerTaskHistory,
+  clearLeaseData,
+  clearQueueData,
 } from "../api/ai-operation.api";
 import {
   type CollectRecordPreview,
@@ -251,8 +255,11 @@ export function AiOperationRobotPanel() {
   const [dlqWorkerType, setDlqWorkerType] = useState<string>("");
   const [redispatchRunId, setRedispatchRunId] = useState("");
   const [redispatchingKey, setRedispatchingKey] = useState<string>("");
+  const [directTriggeringId, setDirectTriggeringId] = useState<number>(0);
   const [loginRequiredInfo, setLoginRequiredInfo] = useState<{ taskId: number; shopId: number } | null>(null);
   const [handlingLogin, setHandlingLogin] = useState(false);
+  const [clearingLeaseData, setClearingLeaseData] = useState(false);
+  const [clearingQueueType, setClearingQueueType] = useState("");
 
   const selectedMonitorSourceType = Form.useWatch("monitorSourceType", form);
   const isShopMonitor = normalizeMonitorSourceType(selectedMonitorSourceType || "shop") === "shop";
@@ -392,6 +399,47 @@ export function AiOperationRobotPanel() {
       if (!options.silent) {
         setRunDetailLoading(false);
       }
+    }
+  };
+
+  const handleClearLeaseData = () => {
+    Modal.confirm({
+      title: "清除全部 lease 数据？",
+      content: "会删除 Redis 中所有 AI 运营 lease、worker lock 和 resource lock 数据。正在运行的任务可能需要重新领取。",
+      okText: "清除",
+      okButtonProps: { danger: true },
+      cancelText: "取消",
+      async onOk() {
+        setClearingLeaseData(true);
+        try {
+          const result = await clearLeaseData();
+          message.success(`已清除 ${result.deletedKeys || 0} 个 lease 相关 key`);
+          void loadRunStatus();
+          if (currentRunId) {
+            void loadRunDetail(selectedRun || runStatusList[0], { forceServer: true });
+          }
+        } catch (error) {
+          message.error(error instanceof Error ? error.message : "清除 lease 数据失败");
+        } finally {
+          setClearingLeaseData(false);
+        }
+      },
+    });
+  };
+
+  const handleClearQueueData = async (queueType: AiOperationQueueType, label: string) => {
+    if (!currentRunId) return;
+    setClearingQueueType(queueType);
+    try {
+      const result = await clearQueueData(currentRunId, queueType);
+      message.success(`已清理 ${label} ${result.clearedItems || 0} 条数据`);
+      if (selectedRun || runStatusList[0]) {
+        void loadRunDetail(selectedRun || runStatusList[0], { forceServer: true });
+      }
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : `清理 ${label} 失败`);
+    } finally {
+      setClearingQueueType("");
     }
   };
 
@@ -600,6 +648,25 @@ export function AiOperationRobotPanel() {
       message.error(error instanceof Error ? error.message : "获取死信队列失败");
     } finally {
       setDlqLoading(false);
+    }
+  };
+
+  const handleDirectTrigger = async (record: TaskHistoryRecord) => {
+    setDirectTriggeringId(record.id);
+    try {
+      const result = await directTriggerTaskHistory(record.id);
+      if (result.ok) {
+        message.success("任务已直接触发完成");
+      } else {
+        message.error(result.error || "直接触发失败");
+      }
+      if (currentRunId) {
+        void loadHistory(currentRunId, historyPage, historyWorkerType);
+      }
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "直接触发失败");
+    } finally {
+      setDirectTriggeringId(0);
     }
   };
 
@@ -908,6 +975,38 @@ export function AiOperationRobotPanel() {
 
   const currentRunId = selectedRun?.runId || runStatusList[0]?.runId || "";
   const depths = runDetail?.queueDepths;
+  const renderClearQueueButton = (queueType: AiOperationQueueType, label: string) => (
+    <Popconfirm
+      title={`清理${label}？`}
+      description="会删除客户端缓存和服务端 Redis 中该队列的数据。"
+      okText="清理"
+      cancelText="取消"
+      okButtonProps={{ danger: true }}
+      onConfirm={() => void handleClearQueueData(queueType, label)}
+    >
+      <Tooltip title={`清理${label}`}>
+        <Button
+          danger
+          type="text"
+          size="small"
+          icon={<DeleteOutlined />}
+          loading={clearingQueueType === queueType}
+        />
+      </Tooltip>
+    </Popconfirm>
+  );
+  const renderClearLeaseButton = () => (
+    <Tooltip title="清除 lease">
+      <Button
+        danger
+        type="text"
+        size="small"
+        icon={<DeleteOutlined />}
+        loading={clearingLeaseData}
+        onClick={handleClearLeaseData}
+      />
+    </Tooltip>
+  );
   const publishLogLines = useMemo(
     () => buildLogLineViews(publishLogModal.preview?.content || "", publishLogModal.search),
     [publishLogModal.preview?.content, publishLogModal.search],
@@ -1373,16 +1472,16 @@ export function AiOperationRobotPanel() {
                   <>
                     <Typography.Title level={5} style={{ margin: "8px 0 4px" }}>队列深度</Typography.Title>
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 10 }}>
-                      <AnimatedStatistic title="监控队列" value={depths.monitorQueueDepth} />
-                      <AnimatedStatistic title="监控延迟队列" value={depths.monitorDelayQueueDepth} />
-                      <AnimatedStatistic title="采集队列" value={depths.collectQueueDepth} />
-                      <AnimatedStatistic title="发布队列" value={depths.publishQueueDepth} />
+                      <AnimatedStatistic title="监控队列" value={depths.monitorQueueDepth} action={renderClearQueueButton("monitor", "监控队列")} />
+                      <AnimatedStatistic title="监控延迟队列" value={depths.monitorDelayQueueDepth} action={renderClearQueueButton("monitor_delay", "监控延迟队列")} />
+                      <AnimatedStatistic title="采集队列" value={depths.collectQueueDepth} action={renderClearQueueButton("collect", "采集队列")} />
+                      <AnimatedStatistic title="发布队列" value={depths.publishQueueDepth} action={renderClearQueueButton("publish", "发布队列")} />
                     </div>
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 10, marginTop: 8 }}>
-                      <AnimatedStatistic title="DLQ 监控" value={depths.dlqMonitorDepth} valueStyle={depths.dlqMonitorDepth > 0 ? { color: "#cf1322" } : undefined} />
-                      <AnimatedStatistic title="DLQ 采集" value={depths.dlqCollectDepth} valueStyle={depths.dlqCollectDepth > 0 ? { color: "#cf1322" } : undefined} />
-                      <AnimatedStatistic title="DLQ 发布" value={depths.dlqPublishDepth} valueStyle={depths.dlqPublishDepth > 0 ? { color: "#cf1322" } : undefined} />
-                      <AnimatedStatistic title="活跃 Lease" value={depths.activeLeases} />
+                      <AnimatedStatistic title="DLQ 监控" value={depths.dlqMonitorDepth} valueStyle={depths.dlqMonitorDepth > 0 ? { color: "#cf1322" } : undefined} action={renderClearQueueButton("dlq_monitor", "DLQ 监控")} />
+                      <AnimatedStatistic title="DLQ 采集" value={depths.dlqCollectDepth} valueStyle={depths.dlqCollectDepth > 0 ? { color: "#cf1322" } : undefined} action={renderClearQueueButton("dlq_collect", "DLQ 采集")} />
+                      <AnimatedStatistic title="DLQ 发布" value={depths.dlqPublishDepth} valueStyle={depths.dlqPublishDepth > 0 ? { color: "#cf1322" } : undefined} action={renderClearQueueButton("dlq_publish", "DLQ 发布")} />
+                      <AnimatedStatistic title="活跃 Lease" value={depths.activeLeases} action={renderClearLeaseButton()} />
                     </div>
                     <Space size={8} style={{ marginTop: 4 }}>
                       {depths.isPaused ? <Tag color="warning">已暂停</Tag> : null}
@@ -1438,7 +1537,7 @@ export function AiOperationRobotPanel() {
                   rowKey="id"
                   loading={historyLoading}
                   dataSource={historyList}
-                  columns={historyColumns}
+                  columns={buildHistoryColumns(directTriggeringId, handleDirectTrigger)}
                   pagination={{
                     current: historyPage.pageIndex,
                     pageSize: historyPage.pageSize,
@@ -1446,7 +1545,7 @@ export function AiOperationRobotPanel() {
                     showSizeChanger: true,
                     onChange: (page, pageSize) => currentRunId && void loadHistory(currentRunId, { pageIndex: page, pageSize }),
                   }}
-                  scroll={{ x: 1180 }}
+                  scroll={{ x: 1300 }}
                 />
               </Space>
             )}
@@ -1884,10 +1983,12 @@ function AnimatedStatistic({
   title,
   value,
   valueStyle,
+  action,
 }: {
   title: string;
   value: number;
   valueStyle?: CSSProperties;
+  action?: ReactNode;
 }) {
   const previousValueRef = useRef(Number(value || 0));
   const [displayValue, setDisplayValue] = useState(Number(value || 0));
@@ -1930,7 +2031,14 @@ function AnimatedStatistic({
   return (
     <div className={changed ? "ai-operation-metric-card is-changed" : "ai-operation-metric-card"}>
       <Statistic
-        title={title}
+        title={
+          action ? (
+            <span style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+              <span>{title}</span>
+              <span onClick={(event) => event.stopPropagation()}>{action}</span>
+            </span>
+          ) : title
+        }
         value={displayValue}
         valueStyle={{
           ...valueStyle,
@@ -2489,83 +2597,117 @@ function formatFileSize(size: number) {
   return `${(size / 1024 / 1024).toFixed(1)} MB`;
 }
 
-const historyColumns: ColumnsType<TaskHistoryRecord> = [
-  {
-    title: "业务标识",
-    dataIndex: "businessKey",
-    width: 150,
-    ellipsis: true,
-    render: (value: string) => value || "-",
-  },
-  {
-    title: "业务名称",
-    dataIndex: "businessName",
-    width: 240,
-    ellipsis: true,
-    render: (value: string) =>
-      value ? (
-        <Tooltip title={value}>
-          <Typography.Text ellipsis style={{ maxWidth: 200 }}>
-            {value}
-          </Typography.Text>
-        </Tooltip>
-      ) : (
-        <span style={{ color: "var(--manager-text-faint)" }}>-</span>
-      ),
-  },
-  {
-    title: "任务类型",
-    dataIndex: "workerType",
-    width: 100,
-    render: (value: string) => {
-      const normalized = String(value || "").trim().toLowerCase();
-      const colorMap: Record<string, string> = {
-        monitor: "blue",
-        collect: "orange",
-        publish: "purple",
-      };
-      const labelMap: Record<string, string> = {
-        monitor: "监控",
-        collect: "采集",
-        publish: "发布",
-      };
-      return <Tag color={colorMap[normalized] || "default"}>{labelMap[normalized] || value || "-"}</Tag>;
+function buildHistoryColumns(
+  directTriggeringId: number,
+  onDirectTrigger: (record: TaskHistoryRecord) => void,
+): ColumnsType<TaskHistoryRecord> {
+  return [
+    {
+      title: "业务标识",
+      dataIndex: "businessKey",
+      width: 150,
+      ellipsis: true,
+      render: (value: string) => value || "-",
     },
-  },
-  {
-    title: "状态",
-    dataIndex: "status",
-    width: 90,
-    render: (value: string) => {
-      const color = value === "success" ? "green" : value === "dlq" ? "red" : value === "retrying" ? "orange" : "default";
-      return <Tag color={color}>{value}</Tag>;
+    {
+      title: "业务名称",
+      dataIndex: "businessName",
+      width: 240,
+      ellipsis: true,
+      render: (value: string) =>
+        value ? (
+          <Tooltip title={value}>
+            <Typography.Text ellipsis style={{ maxWidth: 200 }}>
+              {value}
+            </Typography.Text>
+          </Tooltip>
+        ) : (
+          <span style={{ color: "var(--manager-text-faint)" }}>-</span>
+        ),
     },
-  },
-  {
-    title: "失败原因",
-    dataIndex: "failReason",
-    width: 200,
-    ellipsis: true,
-    render: (value: string) => value || "-",
-  },
-  {
-    title: "尝试次数",
-    dataIndex: "attempts",
-    width: 80,
-  },
-  {
-    title: "任务 ID",
-    dataIndex: "taskId",
-    width: 200,
-    ellipsis: true,
-  },
-  {
-    title: "完成时间",
-    dataIndex: "finishedAt",
-    width: 170,
-    render: (value?: string) => formatDateTime(value),
-  },
-];
+    {
+      title: "任务类型",
+      dataIndex: "workerType",
+      width: 100,
+      render: (value: string) => {
+        const normalized = String(value || "").trim().toLowerCase();
+        const colorMap: Record<string, string> = {
+          monitor: "blue",
+          collect: "orange",
+          publish: "purple",
+        };
+        const labelMap: Record<string, string> = {
+          monitor: "监控",
+          collect: "采集",
+          publish: "发布",
+        };
+        return <Tag color={colorMap[normalized] || "default"}>{labelMap[normalized] || value || "-"}</Tag>;
+      },
+    },
+    {
+      title: "状态",
+      dataIndex: "status",
+      width: 90,
+      render: (value: string) => {
+        const color = value === "success" ? "green" : value === "dlq" ? "red" : value === "retrying" ? "orange" : "default";
+        return <Tag color={color}>{value}</Tag>;
+      },
+    },
+    {
+      title: "失败原因",
+      dataIndex: "failReason",
+      width: 200,
+      ellipsis: true,
+      render: (value: string) => value || "-",
+    },
+    {
+      title: "尝试次数",
+      dataIndex: "attempts",
+      width: 80,
+    },
+    {
+      title: "任务 ID",
+      dataIndex: "taskId",
+      width: 200,
+      ellipsis: true,
+    },
+    {
+      title: "完成时间",
+      dataIndex: "finishedAt",
+      width: 170,
+      render: (value?: string) => formatDateTime(value),
+    },
+    {
+      title: "操作",
+      key: "actions",
+      fixed: "right",
+      width: 110,
+      render: (_, record) => {
+        const status = String(record.status || "").trim().toLowerCase();
+        const canTrigger = status === "dlq" || status === "failed";
+        if (!canTrigger) return <span style={{ color: "var(--manager-text-faint)" }}>-</span>;
+        return (
+          <Popconfirm
+            title="直接触发这个任务？"
+            description="将跳过队列，在当前客户端直接执行该任务动作。"
+            okText="触发"
+            cancelText="取消"
+            onConfirm={() => onDirectTrigger(record)}
+          >
+            <Button
+              type="link"
+              size="small"
+              icon={<PlayCircleOutlined />}
+              loading={directTriggeringId === record.id}
+            >
+              直接触发
+            </Button>
+          </Popconfirm>
+        );
+      },
+    },
+  ];
+}
 
 function runColumns(
   rerunningRunId: string,

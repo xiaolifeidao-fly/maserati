@@ -1,7 +1,9 @@
 import type { IFiller, FillerContext } from './filler.interface';
 import type { TbWindowJsonComponent, TbWindowJsonComponentProp } from '../types/tb-window-json';
+import type { Page } from 'playwright';
 import axios from 'axios';
 import { publishInfo, publishWarn } from '../utils/publish-logger';
+import { buildTaobaoHeaders } from '../utils/tb-publish-api';
 
 // ─── 内部适配类型 ──────────────────────────────────────────────────────────────
 
@@ -310,11 +312,7 @@ export class FoodFiller implements IFiller {
     this.checkResult(components, draftPayload, taskId);
 
     // ── 通过淘宝 asyncOpt 接口补全食品工厂信息 ───────────────────────────────────
-    const requestHeaders: Record<string, string> =
-      draftContext.updateDraftRequestHeaders ??
-      draftContext.addDraftRequestHeaders ??
-      {};
-    await this.fillFoodFactory(components, draftContext.catId, draftContext.startTraceId, requestHeaders, draftPayload, taskId);
+    await this.fillFoodFactory(components, draftContext.catId, draftContext.startTraceId, ctx.page, taskId, draftPayload);
 
     // ── 填充食品图片 ────────────────────────────────────────────────────────────
     this.fillFoodImages(components, draftPayload, uploadedMainImages, ctx.uploadedImageMetaMap);
@@ -387,11 +385,23 @@ export class FoodFiller implements IFiller {
     components: FoodComponents,
     catId: string,
     startTraceId: string,
-    headers: Record<string, string>,
-    draftPayload: Record<string, unknown>,
+    page: Page | undefined,
     taskId: number,
+    draftPayload: Record<string, unknown>,
   ): Promise<void> {
     if (!components.foodPrdLicense) return;
+    if (!page) {
+      publishWarn(`[task:${taskId}] [FOOD] 无可用页面，跳过食品工厂验证`, { taskId });
+      return;
+    }
+
+    let headers: Record<string, string>;
+    try {
+      headers = await buildTaobaoHeaders(taskId, page, 'https://item.upload.taobao.com/sell/v2/draft.htm');
+    } catch {
+      publishWarn(`[task:${taskId}] [FOOD] 无法构建请求头，跳过食品工厂验证`, { taskId });
+      return;
+    }
 
     let foodPrdLicense = draftPayload.foodPrdLicense as string | undefined;
     if (!foodPrdLicense || !this.isQualifiedLicense(foodPrdLicense)) {

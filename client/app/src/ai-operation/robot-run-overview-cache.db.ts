@@ -4,6 +4,7 @@ import path from "path";
 import {
   RobotRunRecord,
   type AiOperationWorkerType,
+  type AiOperationQueueType,
   type RunDetailResult,
   type RunStageStats,
 } from "@eleapi/ai-operation/ai-operation.api";
@@ -93,6 +94,41 @@ class RobotRunOverviewCacheDb {
         : undefined,
     }, "cache");
     this.upsert(next);
+  }
+
+  async clearQueueDepth(runId: string, queueType: AiOperationQueueType): Promise<void> {
+    await this.ensureInit();
+    const previous = await this.get(runId);
+    if (!previous?.queueDepths) {
+      return;
+    }
+    const queueDepths = { ...previous.queueDepths };
+    switch (queueType) {
+      case "monitor":
+        queueDepths.monitorQueueDepth = 0;
+        break;
+      case "monitor_delay":
+        queueDepths.monitorDelayQueueDepth = 0;
+        break;
+      case "collect":
+        queueDepths.collectQueueDepth = 0;
+        break;
+      case "publish":
+        queueDepths.publishQueueDepth = 0;
+        break;
+      case "dlq_monitor":
+        queueDepths.dlqMonitorDepth = 0;
+        break;
+      case "dlq_collect":
+        queueDepths.dlqCollectDepth = 0;
+        break;
+      case "dlq_publish":
+        queueDepths.dlqPublishDepth = 0;
+        break;
+      default:
+        return;
+    }
+    this.upsert(normalizeDetail({ ...previous, queueDepths }, "cache"));
   }
 
   async recordTaskOutcome(

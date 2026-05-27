@@ -15,13 +15,16 @@ import {
   Popconfirm,
   Select,
   Space,
+  Spin,
   Table,
   Tag,
   message,
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useCallback, useEffect, useState } from "react";
+import { RobotTaskWindowApi, type RobotTaskWindowOpenOptions } from "@eleapi/ai-operation/robot-task-window.api";
 import {
+  fetchHumanTask,
   fetchHumanTasks,
   resolveHumanTask,
   unableHumanTask,
@@ -40,6 +43,7 @@ const STATUS_OPTIONS = [
 const BLOCKER_TYPE_LABELS: Record<string, string> = {
   captcha_text: "文字验证码",
   captcha_image: "图片验证码",
+  login_required: "登录任务",
   sms: "短信验证",
   risk_control: "风控拦截",
   manual_decision: "人工决策",
@@ -67,6 +71,7 @@ function BlockerTypeTag({ type }: { type: string }) {
   const map: Record<string, string> = {
     captcha_text: "orange",
     captcha_image: "volcano",
+    login_required: "red",
     sms: "blue",
     risk_control: "red",
     manual_decision: "purple",
@@ -77,6 +82,51 @@ function BlockerTypeTag({ type }: { type: string }) {
 function formatDateTime(val?: string | null) {
   if (!val) return "-";
   return val.replace("T", " ").slice(0, 19);
+}
+
+function parseTaskContext(contextJson?: string): Record<string, unknown> {
+  if (!contextJson) return {};
+  try {
+    const parsed = JSON.parse(contextJson) as unknown;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+  } catch {
+    return {};
+  }
+  return {};
+}
+
+function stringFromContext(context: Record<string, unknown>, key: string): string {
+  const value = context[key];
+  return typeof value === "string" ? value : "";
+}
+
+function numberFromContext(context: Record<string, unknown>, key: string): number {
+  const value = context[key];
+  if (typeof value === "number") return value;
+  if (typeof value === "string") return Number(value || 0);
+  return 0;
+}
+
+function buildRobotTaskWindowOptions(task: HumanTaskRecord): RobotTaskWindowOpenOptions | null {
+  if (!["pending", "assigned"].includes(task.status)) return null;
+  if (!["captcha_text", "captcha_image", "login_required"].includes(task.blockerType)) return null;
+
+  const context = parseTaskContext(task.contextJson);
+  const blockerType = task.blockerType as RobotTaskWindowOpenOptions["blockerType"];
+  const captchaUrl = stringFromContext(context, "captchaUrl") || task.screenshotRef || undefined;
+  const captchaMode = stringFromContext(context, "captchaMode") || undefined;
+
+  return {
+    humanTaskId: task.humanTaskId,
+    blockerType,
+    captchaUrl,
+    captchaMode,
+    shopId: numberFromContext(context, "shopId"),
+    publishTaskId: numberFromContext(context, "publishTaskId") || undefined,
+    prompt: task.prompt || "",
+  };
 }
 
 export function HumanTaskWorkbench() {
@@ -90,6 +140,8 @@ export function HumanTaskWorkbench() {
 
   const [detailOpen, setDetailOpen] = useState(false);
   const [selectedTask, setSelectedTask] = useState<HumanTaskRecord | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [openingTaskWindow, setOpeningTaskWindow] = useState(false);
   const [resolving, setResolving] = useState(false);
   const [unabling, setUnabling] = useState(false);
 
@@ -150,9 +202,37 @@ export function HumanTaskWorkbench() {
     }
   };
 
-  const handleViewDetail = (task: HumanTaskRecord) => {
-    setSelectedTask(task);
+  const openTaskProcessWindow = async (task: HumanTaskRecord) => {
+    const options = buildRobotTaskWindowOptions(task);
+    if (!options) return;
+    if (options.blockerType !== "login_required" && !options.captchaUrl) {
+      message.warning("当前任务缺少验证码地址，无法打开处理窗口");
+      return;
+    }
+    setOpeningTaskWindow(true);
+    try {
+      await new RobotTaskWindowApi().openHumanTask(options);
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : "打开任务处理窗口失败");
+    } finally {
+      setOpeningTaskWindow(false);
+    }
+  };
+
+  const handleViewDetail = async (task: HumanTaskRecord) => {
     setDetailOpen(true);
+    setSelectedTask(task);
+    setDetailLoading(true);
+    try {
+      const latest = await fetchHumanTask(task.humanTaskId);
+      setSelectedTask(latest);
+      setTasks((prev) => prev.map((t) => (t.humanTaskId === latest.humanTaskId ? latest : t)));
+      await openTaskProcessWindow(latest);
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : "加载人工任务详情失败");
+    } finally {
+      setDetailLoading(false);
+    }
   };
 
   const pendingCount = tasks.filter((t) => t.status === "pending").length;
@@ -286,6 +366,7 @@ export function HumanTaskWorkbench() {
         width={560}
         onClose={() => setDetailOpen(false)}
       >
+        <Spin spinning={detailLoading} tip="加载人工任务详情中">
         {selectedTask && (
           <Space direction="vertical" size={16} style={{ width: "100%" }}>
             <Descriptions bordered size="small" column={1}>
@@ -314,6 +395,16 @@ export function HumanTaskWorkbench() {
 
             {(canResolve || canUnable) && (
               <Space>
+                {canResolve && (
+                  <Button
+                    icon={<EyeOutlined />}
+                    loading={openingTaskWindow}
+                    onClick={() => void openTaskProcessWindow(selectedTask)}
+                    size="small"
+                  >
+                    打开处理页
+                  </Button>
+                )}
                 {canResolve && (
                   <Button
                     type="primary"
@@ -346,6 +437,7 @@ export function HumanTaskWorkbench() {
             )}
           </Space>
         )}
+        </Spin>
       </Drawer>
     </div>
   );

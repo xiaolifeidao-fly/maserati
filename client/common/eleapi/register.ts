@@ -9,8 +9,9 @@ import { PublishBatchJobApi } from "./publish/publish-batch-job.api";
 import { PublishCaptchaViewerApi } from "./publish/publish-captcha-viewer.api";
 import { InstallerApi } from "./installer.api";
 import { AiOperationApi } from "./ai-operation/ai-operation.api";
+import { RobotTaskWindowApi } from "./ai-operation/robot-task-window.api";
 
-const register: { new(...args: any[]): ElectronApi }[] = [AuthApi, CollectionWorkspaceApi, CollectApi, CommerceApi, PublishApi, PublishWindowApi, PublishBatchJobApi, PublishCaptchaViewerApi, InstallerApi, AiOperationApi];
+const register: { new(...args: any[]): ElectronApi }[] = [AuthApi, CollectionWorkspaceApi, CollectApi, CommerceApi, PublishApi, PublishWindowApi, PublishBatchJobApi, PublishCaptchaViewerApi, InstallerApi, AiOperationApi, RobotTaskWindowApi];
 
 export function registerApi(){
     return register;

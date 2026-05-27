@@ -15,10 +15,11 @@ type AiOperationRobotRepository struct {
 }
 
 type ProductStatusExtra struct {
-	CollectStatus        string
-	CollectMissingFields string
-	PublishStatus        string
-	PublishErrorMessage  string
+	CollectStatus          string
+	CollectMissingFields   string
+	PublishStatus          string
+	PublishErrorMessage    string
+	PublishTaskUpdatedTime time.Time
 }
 
 func (r *AiOperationRobotRepository) EnsureTable() error {
@@ -548,6 +549,15 @@ func (r *AiOperationRobotRepository) CreateTaskHistory(entity *TaskHistory) erro
 	return r.Db.Create(entity).Error
 }
 
+func (r *AiOperationRobotRepository) FindTaskHistoryByID(id uint64) (*TaskHistory, error) {
+	if r.Db == nil {
+		return nil, fmt.Errorf("database is not initialized")
+	}
+	var entity TaskHistory
+	err := r.Db.Where("active = ? AND id = ?", 1, id).First(&entity).Error
+	return &entity, err
+}
+
 func (r *AiOperationRobotRepository) FindTaskHistoryByTaskID(runID, taskID string) (*TaskHistory, error) {
 	if r.Db == nil {
 		return nil, fmt.Errorf("database is not initialized")
@@ -795,10 +805,11 @@ func (r *AiOperationRobotRepository) LoadProductStatusExtras(products []*RobotPr
 	}
 	if len(sourceProductIDs) > 0 {
 		type publishStatusRow struct {
-			SourceProductID string `gorm:"column:source_product_id"`
-			CollectBatchID  uint64 `gorm:"column:collect_batch_id"`
-			Status          string `gorm:"column:status"`
-			ErrorMessage    string `gorm:"column:error_message"`
+			SourceProductID string    `gorm:"column:source_product_id"`
+			CollectBatchID  uint64    `gorm:"column:collect_batch_id"`
+			Status          string    `gorm:"column:status"`
+			ErrorMessage    string    `gorm:"column:error_message"`
+			UpdatedTime     time.Time `gorm:"column:updated_time"`
 		}
 		latestTaskSubQuery := r.Db.Table("publish_task").
 			Select("source_product_id, collect_batch_id, MAX(id) AS latest_id").
@@ -809,7 +820,7 @@ func (r *AiOperationRobotRepository) LoadProductStatusExtras(products []*RobotPr
 		}
 		var rows []publishStatusRow
 		if err := r.Db.Table("publish_task pt").
-			Select("pt.source_product_id, pt.collect_batch_id, pt.status, pt.error_message").
+			Select("pt.source_product_id, pt.collect_batch_id, pt.status, pt.error_message, pt.updated_time").
 			Joins("JOIN (?) latest ON latest.latest_id = pt.id", latestTaskSubQuery).
 			Scan(&rows).Error; err != nil {
 			return result, err
@@ -826,6 +837,7 @@ func (r *AiOperationRobotRepository) LoadProductStatusExtras(products []*RobotPr
 				extra := result[product.Id]
 				extra.PublishStatus = row.Status
 				extra.PublishErrorMessage = row.ErrorMessage
+				extra.PublishTaskUpdatedTime = row.UpdatedTime
 				result[product.Id] = extra
 			}
 		}

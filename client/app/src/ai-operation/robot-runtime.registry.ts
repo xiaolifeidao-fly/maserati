@@ -81,6 +81,19 @@ class RobotRuntimeRegistry {
   getWorkerLocks(runId: string): Record<string, string> {
     return { ...this.runs.get(runId)?.workerLocks ?? {} };
   }
+
+  clearWorkerLocks(runId?: string): void {
+    const entries = runId
+      ? Array.from(this.runs.entries()).filter(([id]) => id === runId)
+      : Array.from(this.runs.entries());
+    for (const [id, run] of entries) {
+      this.runs.set(id, {
+        ...run,
+        workerLocks: {},
+        updatedAt: new Date().toISOString(),
+      });
+    }
+  }
 }
 
 export const robotRuntimeRegistry = new RobotRuntimeRegistry();

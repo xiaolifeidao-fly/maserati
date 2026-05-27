@@ -323,6 +323,15 @@ type ReconcileLeasesResultDTO struct {
 	Verdicts map[string]string `json:"verdicts"`
 }
 
+type ClearLeaseDataResultDTO struct {
+	DeletedKeys int64 `json:"deletedKeys"`
+}
+
+type ClearQueueDataResultDTO struct {
+	DeletedKeys  int64 `json:"deletedKeys"`
+	ClearedItems int64 `json:"clearedItems"`
+}
+
 type TaskHistoryQueryDTO struct {
 	Page       int    `form:"page"`
 	PageIndex  int    `form:"pageIndex"`

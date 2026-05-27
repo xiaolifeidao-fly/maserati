@@ -7,6 +7,9 @@ import {
   type AiOperationRobotListQuery,
   type AiOperationRobotPayload,
   type AiOperationRobotRecord,
+  type ClearLeaseDataResult,
+  type AiOperationQueueType,
+  type ClearQueueDataResult,
   type CollectAccountOption,
   type LeaseAckPayload,
   type LeaseFailPayload,
@@ -200,6 +203,27 @@ export class AiOperationImpl extends AiOperationApi {
     return requestBackend("POST", `/ai-operation/leases/${normalizedLeaseId}/fail`, { data: payload });
   }
 
+  async clearLeaseData(): Promise<ClearLeaseDataResult> {
+    const result = await requestBackend<ClearLeaseDataResult>("POST", "/ai-operation/leases/clear-data");
+    const localRuns = robotRuntimeRegistry.list();
+    robotRuntimeRegistry.clearWorkerLocks();
+    await Promise.all(localRuns.map((run) => robotRunOverviewCacheDb.markWorkerLease(run.runId, 0)));
+    return result;
+  }
+
+  async clearQueueData(runId: string, queueType: AiOperationQueueType): Promise<ClearQueueDataResult> {
+    const normalizedRunId = String(runId || "").trim();
+    if (!normalizedRunId) {
+      throw new Error("run id is required");
+    }
+    const result = await requestBackend<ClearQueueDataResult>(
+      "POST",
+      `/ai-operation/runs/${normalizedRunId}/queues/${queueType}/clear`,
+    );
+    await robotRunOverviewCacheDb.clearQueueDepth(normalizedRunId, queueType);
+    return result;
+  }
+
   async importMonitorShopLinks(
     robotConfigId: number,
     payload: { filePath: string },
@@ -312,6 +336,11 @@ export class AiOperationImpl extends AiOperationApi {
 
   async redispatchDLQ(payload: RedispatchDLQPayload): Promise<{ ok: boolean }> {
     return requestBackend("POST", "/ai-operation/dlq/redispatch", { data: payload });
+  }
+
+  async directTriggerTaskHistory(historyId: number): Promise<{ ok: boolean; error?: string }> {
+    const task = await requestBackend<RobotTaskRecord>("GET", `/ai-operation/task-history/${historyId}/task`);
+    return robotTaskRuntime.directExecute(task);
   }
 
   async reconcileLeases(runId: string, payload: ReconcileLeasesPayload): Promise<ReconcileLeasesResult> {

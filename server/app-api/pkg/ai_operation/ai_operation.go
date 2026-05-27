@@ -42,11 +42,13 @@ func (h *AiOperationHandler) RegisterHandler(engine *gin.RouterGroup) {
 	engine.POST("/ai-operation/runs/:runId/stop", h.stopRun)
 	engine.POST("/ai-operation/runs/:runId/tasks", h.enqueueTask)
 	engine.POST("/ai-operation/runs/:runId/tasks/poll", h.pollTask)
+	engine.POST("/ai-operation/runs/:runId/queues/:queueType/clear", h.clearQueueData)
 	engine.POST("/ai-operation/leases/:leaseId/heartbeat", h.heartbeatLease)
 	engine.POST("/ai-operation/leases/:leaseId/ack", h.ackLease)
 	engine.POST("/ai-operation/leases/:leaseId/fail", h.failLease)
 	engine.POST("/ai-operation/leases/:leaseId/intervention-required", h.interventionRequired)
 	engine.POST("/ai-operation/leases/:leaseId/intervention/poll", h.pollInterventionResult)
+	engine.POST("/ai-operation/leases/clear-data", h.clearLeaseData)
 	engine.GET("/ai-operation/human-tasks", h.listHumanTasks)
 	engine.GET("/ai-operation/human-tasks/:humanTaskId", h.getHumanTask)
 	engine.POST("/ai-operation/human-tasks/:humanTaskId/claim", h.claimHumanTask)
@@ -59,6 +61,7 @@ func (h *AiOperationHandler) RegisterHandler(engine *gin.RouterGroup) {
 	engine.POST("/ai-operation/runs/:runId/reconcile-leases", h.reconcileLeases)
 	engine.GET("/ai-operation/dlq", h.listDLQ)
 	engine.POST("/ai-operation/dlq/redispatch", h.redispatchDLQ)
+	engine.GET("/ai-operation/task-history/:id/task", h.getTaskHistoryTask)
 }
 
 func (h *AiOperationHandler) listRobots(c *gin.Context) {
@@ -440,6 +443,26 @@ func (h *AiOperationHandler) reconcileLeases(c *gin.Context) {
 	commonRouter.ToJson(c, result, err)
 }
 
+func (h *AiOperationHandler) clearLeaseData(c *gin.Context) {
+	result, err := h.service.ClearLeaseData()
+	commonRouter.ToJson(c, result, err)
+}
+
+func (h *AiOperationHandler) clearQueueData(c *gin.Context) {
+	runID := c.Param("runId")
+	if runID == "" {
+		commonRouter.ToError(c, "runId不能为空")
+		return
+	}
+	queueType := c.Param("queueType")
+	if queueType == "" {
+		commonRouter.ToError(c, "queueType不能为空")
+		return
+	}
+	result, err := h.service.ClearQueueData(runID, queueType)
+	commonRouter.ToJson(c, result, err)
+}
+
 func (h *AiOperationHandler) listDLQ(c *gin.Context) {
 	var query aiOperationDTO.DLQQueryDTO
 	if err := c.ShouldBindQuery(&query); err != nil {
@@ -458,6 +481,17 @@ func (h *AiOperationHandler) redispatchDLQ(c *gin.Context) {
 	}
 	err := h.service.RedispatchDLQTask(&req)
 	commonRouter.ToJson(c, gin.H{"ok": err == nil}, err)
+}
+
+func (h *AiOperationHandler) getTaskHistoryTask(c *gin.Context) {
+	idValue := c.Param("id")
+	id, err := strconv.ParseUint(idValue, 10, 64)
+	if err != nil || id == 0 {
+		commonRouter.ToError(c, "id必须是正整数")
+		return
+	}
+	result, err := h.service.GetTaskHistoryTask(id)
+	commonRouter.ToJson(c, result, err)
 }
 
 func parseRobotID(c *gin.Context) (uint, bool) {

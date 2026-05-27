@@ -5,6 +5,9 @@ import {
   type AiOperationRobotListQuery,
   type AiOperationRobotPayload,
   type AiOperationRobotRecord,
+  type AiOperationQueueType,
+  type ClearLeaseDataResult,
+  type ClearQueueDataResult,
   type CollectAccountOption,
   type DLQListQuery,
   type DLQTaskRecord,
@@ -33,6 +36,9 @@ export {
   type AiOperationRobotListQuery,
   type AiOperationRobotPayload,
   type AiOperationRobotRecord,
+  type AiOperationQueueType,
+  type ClearLeaseDataResult,
+  type ClearQueueDataResult,
   type CollectAccountOption,
   type DLQListQuery,
   type DLQTaskRecord,
@@ -139,4 +145,16 @@ export async function fetchDLQTasks(query: DLQListQuery) {
 
 export async function redispatchDLQTask(payload: RedispatchDLQPayload): Promise<{ ok: boolean }> {
   return getAiOperationApi().redispatchDLQ(payload);
+}
+
+export async function directTriggerTaskHistory(historyId: number): Promise<{ ok: boolean; error?: string }> {
+  return getAiOperationApi().directTriggerTaskHistory(historyId);
+}
+
+export async function clearLeaseData(): Promise<ClearLeaseDataResult> {
+  return getAiOperationApi().clearLeaseData();
+}
+
+export async function clearQueueData(runId: string, queueType: AiOperationQueueType): Promise<ClearQueueDataResult> {
+  return getAiOperationApi().clearQueueData(runId, queueType);
 }

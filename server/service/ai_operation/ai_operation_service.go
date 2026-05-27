@@ -1182,13 +1182,17 @@ func (s *AiOperationService) toProductDTO(entity *aiOperationRepository.RobotPro
 	if entity == nil {
 		return nil
 	}
+	updatedTime := entity.UpdatedTime
+	if extra.PublishTaskUpdatedTime.After(updatedTime) {
+		updatedTime = extra.PublishTaskUpdatedTime
+	}
 	return &aiOperationDTO.RobotProductDTO{
 		BaseDTO: baseDTO.BaseDTO{
 			Id:          entity.Id,
 			Active:      entity.Active,
 			CreatedTime: entity.CreatedTime,
 			CreatedBy:   entity.CreatedBy,
-			UpdatedTime: entity.UpdatedTime,
+			UpdatedTime: updatedTime,
 			UpdatedBy:   entity.UpdatedBy,
 		},
 		RobotConfigID:        entity.RobotConfigID,
@@ -1208,6 +1212,21 @@ func (s *AiOperationService) toProductDTO(entity *aiOperationRepository.RobotPro
 		PublishErrorMessage:  extra.PublishErrorMessage,
 		TargetProductID:      entity.TargetProductID,
 	}
+}
+
+func (s *AiOperationService) GetTaskHistoryTask(id uint64) (*aiOperationDTO.RobotTaskDTO, error) {
+	entity, err := s.robotRepository.FindTaskHistoryByID(id)
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(entity.TaskJSON) == "" {
+		return nil, fmt.Errorf("task history %d has no task JSON", id)
+	}
+	task, err := decodeTask(entity.TaskJSON)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode task JSON for history %d: %w", id, err)
+	}
+	return task, nil
 }
 
 func (s *AiOperationService) ListTaskHistory(query aiOperationDTO.TaskHistoryQueryDTO) (*baseDTO.PageDTO[aiOperationDTO.TaskHistoryDTO], error) {

@@ -130,7 +130,7 @@ function resolveTaoSirProp(propDef: PropValueDef, rawValue: string | null): stri
   if (propDef.required && inputCount > 0) {
     const parts: string[] = [];
     for (const seg of expression) {
-      if (seg.type === 'input') parts.push('0');
+      if (seg.type === 'input') parts.push('1');
       else if (seg.type === 'operator') parts.push(seg.text ?? '');
     }
     return parts.join('') + unit;

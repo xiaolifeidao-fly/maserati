@@ -345,7 +345,7 @@ async function createTaobaoShippingTemplate(
     shopId,
     url: TB_FREIGHT_TEMPLATE_PAGE,
   });
-  const engine = new TbEngine(String(shopId), false);
+  const engine = new TbEngine(String(shopId), true);
   try {
     const page = await engine.init(TB_FREIGHT_TEMPLATE_PAGE);
     if (!page) {

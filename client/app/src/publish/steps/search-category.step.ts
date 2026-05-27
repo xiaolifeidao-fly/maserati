@@ -17,8 +17,8 @@ import {
   publishTaobaoResponseLog,
   summarizeForLog,
 } from '../utils/publish-logger';
-import { ensureTbShopLoggedIn, handleTbMaybeLoginRequired } from '../utils/tb-login-state';
-import { getTaskWindowJson, interceptWindowJson, setTaskWindowJson } from '../utils/window-json.memory';
+import { handleTbMaybeLoginRequired } from '../utils/tb-login-state';
+import { extractWindowJsonFromHtml } from '../utils/window-json.memory';
 
 declare const navigator: any;
 
@@ -264,34 +264,50 @@ export class SearchCategoryStep extends PublishStep {
     ctx: StepContext,
     params: { title: string; category?: string },
   ): Promise<TbCategoryInfo> {
-    const engine = new TbEngine(String(ctx.shopId), false);
+    const engine = new TbEngine(String(ctx.shopId), true);
     engine.bindPublishTask(ctx.taskId);
+
+    // ── 1. 无头打开类目搜索页，从页面获取 cookie 和 UA ──────────────────────
+    const page = await engine.init(TB_CATEGORY_SEARCH_PAGE_URL);
+    if (!page) {
+      throw new PublishError(this.stepCode, '无法打开淘宝类目搜索页面，请确认店铺登录状态');
+    }
+
+    const context = engine.getContext();
+    if (!context) {
+      throw new PublishError(this.stepCode, '无法读取淘宝浏览器上下文，请确认店铺登录状态');
+    }
+
+    const allCookies = await context.cookies();
+    const tbCookies = allCookies.filter(c => {
+      const d = c.domain ?? '';
+      return d.endsWith('.taobao.com') || d === 'taobao.com'
+        || d.endsWith('.tmall.com') || d === 'tmall.com'
+        || d.endsWith('.aliyun.com') || d === 'aliyun.com';
+    });
+    if (!tbCookies.length) {
+      throw new PublishError(this.stepCode, '无法获取淘宝登录态，请先完成淘宝账号登录');
+    }
+    const seen = new Set<string>();
+    const deduped = tbCookies
+      .sort((a, b) => (a.domain ?? '').length - (b.domain ?? '').length)
+      .filter(c => {
+        if (seen.has(c.name)) return false;
+        seen.add(c.name);
+        return true;
+      });
+    const cookieStr = deduped.map(c => `${c.name}=${c.value}`).join('; ');
+
+    let userAgent = '';
     try {
-      const page = await engine.init(TB_CATEGORY_SEARCH_PAGE_URL);
-      if (!page) {
-        throw new PublishError(this.stepCode, '无法打开淘宝类目搜索页，请确认店铺登录状态');
-      }
-      await ensureTbShopLoggedIn(page, this.stepCode, ctx.shopId);
+      userAgent = await page.evaluate(() => navigator.userAgent);
+    } finally {
+      await page.close().catch(() => undefined);
+    }
 
-      const context = engine.getContext();
-      if (!context) {
-        throw new PublishError(this.stepCode, '无法读取淘宝浏览器上下文');
-      }
-
-      const cookies = await context.cookies([
-        'https://taobao.com',
-        'https://www.taobao.com',
-        'https://myseller.taobao.com',
-        'https://item.upload.taobao.com',
-      ]);
-      if (!cookies.length) {
-        throw new PublishError(this.stepCode, '无法获取淘宝登录态，请先完成淘宝账号登录');
-      }
-
-      const cookieStr = cookies.map(cookie => `${cookie.name}=${cookie.value}`).join('; ');
-      const userAgent = await page.evaluate(() => navigator.userAgent);
+    try {
+      // ── 2. 搜索类目 ────────────────────────────────────────────────────────
       const keywordCandidates = this.buildSearchKeywords(params.title, params.category);
-
       let categories: TbSearchCategoryItem[] = [];
       let matchedKeyword = keywordCandidates[0] ?? params.title;
       for (const keyword of keywordCandidates) {
@@ -316,20 +332,26 @@ export class SearchCategoryStep extends PublishStep {
         throw new PublishError(this.stepCode, `未能找到匹配的淘宝类目，商品标题: ${params.title}`);
       }
 
-      // 先注册响应拦截，再 goto，确保捕获 HTML 中的 window.Json
-      const capturePromise = interceptWindowJson(page, ctx.taskId, 15000);
-      await page.goto(`${TB_PUBLISH_PAGE_URL}?catId=${matchedCategory.id}`, {
-        waitUntil: 'domcontentloaded',
+      // ── 3. axios 直接获取发布页 HTML，解析 window.Json ──────────────────────
+      const publishResponse = await axios.get<string>(`${TB_PUBLISH_PAGE_URL}?catId=${matchedCategory.id}`, {
+        headers: {
+          Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'Accept-Language': 'zh-CN,zh;q=0.9',
+          'Cache-Control': 'no-cache',
+          Cookie: cookieStr,
+          Referer: TB_CATEGORY_SEARCH_PAGE_URL,
+          'User-Agent': userAgent,
+        },
         timeout: 30000,
+        responseType: 'text',
       });
-      await ensureTbShopLoggedIn(page, this.stepCode, ctx.shopId);
-      await capturePromise;
 
-      const rawWindowJson = getTaskWindowJson(ctx.taskId);
+      const html = publishResponse.data;
+      const rawWindowJson = extractWindowJsonFromHtml(html);
       if (!rawWindowJson) {
-        await ensureTbShopLoggedIn(page, this.stepCode, ctx.shopId);
         throw new PublishError(this.stepCode, '无法获取淘宝发布页面数据，请确认店铺登录状态');
       }
+
       const tbWindowJson = parseTbWindowJsonForDraft(rawWindowJson);
       const categoryInfo = buildCategoryInfoFromTbWindowJson(tbWindowJson, {
         catId: String(matchedCategory.id),
@@ -355,12 +377,8 @@ export class SearchCategoryStep extends PublishStep {
       return categoryInfo;
     } catch (error) {
       if (error instanceof CaptchaRequiredError) throw error;
-      if (error instanceof PublishError) {
-        throw error;
-      }
+      if (error instanceof PublishError) throw error;
       throw new PublishError(this.stepCode, '淘宝真实类目搜索失败，请稍后重试');
-    } finally {
-      await engine.closePage().catch(() => undefined);
     }
   }
 
@@ -519,8 +537,8 @@ export class SearchCategoryStep extends PublishStep {
     const keywords = this.buildSearchKeywords(input.title, input.category);
     const normalizedKeywords = keywords.map(keyword => this.normalizeText(keyword)).filter(Boolean);
 
-    let best = categories[0];
-    let bestScore = -1;
+    let best: TbSearchCategoryItem | null = null;
+    let bestScore = 0;
 
     for (const category of categories) {
       const normalizedName = this.normalizeText(category.name);
@@ -545,7 +563,7 @@ export class SearchCategoryStep extends PublishStep {
       }
     }
 
-    return best;
+    return best ?? categories[0];
   }
 
   private normalizeText(value: string): string {

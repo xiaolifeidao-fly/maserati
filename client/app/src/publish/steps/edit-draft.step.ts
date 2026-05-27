@@ -206,12 +206,16 @@ export class EditDraftStep extends PublishStep {
         continue;
       }
 
-      // taoSirProp：取第一个单位拼默认值（如 "1g"、"1ml"）
+      // taoSirProp：按 expression 结构拼默认值（input槽填"1"，operator取text），末尾加单位
       if (prop.uiType === 'taoSirProp') {
-        const units = prop.units;
-        if (units?.length) {
-          catPropData[prop.name] = '1' + (units[0].text ?? '');
+        const expression = prop.expression ?? [];
+        const unit = prop.units?.[0]?.text ?? '';
+        const parts: string[] = [];
+        for (const seg of expression) {
+          if (seg.type === 'input') parts.push('1');
+          else if (seg.type === 'operator') parts.push(seg.text ?? '');
         }
+        catPropData[prop.name] = (parts.length > 0 ? parts.join('') : '1') + unit;
         continue;
       }
 

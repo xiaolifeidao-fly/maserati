@@ -57,7 +57,12 @@ function parseExpressionList(value: unknown): TbWindowJsonExpression[] | undefin
   const items = asArray(value)
     .map(item => asRecord(item))
     .filter((item): item is Record<string, unknown> => Boolean(item))
-    .map(item => ({ type: typeof item.type === 'string' ? item.type : undefined }))
+    .map(item => ({
+      type: typeof item.type === 'string' ? item.type : undefined,
+      text: typeof item.text === 'string' ? item.text : undefined,
+      maxLength: typeof item.maxLength === 'number' ? item.maxLength : undefined,
+      placeholder: typeof item.placeholder === 'string' ? item.placeholder : undefined,
+    }))
     .filter(item => item.type);
 
   return items.length ? items : undefined;
@@ -294,6 +299,7 @@ export function parseTbWindowJsonForDraft(raw: unknown): TbWindowJsonDraftData {
     ...fieldCodes,
     'catProp',
     'saleProp',
+    'customSaleProp',
     'tbExtractWay',
     'shippingArea',
     'fakeCredit',

@@ -1492,6 +1492,108 @@ func (s *AiOperationService) ReconcileLeases(runID string, req *aiOperationDTO.R
 	return &aiOperationDTO.ReconcileLeasesResultDTO{Verdicts: verdicts}, nil
 }
 
+// ClearLeaseData clears Redis lease state used by the AI operation workers.
+func (s *AiOperationService) ClearLeaseData() (*aiOperationDTO.ClearLeaseDataResultDTO, error) {
+	if commonRedis.Rdb == nil {
+		return &aiOperationDTO.ClearLeaseDataResultDTO{}, nil
+	}
+	patterns := []string{
+		"lease:*",
+		"robot-run:*:lock:*",
+		"resource-lock:*",
+	}
+	var keys []string
+	seen := map[string]struct{}{}
+	for _, pattern := range patterns {
+		var cursor uint64
+		for {
+			matched, nextCursor, err := commonRedis.Rdb.Scan(cursor, pattern, 200).Result()
+			if err != nil {
+				return nil, err
+			}
+			for _, key := range matched {
+				if _, ok := seen[key]; ok {
+					continue
+				}
+				seen[key] = struct{}{}
+				keys = append(keys, key)
+			}
+			cursor = nextCursor
+			if cursor == 0 {
+				break
+			}
+		}
+	}
+	if len(keys) == 0 {
+		return &aiOperationDTO.ClearLeaseDataResultDTO{}, nil
+	}
+	var deleted int64
+	for start := 0; start < len(keys); start += 500 {
+		end := start + 500
+		if end > len(keys) {
+			end = len(keys)
+		}
+		count, err := commonRedis.Rdb.Del(keys[start:end]...).Result()
+		if err != nil {
+			return nil, err
+		}
+		deleted += count
+	}
+	return &aiOperationDTO.ClearLeaseDataResultDTO{DeletedKeys: deleted}, nil
+}
+
+// ClearQueueData clears one Redis queue bucket shown in the run overview.
+func (s *AiOperationService) ClearQueueData(runID string, queueType string) (*aiOperationDTO.ClearQueueDataResultDTO, error) {
+	if commonRedis.Rdb == nil {
+		return &aiOperationDTO.ClearQueueDataResultDTO{}, nil
+	}
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return nil, fmt.Errorf("runId is required")
+	}
+	key, err := clearableQueueKey(runID, queueType)
+	if err != nil {
+		return nil, err
+	}
+	items, err := queueItemCount(key)
+	if err != nil {
+		return nil, err
+	}
+	deleted, err := commonRedis.Rdb.Del(key).Result()
+	if err != nil {
+		return nil, err
+	}
+	return &aiOperationDTO.ClearQueueDataResultDTO{DeletedKeys: deleted, ClearedItems: items}, nil
+}
+
+func clearableQueueKey(runID string, queueType string) (string, error) {
+	switch strings.TrimSpace(queueType) {
+	case "monitor":
+		return queueKey(runID, "monitor"), nil
+	case "monitor_delay":
+		return delayQueueKey(runID, "monitor"), nil
+	case "collect":
+		return queueKey(runID, "collect"), nil
+	case "publish":
+		return queueKey(runID, "publish"), nil
+	case "dlq_monitor":
+		return "dlq:monitor", nil
+	case "dlq_collect":
+		return "dlq:collect", nil
+	case "dlq_publish":
+		return "dlq:publish", nil
+	default:
+		return "", fmt.Errorf("queueType is invalid")
+	}
+}
+
+func queueItemCount(key string) (int64, error) {
+	if strings.HasSuffix(key, ":delay") {
+		return commonRedis.Rdb.ZCard(key).Result()
+	}
+	return commonRedis.Rdb.LLen(key).Result()
+}
+
 func (s *AiOperationService) abortLeaseForReconcile(runID, workerType, leaseID string) error {
 	lease, err := s.getLease(leaseID)
 	if err == redis.Nil {

@@ -290,6 +290,24 @@ export interface ReconcileLeasesResult {
   verdicts: Record<string, string>;
 }
 
+export interface ClearLeaseDataResult {
+  deletedKeys: number;
+}
+
+export type AiOperationQueueType =
+  | "monitor"
+  | "monitor_delay"
+  | "collect"
+  | "publish"
+  | "dlq_monitor"
+  | "dlq_collect"
+  | "dlq_publish";
+
+export interface ClearQueueDataResult {
+  deletedKeys: number;
+  clearedItems: number;
+}
+
 export interface TaskHistoryRecord {
   id: number;
   taskId: string;
@@ -449,6 +467,16 @@ export class AiOperationApi extends ElectronApi {
   }
 
   @InvokeType(Protocols.INVOKE)
+  async clearLeaseData(): Promise<ClearLeaseDataResult> {
+    return this.invokeApi("clearLeaseData");
+  }
+
+  @InvokeType(Protocols.INVOKE)
+  async clearQueueData(runId: string, queueType: AiOperationQueueType): Promise<ClearQueueDataResult> {
+    return this.invokeApi("clearQueueData", runId, queueType);
+  }
+
+  @InvokeType(Protocols.INVOKE)
   async listPublishShopOptions(): Promise<PageResult<PublishShopOption>> {
     return this.invokeApi("listPublishShopOptions");
   }
@@ -492,6 +520,11 @@ export class AiOperationApi extends ElectronApi {
   @InvokeType(Protocols.INVOKE)
   async redispatchDLQ(payload: RedispatchDLQPayload): Promise<{ ok: boolean }> {
     return this.invokeApi("redispatchDLQ", payload);
+  }
+
+  @InvokeType(Protocols.INVOKE)
+  async directTriggerTaskHistory(historyId: number): Promise<{ ok: boolean; error?: string }> {
+    return this.invokeApi("directTriggerTaskHistory", historyId);
   }
 
   @InvokeType(Protocols.INVOKE)

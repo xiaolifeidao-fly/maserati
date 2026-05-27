@@ -17,15 +17,7 @@ import { aiSelectionShopSpmCacheDb } from "@src/collect/ai-selection/ai-selectio
 import { getCollectedProductRawData } from "@src/collect/workspace.manager";
 import { HttpPublishPersister } from "@src/publish/core/http-publish-persister";
 import { PublishRunner } from "@src/publish/core/publish-runner";
-import { injectCookiesIntoTbContext } from "@src/browser/engine";
-import {
-  getCaptchaBrowserCookies,
-  openPublishWindow,
-  showCaptchaPanel,
-  showScreenshotCaptchaPanel,
-} from "@src/publish/publish-window";
-import { TbEngine } from "@src/browser/tb.engine";
-import type { ShopLoginPayload, ShopRecord } from "@eleapi/commerce/commerce.api";
+import { openRobotTaskWindow } from "@src/ai-operation/robot-task-window";
 import {
   SourceType,
   TaskStatus,
@@ -41,6 +33,8 @@ const ERROR_RETRY_MS = 5000;
 const HEARTBEAT_INTERVAL_MS = 60000;
 const COLLECT_NEXT_POLL_DELAY_MIN_MS = 10000;
 const COLLECT_NEXT_POLL_DELAY_MAX_MS = 15000;
+const PUBLISH_RUN_TIMEOUT_MS = 10 * 60 * 1000; // 10 min per publish attempt
+const MAX_PUBLISH_ATTEMPTS = 5; // max captcha/login retry cycles per task
 
 class RobotTaskExecutionError extends Error {
   constructor(message: string, readonly errorCode: string, readonly retryable: boolean) {
@@ -115,6 +109,18 @@ class RobotTaskRuntime {
     return this.runtimes.has(runId);
   }
 
+  async directExecute(task: RobotTaskRecord): Promise<{ ok: boolean; error?: string }> {
+    const controller = new AbortController();
+    try {
+      await this.handleTask(task, controller.signal, "", { heartbeatPaused: false });
+      return { ok: true };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      log.warn("[ai-operation] directExecute failed", { taskId: task.taskId, workerType: task.type, error: message });
+      return { ok: false, error: message };
+    }
+  }
+
   stop(runId: string, status = "stopped"): void {
     const handle = this.runtimes.get(runId);
     if (!handle) return;
@@ -125,6 +131,33 @@ class RobotTaskRuntime {
       robotRuntimeRegistry.releaseWorker(runId, workerType);
     }
     log.info("[ai-operation] robot task runtime stopped", { runId });
+  }
+
+  async stopAllRuntimes(): Promise<void> {
+    const runIds = Array.from(this.runtimes.keys());
+    if (runIds.length === 0) return;
+    log.info("[ai-operation] stopping all runtimes on app quit", { count: runIds.length, runIds });
+    await Promise.allSettled(
+      runIds.map(async (runId) => {
+        const workerLocks = robotRuntimeRegistry.getWorkerLocks(runId);
+        const leaseIds = Object.values(workerLocks).filter(Boolean);
+        if (leaseIds.length > 0) {
+          await Promise.allSettled(
+            leaseIds.map((leaseId) =>
+              this.failLease(leaseId, {
+                reason: "client app quit",
+                retryable: true,
+                errorCode: "CLIENT_APP_QUIT",
+              }).catch((error) => {
+                log.warn("[ai-operation] failed to fail lease on quit", { runId, leaseId, error: summarizeError(error) });
+              }),
+            ),
+          );
+        }
+        this.stop(runId, "interrupted");
+      }),
+    );
+    log.info("[ai-operation] all runtimes stopped on app quit", { count: runIds.length });
   }
 
   private async workerLoop(runId: string, workerType: AiOperationWorkerType, signal: AbortSignal): Promise<void> {
@@ -139,7 +172,7 @@ class RobotTaskRuntime {
         if (!robotRuntimeRegistry.acquireWorker(runId, workerType, result.leaseId)) {
           await this.failLease(result.leaseId, {
             reason: "local worker mutex is busy",
-            retryable: false,
+            retryable: true,
             errorCode: "LOCAL_WORKER_BUSY",
           });
           continue;
@@ -550,8 +583,17 @@ class RobotTaskRuntime {
     signal: AbortSignal,
   ): Promise<void> {
     const persister = new HttpPublishPersister();
+    let attempts = 0;
 
     while (!signal.aborted) {
+      if (++attempts > MAX_PUBLISH_ATTEMPTS) {
+        throw new RobotTaskExecutionError(
+          `publish task exceeded ${MAX_PUBLISH_ATTEMPTS} attempts (captcha/login loops)`,
+          "PUBLISH_MAX_ATTEMPTS",
+          true,
+        );
+      }
+
       const runner = new PublishRunner(persister);
       let captchaGate: Promise<void> | null = null;
       let loginGate: Promise<void> | null = null;
@@ -565,7 +607,19 @@ class RobotTaskRuntime {
         }
       });
 
-      await runner.run(publishTaskId);
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        const timer = setTimeout(() => {
+          reject(new RobotTaskExecutionError(
+            `publish runner timed out after ${PUBLISH_RUN_TIMEOUT_MS / 60000} minutes`,
+            "PUBLISH_TIMEOUT",
+            true,
+          ));
+        }, PUBLISH_RUN_TIMEOUT_MS);
+        signal.addEventListener("abort", () => clearTimeout(timer), { once: true });
+      });
+
+      await Promise.race([runner.run(publishTaskId), timeoutPromise]);
+
       const latestTask = await this.backend<PublishTaskRecord>("GET", `/publish-tasks/${publishTaskId}`);
       if (latestTask.status === TaskStatus.SUCCESS) {
         return;
@@ -602,8 +656,9 @@ class RobotTaskRuntime {
 
     control.heartbeatPaused = true;
     try {
+      const blockerType = event.captchaMode === "screenshot" ? "captcha_image" : "captcha_text";
       const humanTask = await this.interventionRequired(leaseId, {
-        blockerType: event.captchaMode === "screenshot" ? "captcha_image" : "captcha_text",
+        blockerType,
         prompt: `发布任务 #${publishTaskId} 需要完成淘宝验证码`,
         screenshotRef: event.captchaUrl,
         context: {
@@ -628,60 +683,20 @@ class RobotTaskRuntime {
         shopId,
       });
 
-      openPublishWindow({ entryScene: "product", initialView: "progress", shopId });
+      openRobotTaskWindow(
+        {
+          humanTaskId: humanTask.humanTaskId,
+          blockerType,
+          captchaUrl: event.captchaUrl,
+          captchaMode: event.captchaMode,
+          shopId,
+          publishTaskId,
+          prompt: `发布任务 #${publishTaskId} 需要完成淘宝验证码`,
+        },
+        this.requestBackend!,
+      );
 
-      await new Promise<void>((resolve, reject) => {
-        if (signal.aborted) {
-          reject(new Error("client runtime stopped"));
-          return;
-        }
-        const onAbort = () => reject(new Error("client runtime stopped"));
-        const cleanupResolve = () => {
-          signal.removeEventListener("abort", onAbort);
-          resolve();
-        };
-        signal.addEventListener("abort", onAbort, { once: true });
-
-        const resolveOnce = once(async () => {
-          try {
-            await this.resolveHumanTask(humanTask.humanTaskId, {
-              resolution: {
-                solvedBy: "publish_popup",
-                publishTaskId,
-                shopId,
-                solvedAt: new Date().toISOString(),
-              },
-            });
-            cleanupResolve();
-          } catch (error) {
-            reject(error);
-          }
-        });
-
-        if (event.captchaMode === "screenshot") {
-          void showScreenshotCaptchaPanel(event.captchaUrl!, shopId, publishTaskId, resolveOnce).catch(reject);
-        } else {
-          showCaptchaPanel(event.captchaUrl!, () => {
-            void this.syncCaptchaCookiesToPlaywright(shopId)
-              .catch((error) => {
-                log.warn("[ai-operation] captcha cookie sync failed, resuming after resolve", {
-                  publishTaskId,
-                  shopId,
-                  error: summarizeError(error),
-                });
-              })
-              .then(resolveOnce);
-          }, shopId);
-        }
-
-        void this.waitHumanTaskResolved(leaseId, signal)
-          .then((resolved) => {
-            if (resolved) {
-              cleanupResolve();
-            }
-          })
-          .catch(reject);
-      });
+      await this.awaitInterventionResolved(leaseId, signal);
     } finally {
       control.heartbeatPaused = false;
     }
@@ -719,83 +734,42 @@ class RobotTaskRuntime {
         shopId,
       });
 
-      openPublishWindow({ entryScene: "product", initialView: "progress", shopId });
+      openRobotTaskWindow(
+        {
+          humanTaskId: humanTask.humanTaskId,
+          blockerType: "login_required",
+          shopId,
+          publishTaskId,
+          prompt: `发布任务 #${publishTaskId} 需要重新登录店铺 #${shopId}`,
+        },
+        this.requestBackend!,
+      );
 
-      await new Promise<void>((resolve, reject) => {
-        if (signal.aborted) {
-          reject(new Error("client runtime stopped"));
-          return;
-        }
-        const onAbort = () => reject(new Error("client runtime stopped"));
-        const cleanupResolve = () => {
-          signal.removeEventListener("abort", onAbort);
-          resolve();
-        };
-        signal.addEventListener("abort", onAbort, { once: true });
-
-        const resolveOnce = once(async () => {
-          try {
-            await this.resolveHumanTask(humanTask.humanTaskId, {
-              resolution: {
-                solvedBy: "login_completed",
-                publishTaskId,
-                shopId,
-                solvedAt: new Date().toISOString(),
-              },
-            });
-            cleanupResolve();
-          } catch (error) {
-            reject(error);
-          }
-        });
-
-        void this.openShopLoginWorkspace(shopId, resolveOnce).catch(reject);
-
-        void this.waitHumanTaskResolved(leaseId, signal)
-          .then((resolved) => {
-            if (resolved) {
-              cleanupResolve();
-            }
-          })
-          .catch(reject);
-      });
+      await this.awaitInterventionResolved(leaseId, signal);
     } finally {
       control.heartbeatPaused = false;
     }
   }
 
-  private async openShopLoginWorkspace(shopId: number, onLoginDone: () => void): Promise<void> {
-    let shop: ShopRecord;
-    try {
-      shop = await this.backend<ShopRecord>("GET", `/shops/${shopId}`);
-    } catch (error) {
-      log.warn("[ai-operation] failed to fetch shop for login", { shopId, error: summarizeError(error) });
-      return;
-    }
-    const engine = new TbEngine(String(shopId), false);
-    void engine.openLoginWorkspace(shop, async (payload: ShopLoginPayload) => {
-      try {
-        await this.backend("POST", "/shops/login", { data: payload });
-      } catch {
-        // 持久化失败不阻塞任务恢复
+  private async awaitInterventionResolved(leaseId: string, signal: AbortSignal): Promise<void> {
+    await new Promise<void>((resolve, reject) => {
+      if (signal.aborted) {
+        reject(new Error("client runtime stopped"));
+        return;
       }
-      onLoginDone();
-    });
-  }
+      const onAbort = () => reject(new Error("client runtime stopped"));
+      signal.addEventListener("abort", onAbort, { once: true });
 
-  private async syncCaptchaCookiesToPlaywright(shopId: number): Promise<void> {
-    const electronCookies = await getCaptchaBrowserCookies();
-    const playwrightCookies = electronCookies.map((cookie) => ({
-      name: cookie.name,
-      value: cookie.value,
-      domain: cookie.domain ?? "",
-      path: cookie.path ?? "/",
-      expires: cookie.expirationDate,
-      httpOnly: cookie.httpOnly ?? false,
-      secure: cookie.secure ?? false,
-      sameSite: mapElectronSameSite(cookie.sameSite),
-    }));
-    await injectCookiesIntoTbContext(String(shopId), playwrightCookies);
+      void this.waitHumanTaskResolved(leaseId, signal)
+        .then((resolved) => {
+          signal.removeEventListener("abort", onAbort);
+          if (resolved) resolve();
+        })
+        .catch((err) => {
+          signal.removeEventListener("abort", onAbort);
+          reject(err);
+        });
+    });
   }
 
   private async waitHumanTaskResolved(leaseId: string, signal: AbortSignal): Promise<boolean> {
@@ -1020,23 +994,6 @@ function appendTaobaoSpmToUrl(sourceProductUrl: string, sourceProductId: string,
       : buildTaobaoItemUrl(sourceProductId);
     return `${itemFallback}${separator}spm=${normalizedSpmPrefix}.0.0&xxc=shop`;
   }
-}
-
-function mapElectronSameSite(sameSite?: string): "Strict" | "Lax" | "None" {
-  if (sameSite === "strict") return "Strict";
-  if (sameSite === "lax") return "Lax";
-  return "None";
-}
-
-function once<T extends unknown[]>(callback: (...args: T) => void | Promise<void>): (...args: T) => void {
-  let called = false;
-  return (...args: T) => {
-    if (called) {
-      return;
-    }
-    called = true;
-    void callback(...args);
-  };
 }
 
 function buildTaobaoItemUrl(itemId: string): string {

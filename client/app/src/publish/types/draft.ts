@@ -12,6 +12,8 @@ export interface TbDraftContext {
   itemId?: string;
   /** CSRF Token */
   csrfToken?: string;
+  /** 进程内 CSRF Token 缓存 key（sourceProductId + "_token"） */
+  csrfTokenCacheKey?: string;
   /** 页面 window 中抓取的 JSON 数据（原始页面状态） */
   pageJsonData?: Record<string, unknown>;
   /** 最后一次提交草稿到淘宝的有效 payload */
@@ -24,10 +26,6 @@ export interface TbDraftContext {
   addDraftRequestForm?: Record<string, string>;
   /** 从 draftOp/update.json 请求中拦截到的完整表单参数 */
   updateDraftRequestForm?: Record<string, string>;
-  /** 从 draftOp/add.json 请求中拦截到的请求头 */
-  addDraftRequestHeaders?: Record<string, string>;
-  /** 从 draftOp/update.json 请求中拦截到的请求头 */
-  updateDraftRequestHeaders?: Record<string, string>;
   /** 发布页销售规格 UI 模式 */
   saleSpecUiMode?: TbSaleSpecUiMode;
   /** 发布页销售规格 UI 文案片段，便于排查 */

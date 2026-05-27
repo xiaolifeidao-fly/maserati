@@ -72,7 +72,10 @@
       "Bash(sw_vers -productVersion)",
       "Skill(client-publish-flow)",
       "Skill(client-publish-flow:*)",
-      "Bash(xargs ls -la)"
+      "Bash(xargs ls -la)",
+      "Skill(electron-development)",
+      "Skill(electron-development:*)",
+      "Bash(npx --yes tsc --noEmit)"
     ]
   }
 }

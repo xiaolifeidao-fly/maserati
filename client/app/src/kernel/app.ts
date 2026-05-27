@@ -12,6 +12,7 @@ import log from 'electron-log';
 import { registerRpc } from './register/rpc';
 import { init } from './store';
 import { closeAllBrowserContexts } from '@src/browser/engine';
+import { robotTaskRuntime } from '@src/ai-operation/robot-task-runtime';
 
 // ==================== 日志配置：按日期文件夹存储，5M轮转，保留7天 ====================
 (function configureLogging() {
@@ -321,15 +322,16 @@ export const start = () => {
       isQuitting = true;
       event.preventDefault();
       const forceExit = setTimeout(() => {
-        log.warn('Force exit: closeAllBrowserContexts timed out after 5s');
+        log.warn('Force exit: cleanup timed out after 8s');
         app.exit(0);
-      }, 5000);
-      closeAllBrowserContexts()
-        .catch((e) => log.error('Error closing browsers on quit:', e))
-        .finally(() => {
-          clearTimeout(forceExit);
-          app.exit(0);
-        });
+      }, 8000);
+      Promise.allSettled([
+        closeAllBrowserContexts().catch((e) => log.error('Error closing browsers on quit:', e)),
+        robotTaskRuntime.stopAllRuntimes().catch((e) => log.error('Error stopping runtimes on quit:', e)),
+      ]).finally(() => {
+        clearTimeout(forceExit);
+        app.exit(0);
+      });
     });
 
     app.on('ready', async ()=> {

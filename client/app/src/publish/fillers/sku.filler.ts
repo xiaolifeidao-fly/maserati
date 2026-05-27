@@ -1,18 +1,23 @@
 import type { IFiller, FillerContext } from './filler.interface';
 import type { NormalizedSku } from '../types/source-data';
 import type { TbSaleSpecUiMode } from '../types/draft';
+import type { ImageCropMeta } from '../core/publish-image-meta-store';
 import { findLowestPositivePriceInStock, formatPrice, parsePriceNumber } from './price.utils';
+import { PublishError } from '../core/errors';
+import { StepCode } from '../types/publish-task';
+import { selectRegulatedSaleProps } from './sku-regulated/selector';
+import { mapDimensionsToAttrs } from './sku-regulated/dim-mapper';
+import { buildRegulatedSalePropPayload } from './sku-regulated/payload';
+
+// ──────────────────────────────────────────────────────────────────────────────
+// 自定义路径接口与工具（仅自定义路径使用）
+// ──────────────────────────────────────────────────────────────────────────────
 
 interface CustomSalePropItem {
   text: string;
   value: number;
   img?: string;
-}
-
-interface CustomSalePropGroup {
-  name: string;
-  text: string;
-  items: CustomSalePropItem[];
+  pix?: string;
 }
 
 interface ExistingCustomSalePropItem {
@@ -71,20 +76,86 @@ export interface GeneratedSkuPayload {
   sku: Array<Record<string, unknown>>;
 }
 
+// ──────────────────────────────────────────────────────────────────────────────
+// 跨步骤缓存（DOM 检测结果）
+// ──────────────────────────────────────────────────────────────────────────────
+
+/** sourceProductId → hasSellComponentSaleProps 检测结果 */
+const sellComponentSalePropsFlagCache = new Map<string, boolean>();
+
+function buildSellComponentCacheKey(sourceId: string): string {
+  return `${sourceId}_hasSellComponentSaleProps`;
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// 基础工具（自定义路径共用）
+// ──────────────────────────────────────────────────────────────────────────────
+
+/** 从 uploadedImageMetaMap 读取尺寸并格式化为 "WxH"，拿不到时降级 "800x800" */
+function buildCustomPix(
+  tbUrl: string,
+  metaMap: ReadonlyMap<string, ImageCropMeta>,
+): string {
+  const meta = metaMap.get(tbUrl);
+  return meta ? `${meta.width}x${meta.height}` : '800x800';
+}
+
+/**
+ * 在 skuList 中查找指定维度索引 + 规格值对应的第一个已上传图片 URL
+ *
+ * @param dimIndex  specs 数组的位置索引（原始维度顺序）
+ * @param specValue 目标规格值文本，如 "红色"
+ */
+function findFirstUploadedImageForDimValue(
+  skuList: NormalizedSku[],
+  dimIndex: number,
+  specValue: string,
+  skuImageUrlMap: Record<string, string>,
+): string | undefined {
+  for (const sku of skuList) {
+    const spec = (sku.specs ?? [])[dimIndex];
+    if (String(spec?.value ?? '').trim() !== specValue) continue;
+    const original = String(sku.imgUrl ?? '').trim();
+    if (original && skuImageUrlMap[original]) return skuImageUrlMap[original];
+  }
+  return undefined;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function asArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function toNumericValue(value: string | number | undefined): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && /^-?\d+$/.test(value.trim())) return Number(value);
+  return undefined;
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// SkuFiller
+// ──────────────────────────────────────────────────────────────────────────────
+
 /**
  * SkuFiller — SKU 填充器
  *
- * 填充内容：
- *  - customSaleProp 自定义销售属性定义
- *  - sku          SKU 明细
- *  - price        一口价
- *  - quantity     总库存
+ * 填充内容：customSaleProp / saleProp / sku / price / quantity
  *
- * 处理逻辑：
- *  1. 从源商品 SKU 中提取规格维度（如颜色、规格）
- *  2. 生成 customSaleProp 所需的属性组和候选值
- *  3. 按每个 SKU 组合生成 props / salePropKey 明细
- *  4. 同步最低价、总库存与默认发货时效结构
+ * 路径选择（每次 fill 运行时决定）：
+ *
+ *   ① regulated 路径（非自定义）
+ *      条件：页面含 `.sell-component-sale-props` 且 subItems 存在
+ *      逻辑：按 TB 规定销售属性填充，主属性平铺原商品规格，非主属性按维度映射填充
+ *      Abort 条件：无 showUploadImage 属性 / 含 sizeSaleProps / 原始维度不足
+ *
+ *   ② custom 路径（自定义）
+ *      条件：不满足 regulated 条件
+ *      逻辑：从原商品规格自由生成 customSaleProp + sku
  */
 export class SkuFiller implements IFiller {
   readonly fillerName = 'SkuFiller';
@@ -95,18 +166,144 @@ export class SkuFiller implements IFiller {
 
     if (!skuList.length) return;
 
+    const sourceId = String(product.sourceId ?? '').trim();
+    const cacheKey = buildSellComponentCacheKey(sourceId);
+
+    // ── DOM 检测 / 缓存读取 ──────────────────────────────────────────────────
+    let hasSellComponentSaleProps: boolean;
+    if (ctx.page) {
+      hasSellComponentSaleProps = await ctx.page.evaluate(`
+        (function() {
+          var el = document.querySelector('#struct-saleProp .sell-component-sale-props');
+          console.log('[SkuFiller][page] .sell-component-sale-props found:', !!el);
+          return !!el;
+        })()
+      `) as boolean;
+      if (sourceId) {
+        sellComponentSalePropsFlagCache.set(cacheKey, hasSellComponentSaleProps);
+      }
+    } else {
+      hasSellComponentSaleProps = sellComponentSalePropsFlagCache.get(cacheKey) ?? false;
+    }
+    console.log('[SkuFiller] hasSellComponentSaleProps:', hasSellComponentSaleProps);
+
+    // ── regulated 路径 ───────────────────────────────────────────────────────
+    if (hasSellComponentSaleProps) {
+      const regulated = await this.fillRegulated(ctx, skuList);
+      if (regulated) return; // regulated 路径处理完成，直接返回
+      // regulated 路径未能处理（subItems 不存在）→ 降级到 custom 路径
+    }
+
+    // ── custom 路径 ──────────────────────────────────────────────────────────
+    this.fillCustom(ctx, skuList);
+  }
+
+  // ────────────────────────────────────────────────────────────────────────────
+  // regulated 路径
+  // ────────────────────────────────────────────────────────────────────────────
+
+  private async fillRegulated(
+    ctx: FillerContext,
+    skuList: NormalizedSku[],
+  ): Promise<boolean> {
+    const { draftPayload } = ctx;
+
+    // 读取 subItems
+    const salePropComponent = ctx.tbWindowJson?.components?.['saleProp'];
+    const subItems = asRecord(salePropComponent?.props?.subItems);
+    if (!subItems) {
+      console.log('[SkuFiller][regulated] subItems not found, fallback to custom path');
+      return false;
+    }
+
+    // 属性选择
+    const selection = selectRegulatedSaleProps(subItems);
+    if (!selection) {
+      throw new PublishError(
+        StepCode.FILL_DRAFT,
+        '没有 showUploadImage=true 的销售属性，无法兼容规定路径发布',
+      );
+    }
+
+    // sizeSaleProps 检测
+    const allSelected = [selection.mainAttr, ...selection.nonMainAttrs];
+    if (allSelected.some(item => item.uiType === 'sizeSaleProps')) {
+      throw new PublishError(
+        StepCode.FILL_DRAFT,
+        '选中的销售属性包含 sizeSaleProps 类型，无法兼容，请手动发布',
+      );
+    }
+
+    // 维度映射（含 Case 3 检测）
+    const dimMapping = mapDimensionsToAttrs(skuList, selection);
+    if (!dimMapping) {
+      throw new PublishError(
+        StepCode.FILL_DRAFT,
+        `原商品销售属性维度不足（需要 ${1 + selection.nonMainAttrs.length} 个维度），无法兼容，请手动发布`,
+      );
+    }
+
+    // 构建载荷
+    const regulated = buildRegulatedSalePropPayload(
+      skuList,
+      selection,
+      dimMapping,
+      draftPayload['saleProp'],
+      ctx.uploadedSkuImageMap ?? {},
+      ctx.uploadedImageMetaMap ?? new Map(),
+    );
+
+    // 写入 draftPayload
+    const lowestSkuPrice = findLowestPositivePriceInStock(skuList);
+    if (lowestSkuPrice !== null) {
+      draftPayload['price'] = formatPrice(lowestSkuPrice, ctx.publishConfig?.priceSettings);
+    }
+    draftPayload['quantity'] = String(skuList.reduce((sum, item) => sum + (item.stock ?? 0), 0));
+
+    delete draftPayload['customSaleProp'];
+    draftPayload['saleProp'] = regulated.saleProp;
+    draftPayload['tmDeliveryTime'] = {
+      type: '0',
+      value: null,
+      setBySku: false,
+      newVersion: true,
+    };
+
+    if (regulated.sku.length > 0) {
+      draftPayload['sku'] = regulated.sku.map((item, index) => ({
+        ...item,
+        skuPrice: formatPrice(
+          parsePriceNumber(item['skuPrice'] ?? skuList[index]?.price ?? '0'),
+          ctx.publishConfig?.priceSettings,
+        ),
+        ...(ctx.tbWindowJson?.isSkuCombineContentEnable
+          ? { skuCombineContent: buildDefaultSkuCombineContent() }
+          : {}),
+      }));
+    }
+
+    return true;
+  }
+
+  // ────────────────────────────────────────────────────────────────────────────
+  // custom 路径
+  // ────────────────────────────────────────────────────────────────────────────
+
+  private fillCustom(ctx: FillerContext, skuList: NormalizedSku[]): void {
+    const { draftPayload } = ctx;
+
     const generated = buildCustomSalePropPayload(
       skuList,
       draftPayload['customSaleProp'],
       ctx.uploadedSkuImageMap ?? {},
       ctx.draftContext.saleSpecUiMode ?? 'unknown',
+      ctx.uploadedImageMetaMap ?? new Map(),
     );
     const dimensions = generated.customSaleProp;
     const skuInfoList = generated.sku;
 
     const lowestSkuPrice = findLowestPositivePriceInStock(skuList);
     if (lowestSkuPrice !== null) {
-      // draft.price 始终跟随有库存 SKU 的最低价，并复用发布配置里的价格上浮规则。
       draftPayload['price'] = formatPrice(lowestSkuPrice, ctx.publishConfig?.priceSettings);
     }
     draftPayload['quantity'] = String(skuList.reduce((sum, item) => sum + (item.stock ?? 0), 0));
@@ -128,7 +325,7 @@ export class SkuFiller implements IFiller {
     draftPayload['sku'] = skuInfoList.map((item, index) => ({
       ...item,
       skuPrice: formatPrice(
-        parsePriceNumber(item.skuPrice ?? skuList[index]?.price ?? '0'),
+        parsePriceNumber(item['skuPrice'] ?? skuList[index]?.price ?? '0'),
         ctx.publishConfig?.priceSettings,
       ),
       ...(ctx.tbWindowJson?.isSkuCombineContentEnable
@@ -137,6 +334,10 @@ export class SkuFiller implements IFiller {
     }));
   }
 }
+
+// ──────────────────────────────────────────────────────────────────────────────
+// 公共工具（供外部调用）
+// ──────────────────────────────────────────────────────────────────────────────
 
 export function buildDefaultSkuCombineContent(): SkuCombineContentPayload {
   return {
@@ -150,14 +351,8 @@ export function buildDefaultSkuCombineContent(): SkuCombineContentPayload {
         barcode: '0000000000000',
         primaryKey: 'id:1000570517373614',
         props: [
-          {
-            propKey: '品名',
-            propValue: '巧比杯蘸酱饼干',
-          },
-          {
-            propKey: '净含量',
-            propValue: '500.00g',
-          },
+          { propKey: '品名', propValue: '巧比杯蘸酱饼干' },
+          { propKey: '净含量', propValue: '500.00g' },
         ],
         count: 1,
       },
@@ -165,11 +360,16 @@ export function buildDefaultSkuCombineContent(): SkuCombineContentPayload {
   };
 }
 
+// ──────────────────────────────────────────────────────────────────────────────
+// 自定义路径：buildCustomSalePropPayload 及其私有辅助函数
+// ──────────────────────────────────────────────────────────────────────────────
+
 export function buildCustomSalePropPayload(
   skuList: NormalizedSku[],
   existingValue: unknown,
   skuImageUrlMap: Record<string, string> = {},
   saleSpecUiMode: TbSaleSpecUiMode = 'unknown',
+  uploadedImageMetaMap: ReadonlyMap<string, ImageCropMeta> = new Map(),
 ): GeneratedSkuPayload {
   const existingGroups = Array.isArray(existingValue)
     ? (existingValue as ExistingCustomSalePropGroup[])
@@ -187,43 +387,45 @@ export function buildCustomSalePropPayload(
         rawDimensions[index] = { name: specName, values: [specValue] };
         continue;
       }
-
-      if (!current.name) {
-        current.name = specName;
-      }
-      if (!current.values.includes(specValue)) {
-        current.values.push(specValue);
-      }
+      if (!current.name) current.name = specName;
+      if (!current.values.includes(specValue)) current.values.push(specValue);
     }
   }
 
   const customPropSeed = buildCustomPropSeed();
+  // 保留原始 specs 维度索引（originalIndex），用于精确查找该维度对应的 SKU 图片
   const multiDimensionGroups = rawDimensions
-    .filter(dimension => dimension.name && dimension.values.length > 0)
-    .map((dimension, index) => {
-      const existingGroup = findExistingGroup(existingGroups, dimension.name, index);
+    .map((dimension, originalIndex) => ({ dimension, originalIndex }))
+    .filter(({ dimension }) => dimension?.name && dimension.values.length > 0)
+    .map(({ dimension, originalIndex }, filteredIndex) => {
+      const existingGroup = findExistingGroup(existingGroups, dimension.name, filteredIndex);
       const items = dimension.values.map((value, itemIndex) => {
-        const existingItem = existingGroup?.items?.find(item => String(item?.text ?? '').trim() === value);
+        const existingItem = existingGroup?.items?.find(
+          item => String(item?.text ?? '').trim() === value,
+        );
         const resolvedValue = toNumericValue(existingItem?.value) ?? -(itemIndex + 1);
+        // 按原始维度索引查找该规格值对应的已上传图片
+        const tbUrl = findFirstUploadedImageForDimValue(skuList, originalIndex, value, skuImageUrlMap);
         return {
           text: value,
           value: resolvedValue,
+          ...(tbUrl ? { img: tbUrl, pix: buildCustomPix(tbUrl, uploadedImageMetaMap) } : {}),
         };
       });
-
       return {
-        name: resolveCustomPropName(existingGroup?.name, index, customPropSeed),
+        name: resolveCustomPropName(existingGroup?.name, filteredIndex, customPropSeed),
         text: dimension.name,
         items,
       };
     });
 
-  const dimensions = saleSpecUiMode === 'custom-spec'
-    ? flattenDimensionsForCustomSpec(skuList, existingGroups, multiDimensionGroups, skuImageUrlMap)
-    : multiDimensionGroups;
+  const dimensions =
+    saleSpecUiMode === 'custom-spec'
+      ? flattenDimensionsForCustomSpec(skuList, existingGroups, multiDimensionGroups, skuImageUrlMap, uploadedImageMetaMap)
+      : multiDimensionGroups;
 
   const skuInfoList = skuList
-    .map((sku, index) => buildSkuEntry(sku, index, dimensions, skuImageUrlMap))
+    .map((sku, index) => buildCustomSkuEntry(sku, index, dimensions, skuImageUrlMap, uploadedImageMetaMap))
     .filter((item): item is Record<string, unknown> => Boolean(item));
 
   return {
@@ -232,40 +434,32 @@ export function buildCustomSalePropPayload(
   };
 }
 
-function buildSkuEntry(
+function buildCustomSkuEntry(
   sku: NormalizedSku,
   index: number,
   dimensions: SkuDimension[],
   skuImageUrlMap: Record<string, string> = {},
+  uploadedImageMetaMap: ReadonlyMap<string, ImageCropMeta> = new Map(),
 ): Record<string, unknown> | null {
-  const props = dimensions.map(dimension => resolveSkuPropForDimension(sku, dimension, skuImageUrlMap));
+  const props = dimensions.map(dimension =>
+    resolveSkuPropForDimension(sku, dimension, skuImageUrlMap),
+  );
 
-  if (props.some(item => !item) || props.length === 0) {
-    return null;
-  }
+  if (props.some(item => !item) || props.length === 0) return null;
 
   const resolvedProps = props.filter((item): item is NonNullable<typeof item> => Boolean(item));
-
-  const skuPicture = buildSkuPicture(sku.imgUrl, skuImageUrlMap);
+  const skuPicture = buildCustomSkuPicture(sku.imgUrl, skuImageUrlMap, uploadedImageMetaMap);
 
   return {
     cspuId: null,
     skuPrice: parsePriceNumber(sku.price).toFixed(2),
-    action: {
-      selected: true,
-    },
+    action: { selected: true },
     skuId: null,
     skuStatus: 1,
     skuStock: sku.stock ?? 0,
-    skuQuality: {
-      text: '单品',
-      value: 'mainSku',
-    },
+    skuQuality: { text: '单品', value: 'mainSku' },
     skuMaterialParamControl: null,
-    skuCustomize: {
-      text: '否',
-      value: 0,
-    },
+    skuCustomize: { text: '否', value: 0 },
     disabled: null,
     skuPicture,
     props: resolvedProps,
@@ -276,16 +470,16 @@ function buildSkuEntry(
   };
 }
 
-function buildSkuPicture(
+function buildCustomSkuPicture(
   imgUrl: string | undefined,
   skuImageUrlMap: Record<string, string>,
-): Array<{ url: string }> {
+  uploadedImageMetaMap: ReadonlyMap<string, ImageCropMeta> = new Map(),
+): Array<{ url: string; pix: string }> {
   const originalUrl = imgUrl?.trim();
   if (!originalUrl) return [];
-
   const tbUrl = skuImageUrlMap[originalUrl];
   if (!tbUrl) return [];
-  return [{ url: tbUrl }];
+  return [{ url: tbUrl, pix: buildCustomPix(tbUrl, uploadedImageMetaMap) }];
 }
 
 function resolveSkuPropForDimension(
@@ -293,7 +487,9 @@ function resolveSkuPropForDimension(
   dimension: SkuDimension,
   skuImageUrlMap: Record<string, string>,
 ): SkuResolvedProp | null {
-  const matchedSpec = (sku.specs ?? []).find(spec => String(spec.name ?? '').trim() === dimension.text);
+  const matchedSpec = (sku.specs ?? []).find(
+    spec => String(spec.name ?? '').trim() === dimension.text,
+  );
   const valueText = String(matchedSpec?.value ?? '').trim();
 
   if (valueText) {
@@ -304,6 +500,7 @@ function resolveSkuPropForDimension(
       text: matchedItem.text,
       value: matchedItem.value,
       ...(matchedItem.img ? { img: matchedItem.img } : {}),
+      ...(matchedItem.pix ? { pix: matchedItem.pix } : {}),
     };
   }
 
@@ -317,6 +514,7 @@ function resolveSkuPropForDimension(
       text: matchedItem.text,
       value: matchedItem.value,
       ...(matchedItem.img ? { img: matchedItem.img } : {}),
+      ...(matchedItem.pix ? { pix: matchedItem.pix } : {}),
     };
   }
 
@@ -328,14 +526,18 @@ function flattenDimensionsForCustomSpec(
   existingGroups: ExistingCustomSalePropGroup[],
   multiDimensionGroups: SkuDimension[],
   skuImageUrlMap: Record<string, string>,
+  uploadedImageMetaMap: ReadonlyMap<string, ImageCropMeta>,
 ): SkuDimension[] {
   if (multiDimensionGroups.length <= 1) {
     return multiDimensionGroups.map(group => ({
       ...group,
-      items: group.items.map(item => ({
-        ...item,
-        img: findItemImageByText(skuList, item.text, skuImageUrlMap),
-      })),
+      items: group.items.map(item => {
+        const tbUrl = findItemImageByText(skuList, item.text, skuImageUrlMap);
+        return {
+          ...item,
+          ...(tbUrl ? { img: tbUrl, pix: buildCustomPix(tbUrl, uploadedImageMetaMap) } : {}),
+        };
+      }),
     }));
   }
 
@@ -345,27 +547,28 @@ function flattenDimensionsForCustomSpec(
 
   for (const sku of skuList) {
     const text = buildCombinedSpecText(sku);
-    if (!text || itemMap.has(text)) {
-      continue;
-    }
+    if (!text || itemMap.has(text)) continue;
 
-    const existingItem = existingGroup?.items?.find(item => String(item?.text ?? '').trim() === text);
+    const existingItem = existingGroup?.items?.find(
+      item => String(item?.text ?? '').trim() === text,
+    );
+    const tbUrl = resolveSkuImageUrl(sku.imgUrl, skuImageUrlMap);
     itemMap.set(text, {
       text,
       value: toNumericValue(existingItem?.value) ?? -(itemMap.size + 1),
-      img: resolveSkuImageUrl(sku.imgUrl, skuImageUrlMap),
+      ...(tbUrl ? { img: tbUrl, pix: buildCustomPix(tbUrl, uploadedImageMetaMap) } : {}),
     });
   }
 
-  if (itemMap.size === 0) {
-    return multiDimensionGroups;
-  }
+  if (itemMap.size === 0) return multiDimensionGroups;
 
-  return [{
-    name: resolveCustomPropName(existingGroup?.name, 0, seed),
-    text: String(existingGroup?.text ?? '').trim() || '商品规格',
-    items: Array.from(itemMap.values()),
-  }];
+  return [
+    {
+      name: resolveCustomPropName(existingGroup?.name, 0, seed),
+      text: String(existingGroup?.text ?? '').trim() || '商品规格',
+      items: Array.from(itemMap.values()),
+    },
+  ];
 }
 
 function buildCombinedSpecText(sku: NormalizedSku): string {
@@ -386,7 +589,6 @@ function findItemImageByText(
       .find(value => value === text);
     return Boolean(directText);
   });
-
   return resolveSkuImageUrl(matchedSku?.imgUrl, skuImageUrlMap);
 }
 
@@ -395,9 +597,7 @@ function resolveSkuImageUrl(
   skuImageUrlMap: Record<string, string>,
 ): string | undefined {
   const originalUrl = String(imgUrl ?? '').trim();
-  if (!originalUrl) {
-    return undefined;
-  }
+  if (!originalUrl) return undefined;
   return skuImageUrlMap[originalUrl];
 }
 
@@ -419,29 +619,14 @@ function resolveCustomPropName(
   seed: GeneratedCustomPropSeed,
 ): string {
   const normalized = String(existingName ?? '').trim();
-  if (normalized && normalized !== 'custom_-1') {
-    return normalized;
-  }
-
+  if (normalized && normalized !== 'custom_-1') return normalized;
   const suffix = `${seed.timestamp}${seed.random}${String(index + 1).padStart(2, '0')}`;
   return `custom_${suffix}`;
 }
 
 function buildCustomPropSeed(): GeneratedCustomPropSeed {
-  const timestamp = String(Date.now());
-  const random = String(Math.floor(Math.random() * 90) + 10);
-
-  return { timestamp, random };
-}
-
-function toNumericValue(value: string | number | undefined): number | undefined {
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    return value;
-  }
-
-  if (typeof value === 'string' && /^-?\d+$/.test(value.trim())) {
-    return Number(value);
-  }
-
-  return undefined;
+  return {
+    timestamp: String(Date.now()),
+    random: String(Math.floor(Math.random() * 90) + 10),
+  };
 }
