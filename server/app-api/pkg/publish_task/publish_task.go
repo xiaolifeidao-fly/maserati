@@ -30,6 +30,7 @@ func (h *PublishTaskHandler) RegisterHandler(engine *gin.RouterGroup) {
 	engine.POST("/publish-tasks", h.createTask)
 	engine.PUT("/publish-tasks/:id", h.updateTask)
 	engine.DELETE("/publish-tasks/:id", h.deleteTask)
+	engine.POST("/publish-tasks/:id/logs", h.uploadLog)
 	// 步骤（嵌套在任务下）
 	engine.GET("/publish-tasks/:id/steps", h.listSteps)
 	engine.POST("/publish-tasks/:id/steps", h.createStep)
@@ -113,6 +114,20 @@ func (h *PublishTaskHandler) deleteTask(c *gin.Context) {
 		return
 	}
 	commonRouter.ToJson(c, gin.H{"deleted": true}, e)
+}
+
+func (h *PublishTaskHandler) uploadLog(c *gin.Context) {
+	id, ok := parseID(c, "id")
+	if !ok {
+		return
+	}
+	var req publishTaskDTO.UploadPublishLogDTO
+	if c.ShouldBindJSON(&req) != nil {
+		commonRouter.ToError(c, "参数错误")
+		return
+	}
+	r, e := h.service.UploadLog(id, &req)
+	commonRouter.ToJson(c, r, e)
 }
 
 // ─── Step Handlers ────────────────────────────────────────────────────────────

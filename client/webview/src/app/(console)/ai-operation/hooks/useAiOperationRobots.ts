@@ -23,6 +23,7 @@ import {
   type RobotMonitorShopSnapshot,
   type RobotMonitorShopLinkRecord,
   type PublishShopOption,
+  type RobotRunPublishConfig,
   type RobotRunListQuery,
   type RobotRunRecord,
 } from "../api/ai-operation.api";
@@ -101,10 +102,14 @@ export function useAiOperationRobots() {
     }
   };
 
-  const startRobot = async (id: number, monitorShopSnapshots: RobotMonitorShopSnapshot[]) => {
+  const startRobot = async (
+    id: number,
+    monitorShopSnapshots: RobotMonitorShopSnapshot[],
+    publishConfig?: RobotRunPublishConfig,
+  ) => {
     setSubmitting(true);
     try {
-      await startAiOperationRobot(id, monitorShopSnapshots);
+      await startAiOperationRobot(id, monitorShopSnapshots, publishConfig);
       await refresh();
     } finally {
       setSubmitting(false);

@@ -22,22 +22,23 @@ func (r *AiOperationRobot) TableName() string { return "robot_configs" }
 
 type RobotRun struct {
 	db.BaseEntity
-	RunID            string     `gorm:"column:run_id;type:varchar(64);uniqueIndex:idx_robot_run_uid" description:"运行实例ID"`
-	RobotConfigID    uint64     `gorm:"column:robot_config_id;type:bigint unsigned;index:idx_robot_run_config_status" description:"机器人配置ID"`
-	AppUserID        uint64     `gorm:"column:app_user_id;type:bigint unsigned;index:idx_robot_run_user_status" description:"启动用户ID"`
-	Status           string     `gorm:"column:status;type:varchar(32);index:idx_robot_run_config_status;index:idx_robot_run_user_status" description:"状态"`
-	QueueNamespace   string     `gorm:"column:queue_namespace;type:varchar(128)" description:"Redis队列命名空间"`
-	CurrentTasksJSON string     `gorm:"column:current_tasks_json;type:longtext" description:"当前任务JSON"`
-	MonitorShopCount int64      `gorm:"column:monitor_shop_count;type:bigint;default:0" description:"监控店铺数量"`
-	CollectedCount   int64      `gorm:"column:collected_count;type:bigint;default:0" description:"已采集数量"`
-	PublishedCount   int64      `gorm:"column:published_count;type:bigint;default:0" description:"已发布数量"`
-	StartedAt        *time.Time `gorm:"column:started_at;type:timestamp null" description:"启动时间"`
-	StoppedAt        *time.Time `gorm:"column:stopped_at;type:timestamp null" description:"停止时间"`
-	HeartbeatAt      *time.Time `gorm:"column:heartbeat_at;type:timestamp null" description:"最近心跳时间"`
-	LastMonitorAt    *time.Time `gorm:"column:last_monitor_at;type:timestamp null" description:"最后一次监控完成时间"`
-	LastCollectAt    *time.Time `gorm:"column:last_collect_at;type:timestamp null" description:"最后一次采集完成时间"`
-	LastPublishAt    *time.Time `gorm:"column:last_publish_at;type:timestamp null" description:"最后一次发布完成时间"`
-	StopReason       string     `gorm:"column:stop_reason;type:varchar(255)" description:"停止原因"`
+	RunID             string     `gorm:"column:run_id;type:varchar(64);uniqueIndex:idx_robot_run_uid" description:"运行实例ID"`
+	RobotConfigID     uint64     `gorm:"column:robot_config_id;type:bigint unsigned;index:idx_robot_run_config_status" description:"机器人配置ID"`
+	AppUserID         uint64     `gorm:"column:app_user_id;type:bigint unsigned;index:idx_robot_run_user_status" description:"启动用户ID"`
+	Status            string     `gorm:"column:status;type:varchar(32);index:idx_robot_run_config_status;index:idx_robot_run_user_status" description:"状态"`
+	QueueNamespace    string     `gorm:"column:queue_namespace;type:varchar(128)" description:"Redis队列命名空间"`
+	CurrentTasksJSON  string     `gorm:"column:current_tasks_json;type:longtext" description:"当前任务JSON"`
+	PublishConfigJSON string     `gorm:"column:publish_config_json;type:longtext" description:"本次运行实例发布配置JSON"`
+	MonitorShopCount  int64      `gorm:"column:monitor_shop_count;type:bigint;default:0" description:"监控店铺数量"`
+	CollectedCount    int64      `gorm:"column:collected_count;type:bigint;default:0" description:"已采集数量"`
+	PublishedCount    int64      `gorm:"column:published_count;type:bigint;default:0" description:"已发布数量"`
+	StartedAt         *time.Time `gorm:"column:started_at;type:timestamp null" description:"启动时间"`
+	StoppedAt         *time.Time `gorm:"column:stopped_at;type:timestamp null" description:"停止时间"`
+	HeartbeatAt       *time.Time `gorm:"column:heartbeat_at;type:timestamp null" description:"最近心跳时间"`
+	LastMonitorAt     *time.Time `gorm:"column:last_monitor_at;type:timestamp null" description:"最后一次监控完成时间"`
+	LastCollectAt     *time.Time `gorm:"column:last_collect_at;type:timestamp null" description:"最后一次采集完成时间"`
+	LastPublishAt     *time.Time `gorm:"column:last_publish_at;type:timestamp null" description:"最后一次发布完成时间"`
+	StopReason        string     `gorm:"column:stop_reason;type:varchar(255)" description:"停止原因"`
 }
 
 func (r *RobotRun) TableName() string { return "robot_runs" }

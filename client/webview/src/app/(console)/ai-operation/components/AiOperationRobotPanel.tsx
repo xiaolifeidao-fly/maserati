@@ -32,6 +32,7 @@ import {
   InputNumber,
   Modal,
   Popconfirm,
+  Radio,
   Select,
   Space,
   Spin,
@@ -58,6 +59,7 @@ import {
   type RobotMonitorShopSnapshot,
   type RobotProductRecord,
   type RobotRunRecord,
+  type RobotRunPublishConfig,
   type RunDetailResult,
   type TaskHistoryRecord,
   fetchRunDetail,
@@ -89,6 +91,16 @@ import type { PublishLogPreviewResult, PublishStepRecord, PublishTaskRecord } fr
 
 interface RobotFormValues extends AiOperationRobotPayload {
   monitorIntervalSeconds?: number;
+}
+
+type PublishStrategy = "warehouse" | "immediate";
+type PublishBrandMode = "none" | "follow_source";
+
+interface PublishSettings {
+  floatRatio: number;
+  floatAmount: number;
+  strategy: PublishStrategy;
+  brandMode: PublishBrandMode;
 }
 
 type ProductStage = "collect" | "publish";
@@ -132,6 +144,13 @@ interface StepLogRange {
 }
 
 const OVERVIEW_REFRESH_INTERVAL_SECONDS = 3;
+const PRICE_SETTINGS_KEY = "publish_price_settings_v1";
+const DEFAULT_PUBLISH_SETTINGS: PublishSettings = {
+  floatRatio: 1.3,
+  floatAmount: 0,
+  strategy: "warehouse",
+  brandMode: "follow_source",
+};
 
 function getShopLabel(shop: PublishShopOption) {
   const name = shop.remark || shop.nickname || shop.name || shop.code || `店铺 #${shop.id}`;
@@ -167,6 +186,67 @@ function normalizeMonitorShopUrl(value: string): string {
   }
 }
 
+function formatEditableNumber(value: number): string {
+  return Number.isInteger(value) ? String(value) : String(value);
+}
+
+function loadPriceSettings(): PublishSettings {
+  try {
+    if (typeof window !== "undefined") {
+      const raw = localStorage.getItem(PRICE_SETTINGS_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw) as Partial<PublishSettings>;
+        return {
+          floatRatio: typeof parsed.floatRatio === "number" ? parsed.floatRatio : DEFAULT_PUBLISH_SETTINGS.floatRatio,
+          floatAmount: typeof parsed.floatAmount === "number" ? parsed.floatAmount : DEFAULT_PUBLISH_SETTINGS.floatAmount,
+          strategy: parsed.strategy === "immediate" ? "immediate" : DEFAULT_PUBLISH_SETTINGS.strategy,
+          brandMode: parsed.brandMode === "none" ? "none" : DEFAULT_PUBLISH_SETTINGS.brandMode,
+        };
+      }
+    }
+  } catch {
+    // ignore invalid cached config
+  }
+  return { ...DEFAULT_PUBLISH_SETTINGS };
+}
+
+function savePriceSettings(settings: PublishSettings): void {
+  if (typeof window !== "undefined") {
+    localStorage.setItem(PRICE_SETTINGS_KEY, JSON.stringify(settings));
+  }
+}
+
+function toRobotRunPublishConfig(settings: PublishSettings): RobotRunPublishConfig {
+  return {
+    strategy: settings.strategy,
+    priceSettings: {
+      floatRatio: settings.floatRatio,
+      floatAmount: settings.floatAmount,
+    },
+    brandMode: settings.brandMode,
+  };
+}
+
+function parseRunPublishSettings(publishConfigJson?: string): PublishSettings {
+  try {
+    const parsed = JSON.parse(String(publishConfigJson || "{}")) as Partial<RobotRunPublishConfig>;
+    const floatRatio = Number(parsed.priceSettings?.floatRatio);
+    const floatAmount = Number(parsed.priceSettings?.floatAmount);
+    return {
+      strategy: parsed.strategy === "immediate" ? "immediate" : DEFAULT_PUBLISH_SETTINGS.strategy,
+      brandMode: parsed.brandMode === "none" ? "none" : DEFAULT_PUBLISH_SETTINGS.brandMode,
+      floatRatio: Number.isFinite(floatRatio) && floatRatio > 0 ? floatRatio : DEFAULT_PUBLISH_SETTINGS.floatRatio,
+      floatAmount: Number.isFinite(floatAmount) && floatAmount >= 0 ? floatAmount : DEFAULT_PUBLISH_SETTINGS.floatAmount,
+    };
+  } catch {
+    return { ...DEFAULT_PUBLISH_SETTINGS };
+  }
+}
+
+function formatPublishSettings(settings: PublishSettings): string {
+  return `${settings.strategy === "immediate" ? "立即上架" : "放入仓库"} / ${settings.brandMode === "none" ? "无品牌" : "跟随原商品"} / 原价 x ${settings.floatRatio} + ${settings.floatAmount} 元`;
+}
+
 export function AiOperationRobotPanel() {
   const [form] = Form.useForm<RobotFormValues>();
   const {
@@ -199,6 +279,9 @@ export function AiOperationRobotPanel() {
   const [startingRobot, setStartingRobot] = useState<AiOperationRobotRecord | null>(null);
   const [monitorShopFileList, setMonitorShopFileList] = useState<UploadFile[]>([]);
   const [monitorShopLinks, setMonitorShopLinks] = useState<RobotMonitorShopLinkRecord[]>([]);
+  const [priceSettings, setPriceSettings] = useState<PublishSettings>(loadPriceSettings);
+  const [priceRatioInput, setPriceRatioInput] = useState(() => formatEditableNumber(loadPriceSettings().floatRatio));
+  const [priceAmountInput, setPriceAmountInput] = useState(() => formatEditableNumber(loadPriceSettings().floatAmount));
 
   // Run drawer state
   const [runDrawerOpen, setRunDrawerOpen] = useState(false);
@@ -730,11 +813,71 @@ export function AiOperationRobotPanel() {
   };
 
   const openStartModal = async (record: AiOperationRobotRecord) => {
+    const settings = loadPriceSettings();
     setStartingRobot(record);
     setMonitorShopFileList([]);
     setMonitorShopLinks([]);
+    setPriceSettings(settings);
+    setPriceRatioInput(formatEditableNumber(settings.floatRatio));
+    setPriceAmountInput(formatEditableNumber(settings.floatAmount));
     setStartOpen(true);
     void refreshOptions();
+  };
+
+  const handlePriceRatioChange = (value: string) => {
+    if (!/^\d*(\.\d{0,2})?$/.test(value)) {
+      return;
+    }
+    setPriceRatioInput(value);
+    if (value === "") {
+      return;
+    }
+    const numeric = Number(value);
+    if (Number.isFinite(numeric) && numeric > 0) {
+      setPriceSettings((current) => ({ ...current, floatRatio: Math.min(10, numeric) }));
+    }
+  };
+
+  const handlePriceAmountChange = (value: string) => {
+    if (!/^\d*(\.\d{0,2})?$/.test(value)) {
+      return;
+    }
+    setPriceAmountInput(value);
+    if (value === "") {
+      return;
+    }
+    const numeric = Number(value);
+    if (Number.isFinite(numeric) && numeric >= 0) {
+      setPriceSettings((current) => ({ ...current, floatAmount: numeric }));
+    }
+  };
+
+  const commitPriceRatioInput = () => {
+    const numeric = Number(priceRatioInput);
+    const nextValue = Number.isFinite(numeric) && numeric > 0
+      ? Math.min(10, Math.max(0.1, numeric))
+      : DEFAULT_PUBLISH_SETTINGS.floatRatio;
+    setPriceSettings((current) => ({ ...current, floatRatio: nextValue }));
+    setPriceRatioInput(formatEditableNumber(nextValue));
+  };
+
+  const commitPriceAmountInput = () => {
+    const numeric = Number(priceAmountInput);
+    const nextValue = Number.isFinite(numeric) && numeric >= 0
+      ? numeric
+      : DEFAULT_PUBLISH_SETTINGS.floatAmount;
+    setPriceSettings((current) => ({ ...current, floatAmount: nextValue }));
+    setPriceAmountInput(formatEditableNumber(nextValue));
+  };
+
+  const handleResetPriceSettings = () => {
+    setPriceSettings((current) => ({
+      ...current,
+      floatRatio: DEFAULT_PUBLISH_SETTINGS.floatRatio,
+      floatAmount: DEFAULT_PUBLISH_SETTINGS.floatAmount,
+    }));
+    setPriceRatioInput(formatEditableNumber(DEFAULT_PUBLISH_SETTINGS.floatRatio));
+    setPriceAmountInput(formatEditableNumber(DEFAULT_PUBLISH_SETTINGS.floatAmount));
   };
 
   const handleStartRobot = async () => {
@@ -760,7 +903,15 @@ export function AiOperationRobotPanel() {
           return;
         }
       }
-      await startRobot(startingRobot.id, monitorShopSnapshots);
+      commitPriceRatioInput();
+      commitPriceAmountInput();
+      const publishSettings = {
+        ...priceSettings,
+        floatRatio: Number(priceRatioInput) > 0 ? Math.min(10, Math.max(0.1, Number(priceRatioInput))) : priceSettings.floatRatio,
+        floatAmount: Number(priceAmountInput) >= 0 ? Number(priceAmountInput) : priceSettings.floatAmount,
+      };
+      savePriceSettings(publishSettings);
+      await startRobot(startingRobot.id, monitorShopSnapshots, toRobotRunPublishConfig(publishSettings));
       message.success("运行实例已启动");
       setStartOpen(false);
       setStartingRobot(null);
@@ -1333,6 +1484,66 @@ export function AiOperationRobotPanel() {
               ) : null}
             </>
           ) : null}
+          <div style={{ display: "grid", gap: 14, paddingTop: 4 }}>
+            <div>
+              <div style={{ fontWeight: 600, color: "var(--manager-text)", marginBottom: 8 }}>发布配置</div>
+              <div className="manager-muted" style={{ fontSize: 12 }}>
+                本配置会绑定到本次运行实例，后续发布任务都按这套配置执行。
+              </div>
+            </div>
+            <div>
+              <div className="publish-field-label">发布策略</div>
+              <Select
+                value={priceSettings.strategy}
+                onChange={(value) => setPriceSettings((current) => ({ ...current, strategy: value as PublishStrategy }))}
+                options={[
+                  { label: "放入仓库", value: "warehouse" },
+                  { label: "立即上架", value: "immediate" },
+                ]}
+                style={{ width: "100%" }}
+              />
+            </div>
+            <div>
+              <div className="publish-field-label">品牌配置</div>
+              <Radio.Group
+                value={priceSettings.brandMode}
+                onChange={(event) => setPriceSettings((current) => ({ ...current, brandMode: event.target.value as PublishBrandMode }))}
+                optionType="button"
+                buttonStyle="solid"
+              >
+                <Radio.Button value="none">无品牌</Radio.Button>
+                <Radio.Button value="follow_source">跟随原商品</Radio.Button>
+              </Radio.Group>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 12 }}>
+              <div>
+                <div className="publish-field-label">浮动比例</div>
+                <Input
+                  value={priceRatioInput}
+                  onChange={(event) => handlePriceRatioChange(event.target.value)}
+                  onBlur={commitPriceRatioInput}
+                  placeholder="例如 1.3"
+                  addonAfter="x"
+                />
+              </div>
+              <div>
+                <div className="publish-field-label">浮动金额</div>
+                <Input
+                  value={priceAmountInput}
+                  onChange={(event) => handlePriceAmountChange(event.target.value)}
+                  onBlur={commitPriceAmountInput}
+                  placeholder="例如 0"
+                  addonAfter="元"
+                />
+              </div>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+              <IconOnlyButton type="link" shape="default" icon={<ReloadOutlined />} tooltip="恢复默认值（×1.3 + 0 元）" style={{ paddingInline: 0 }} onClick={handleResetPriceSettings} />
+              <span className="manager-muted" style={{ fontSize: 12 }}>
+                预览：{priceSettings.strategy === "immediate" ? "立即上架" : "放入仓库"} / {priceSettings.brandMode === "none" ? "无品牌" : "跟随原商品"} / 原价 x {priceSettings.floatRatio} + {priceSettings.floatAmount} 元
+              </span>
+            </div>
+          </div>
         </Space>
       </Modal>
 
@@ -1414,6 +1625,7 @@ export function AiOperationRobotPanel() {
                       { key: "lastMonitorAt", label: "最后监控", children: formatDateTime(runDetail.run.lastMonitorAt) },
                       { key: "lastCollectAt", label: "最后采集", children: formatDateTime(runDetail.run.lastCollectAt) },
                       { key: "lastPublishAt", label: "最后发布", children: formatDateTime(runDetail.run.lastPublishAt) },
+                      { key: "publishConfig", label: "发布配置", children: formatPublishSettings(parseRunPublishSettings(runDetail.run.publishConfigJson)) },
                       { key: "stoppedAt", label: "停止时间", children: formatDateTime(runDetail.run.stoppedAt) },
                       { key: "stopReason", label: "停止原因", children: runDetail.run.stopReason || "-" },
                     ]}

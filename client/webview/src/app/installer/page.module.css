@@ -27,6 +27,11 @@
   white-space: pre-line;
 }
 
+.downloadUrl {
+  margin-top: 16px;
+  word-break: break-all;
+}
+
 .progress {
   margin: 24px 0;
 }

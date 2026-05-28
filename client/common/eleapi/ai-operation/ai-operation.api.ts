@@ -100,6 +100,18 @@ export interface RobotMonitorShopSnapshot {
   extraJson?: string;
 }
 
+export type RobotRunPublishStrategy = "warehouse" | "immediate";
+export type RobotRunPublishBrandMode = "none" | "follow_source";
+
+export interface RobotRunPublishConfig {
+  strategy: RobotRunPublishStrategy;
+  priceSettings?: {
+    floatRatio: number;
+    floatAmount: number;
+  };
+  brandMode?: RobotRunPublishBrandMode;
+}
+
 export class RobotRunRecord {
   id = 0;
   runId = "";
@@ -108,6 +120,7 @@ export class RobotRunRecord {
   status = "";
   queueNamespace = "";
   currentTasksJson = "";
+  publishConfigJson = "";
   monitorShopCount = 0;
   collectedCount = 0;
   publishedCount = 0;
@@ -397,8 +410,12 @@ export class AiOperationApi extends ElectronApi {
   }
 
   @InvokeType(Protocols.INVOKE)
-  async startRobotRun(robotConfigId: number, monitorShops: RobotMonitorShopSnapshot[]): Promise<RobotRunRecord> {
-    return this.invokeApi("startRobotRun", robotConfigId, monitorShops);
+  async startRobotRun(
+    robotConfigId: number,
+    monitorShops: RobotMonitorShopSnapshot[],
+    publishConfig?: RobotRunPublishConfig,
+  ): Promise<RobotRunRecord> {
+    return this.invokeApi("startRobotRun", robotConfigId, monitorShops, publishConfig);
   }
 
   @InvokeType(Protocols.INVOKE)

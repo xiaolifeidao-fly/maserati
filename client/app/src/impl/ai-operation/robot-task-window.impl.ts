@@ -9,7 +9,7 @@ import { requestBackend } from '../shared/backend';
 
 export class RobotTaskWindowImpl extends RobotTaskWindowApi {
   async openHumanTask(options: Parameters<RobotTaskWindowApi['openHumanTask']>[0]): Promise<{ started: boolean }> {
-    openRobotTaskWindow(options, requestBackend);
+    await openRobotTaskWindow(options, requestBackend);
     return { started: true };
   }
 

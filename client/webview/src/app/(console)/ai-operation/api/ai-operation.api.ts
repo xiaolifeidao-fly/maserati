@@ -17,6 +17,7 @@ import {
   type RobotMonitorShopLinkImportResult,
   type RobotMonitorShopLinkRecord,
   type RobotMonitorShopSnapshot,
+  type RobotRunPublishConfig,
   type RobotProductListQuery,
   type RobotProductRecord,
   type RobotRunListQuery,
@@ -48,6 +49,7 @@ export {
   type RobotMonitorShopLinkImportResult,
   type RobotMonitorShopLinkRecord,
   type RobotMonitorShopSnapshot,
+  type RobotRunPublishConfig,
   type RobotProductListQuery,
   type RobotProductRecord,
   type RobotRunListQuery,
@@ -75,8 +77,12 @@ export async function deleteAiOperationRobot(id: number) {
   return getAiOperationApi().deleteRobot(id);
 }
 
-export async function startAiOperationRobot(id: number, monitorShops: RobotMonitorShopSnapshot[]) {
-  return getAiOperationApi().startRobotRun(id, monitorShops);
+export async function startAiOperationRobot(
+  id: number,
+  monitorShops: RobotMonitorShopSnapshot[],
+  publishConfig?: RobotRunPublishConfig,
+) {
+  return getAiOperationApi().startRobotRun(id, monitorShops, publishConfig);
 }
 
 export async function pauseAiOperationRun(runId: string) {

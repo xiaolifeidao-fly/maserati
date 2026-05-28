@@ -87,7 +87,8 @@ type MonitorDiscoveredProductDTO struct {
 }
 
 type StartRobotRunDTO struct {
-	MonitorShops []RobotMonitorShopSnapshotDTO `json:"monitorShops"`
+	MonitorShops      []RobotMonitorShopSnapshotDTO `json:"monitorShops"`
+	PublishConfigJSON string                        `json:"publishConfigJson"`
 }
 
 type StopRobotRunDTO struct {
@@ -96,22 +97,23 @@ type StopRobotRunDTO struct {
 
 type RobotRunDTO struct {
 	baseDTO.BaseDTO
-	RunID            string     `json:"runId"`
-	RobotConfigID    uint64     `json:"robotConfigId"`
-	AppUserID        uint64     `json:"appUserId"`
-	Status           string     `json:"status"`
-	QueueNamespace   string     `json:"queueNamespace"`
-	CurrentTasksJSON string     `json:"currentTasksJson"`
-	MonitorShopCount int64      `json:"monitorShopCount"`
-	CollectedCount   int64      `json:"collectedCount"`
-	PublishedCount   int64      `json:"publishedCount"`
-	StartedAt        *time.Time `json:"startedAt"`
-	StoppedAt        *time.Time `json:"stoppedAt"`
-	HeartbeatAt      *time.Time `json:"heartbeatAt"`
-	LastMonitorAt    *time.Time `json:"lastMonitorAt"`
-	LastCollectAt    *time.Time `json:"lastCollectAt"`
-	LastPublishAt    *time.Time `json:"lastPublishAt"`
-	StopReason       string     `json:"stopReason"`
+	RunID             string     `json:"runId"`
+	RobotConfigID     uint64     `json:"robotConfigId"`
+	AppUserID         uint64     `json:"appUserId"`
+	Status            string     `json:"status"`
+	QueueNamespace    string     `json:"queueNamespace"`
+	CurrentTasksJSON  string     `json:"currentTasksJson"`
+	PublishConfigJSON string     `json:"publishConfigJson"`
+	MonitorShopCount  int64      `json:"monitorShopCount"`
+	CollectedCount    int64      `json:"collectedCount"`
+	PublishedCount    int64      `json:"publishedCount"`
+	StartedAt         *time.Time `json:"startedAt"`
+	StoppedAt         *time.Time `json:"stoppedAt"`
+	HeartbeatAt       *time.Time `json:"heartbeatAt"`
+	LastMonitorAt     *time.Time `json:"lastMonitorAt"`
+	LastCollectAt     *time.Time `json:"lastCollectAt"`
+	LastPublishAt     *time.Time `json:"lastPublishAt"`
+	StopReason        string     `json:"stopReason"`
 }
 
 type RobotRunQueryDTO struct {

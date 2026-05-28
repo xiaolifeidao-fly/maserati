@@ -1,7 +1,7 @@
 import { InstallerApi } from '@eleapi/installer.api';
 import { autoUpdater } from 'electron-updater';
 import log from 'electron-log';
-import { app } from 'electron';
+import { app, shell } from 'electron';
 import { updateWindow } from '@src/kernel/windows';
 import { InvokeType, Protocols } from '@eleapi/base';
 
@@ -44,5 +44,13 @@ export class InstallerImpl extends InstallerApi {
       this.send('onMonitorUpdateDownloadedError', (error as any)?.message ?? String(error));
       throw error;
     }
+  }
+
+  @InvokeType(Protocols.INVOKE)
+  async openDownloadUrl(url: string) {
+    if (!/^https?:\/\//i.test(url)) {
+      throw new Error('Invalid download URL');
+    }
+    await shell.openExternal(url);
   }
 }

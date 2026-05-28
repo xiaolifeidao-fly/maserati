@@ -1,20 +1,24 @@
 'use client';
 import React, { useEffect, useState } from 'react';
-import { Card, Progress, Button, message, Modal } from 'antd';
+import { Card, Progress, Button, message, Modal, Typography } from 'antd';
 import { InstallerApi } from '@eleapi/installer.api';
 import styles from './page.module.css';
+
+const { Paragraph } = Typography;
 
 export default function InstallerPage() {
   const [progress, setProgress] = useState(0);
   const [isDownloading, setIsDownloading] = useState(false);
   const [isDownloadComplete, setIsDownloadComplete] = useState(false);
-  const [updateInfo, setUpdateInfo] = useState<{ version: string; releaseNotes: string } | null>(null);
+  const [updateInfo, setUpdateInfo] = useState<{ version: string; releaseNotes: string; manualDownload: boolean; downloadUrl: string } | null>(null);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     setUpdateInfo({
       version: params.get('version') ?? '',
       releaseNotes: params.get('releaseNotes') ?? '',
+      manualDownload: params.get('manualDownload') === 'true',
+      downloadUrl: params.get('downloadUrl') ?? '',
     });
 
     const api = new InstallerApi();
@@ -25,7 +29,12 @@ export default function InstallerPage() {
       setIsDownloading(false);
       setIsDownloadComplete(true);
       if (event?.version) {
-        setUpdateInfo({ version: event.version, releaseNotes: event.releaseNotes ?? '' });
+        setUpdateInfo((prev) => ({
+          version: event.version,
+          releaseNotes: event.releaseNotes ?? '',
+          manualDownload: prev?.manualDownload ?? false,
+          downloadUrl: prev?.downloadUrl ?? '',
+        }));
       }
     });
     api.onMonitorUpdateDownloadedError((error: any) => {
@@ -40,6 +49,19 @@ export default function InstallerPage() {
     } catch (error) {
       message.error('下载失败: ' + error);
       setIsDownloading(false);
+    }
+  };
+
+  const handleOpenDownloadUrl = async () => {
+    if (!updateInfo?.downloadUrl) {
+      message.error('下载地址为空');
+      return;
+    }
+
+    try {
+      await new InstallerApi().openDownloadUrl(updateInfo.downloadUrl);
+    } catch (error) {
+      message.error('打开下载地址失败: ' + error);
     }
   };
 
@@ -72,17 +94,31 @@ export default function InstallerPage() {
           <div className={styles.updateInfo}>
             <h3>版本 {updateInfo.version}</h3>
             {updateInfo.releaseNotes && <p>{updateInfo.releaseNotes}</p>}
+            {updateInfo.manualDownload && updateInfo.downloadUrl && (
+              <Paragraph copyable className={styles.downloadUrl}>
+                {updateInfo.downloadUrl}
+              </Paragraph>
+            )}
           </div>
         )}
 
-        <Progress
-          percent={progress}
-          status={isDownloading ? 'active' : 'normal'}
-          className={styles.progress}
-        />
+        {!updateInfo?.manualDownload && (
+          <Progress
+            percent={progress}
+            status={isDownloading ? 'active' : 'normal'}
+            className={styles.progress}
+          />
+        )}
 
         <div className={styles.actions}>
-          {!isDownloadComplete ? (
+          {updateInfo?.manualDownload ? (
+            <>
+              <Button type="primary" onClick={handleOpenDownloadUrl}>
+                打开下载地址
+              </Button>
+              <Button onClick={handleCancel}>退出</Button>
+            </>
+          ) : !isDownloadComplete ? (
             <>
               <Button
                 type="primary"

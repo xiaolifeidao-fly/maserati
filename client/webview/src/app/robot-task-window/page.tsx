@@ -22,18 +22,30 @@ function createApi() {
 
 function LoginPanel({
   shopId,
+  shopName,
+  shopAccount,
+  shopCode,
+  platformShopId,
+  businessId,
   publishTaskId,
   prompt,
   resolved,
   onLogin,
 }: {
   shopId: number;
+  shopName: string;
+  shopAccount: string;
+  shopCode: string;
+  platformShopId: string;
+  businessId: string;
   publishTaskId: number;
   prompt: string;
   resolved: boolean;
   onLogin: () => void;
 }) {
   const [loading, setLoading] = useState(false);
+  const shopLabel = shopName || shopAccount || shopCode || (shopId > 0 ? `店铺 #${shopId}` : "-");
+  const accountLabel = shopAccount || shopCode || platformShopId || businessId || "-";
 
   const handleLogin = async () => {
     setLoading(true);
@@ -73,10 +85,26 @@ function LoginPanel({
           <div style={styles.infoRow}>
             <ShopOutlined style={{ color: "#8c8c8c", marginRight: 6 }} />
             <Text type="secondary">店铺</Text>
-            <Text strong style={{ marginLeft: "auto" }}>
-              #{shopId}
+            <Text strong style={styles.infoValue}>
+              {shopLabel}
             </Text>
           </div>
+
+          <div style={styles.infoRow}>
+            <SafetyCertificateOutlined style={{ color: "#8c8c8c", marginRight: 6 }} />
+            <Text type="secondary">店铺账号</Text>
+            <Text strong style={styles.infoValue}>
+              {accountLabel}
+            </Text>
+          </div>
+
+          {(platformShopId || businessId || shopCode) && (
+            <div style={styles.metaGrid}>
+              {shopCode && <Text type="secondary">编码：{shopCode}</Text>}
+              {platformShopId && <Text type="secondary">平台店铺ID：{platformShopId}</Text>}
+              {businessId && <Text type="secondary">业务ID：{businessId}</Text>}
+            </div>
+          )}
 
           {publishTaskId > 0 && (
             <div style={styles.infoRow}>
@@ -208,6 +236,11 @@ function RobotTaskWindowContent() {
     | "captcha_image"
     | "login_required";
   const shopId = Number(searchParams?.get("shopId") ?? 0);
+  const shopName = searchParams?.get("shopName") ?? "";
+  const shopAccount = searchParams?.get("shopAccount") ?? "";
+  const shopCode = searchParams?.get("shopCode") ?? "";
+  const platformShopId = searchParams?.get("platformShopId") ?? "";
+  const businessId = searchParams?.get("businessId") ?? "";
   const publishTaskId = Number(searchParams?.get("publishTaskId") ?? 0);
   const prompt = searchParams?.get("prompt") ?? "";
 
@@ -248,6 +281,11 @@ function RobotTaskWindowContent() {
       {isLogin ? (
         <LoginPanel
           shopId={shopId}
+          shopName={shopName}
+          shopAccount={shopAccount}
+          shopCode={shopCode}
+          platformShopId={platformShopId}
+          businessId={businessId}
           publishTaskId={publishTaskId}
           prompt={prompt}
           resolved={resolved}
@@ -287,7 +325,7 @@ const styles: Record<string, React.CSSProperties> = {
     background: "#fff",
     borderRadius: 12,
     padding: "28px 32px",
-    width: 380,
+    width: 420,
     boxShadow: "0 2px 12px rgba(0,0,0,0.08)",
   },
   infoRow: {
@@ -296,6 +334,23 @@ const styles: Record<string, React.CSSProperties> = {
     padding: "8px 12px",
     background: "#fafafa",
     borderRadius: 6,
+    gap: 8,
+  },
+  infoValue: {
+    marginLeft: "auto",
+    maxWidth: 260,
+    textAlign: "right",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  },
+  metaGrid: {
+    display: "grid",
+    gap: 6,
+    padding: "8px 12px",
+    background: "#fafafa",
+    borderRadius: 6,
+    fontSize: 12,
   },
   captchaInfo: {
     width: "100%",

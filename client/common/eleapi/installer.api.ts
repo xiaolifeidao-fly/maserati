@@ -25,6 +25,11 @@ export class InstallerApi extends ElectronApi {
         return await this.invokeApi("install");
     }
 
+    @InvokeType(Protocols.INVOKE)
+    async openDownloadUrl(url: string) {
+        return await this.invokeApi("openDownloadUrl", url);
+    }
+
     @InvokeType(Protocols.TRRIGER)
     async onMonitorDownloadProgress(callback : (progress : number) => void){
         return await this.onMessage("onMonitorDownloadProgress", callback);

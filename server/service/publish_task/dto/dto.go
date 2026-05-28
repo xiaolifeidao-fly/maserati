@@ -68,6 +68,15 @@ type PublishBatchRepublishStatsDTO struct {
 	PendingCount int64  `json:"pendingCount"`
 }
 
+type UploadPublishLogDTO struct {
+	FileName string `json:"fileName"`
+	Content  string `json:"content"`
+}
+
+type UploadPublishLogResultDTO struct {
+	Path string `json:"path"`
+}
+
 // ─── PublishStep DTOs ─────────────────────────────────────────────────────────
 
 type PublishStepDTO struct {

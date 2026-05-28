@@ -30,6 +30,11 @@ export interface RobotTaskWindowOptions {
   captchaUrl?: string;
   captchaMode?: string;
   shopId: number;
+  shopName?: string;
+  shopAccount?: string;
+  shopCode?: string;
+  platformShopId?: string;
+  businessId?: string;
   publishTaskId?: number;
   prompt: string;
 }
@@ -69,6 +74,46 @@ function buildWebviewUrl(params: Record<string, string | number | undefined>): s
     }
   }
   return url.toString();
+}
+
+function firstText(...values: Array<string | undefined | null>): string {
+  for (const value of values) {
+    const text = String(value || '').trim();
+    if (text) return text;
+  }
+  return '';
+}
+
+async function resolveShopDisplayParams(
+  shopId: number,
+  options: RobotTaskWindowOptions,
+  requestBackend: RequestBackend,
+): Promise<Pick<RobotTaskWindowOptions, 'shopName' | 'shopAccount' | 'shopCode' | 'platformShopId' | 'businessId'>> {
+  const provided = {
+    shopName: firstText(options.shopName),
+    shopAccount: firstText(options.shopAccount),
+    shopCode: firstText(options.shopCode),
+    platformShopId: firstText(options.platformShopId),
+    businessId: firstText(options.businessId),
+  };
+
+  if (shopId <= 0) {
+    return provided;
+  }
+
+  try {
+    const shop = await requestBackend<ShopRecord>('GET', `/shops/${shopId}`);
+    return {
+      shopName: firstText(provided.shopName, shop.name, shop.remark, shop.nickname, shop.code),
+      shopAccount: firstText(provided.shopAccount, shop.nickname, shop.code, shop.name),
+      shopCode: firstText(provided.shopCode, shop.code),
+      platformShopId: firstText(provided.platformShopId, shop.platformShopId),
+      businessId: firstText(provided.businessId, shop.businessId),
+    };
+  } catch (err) {
+    log.warn('[robot-task-window] failed to fetch shop display info', { shopId, err });
+    return provided;
+  }
 }
 
 function syncLayout(handle: WindowHandle): void {
@@ -344,10 +389,10 @@ function setupDirectCaptcha(
 
 // ─── 公开接口 ──────────────────────────────────────────────────────────────────
 
-export function openRobotTaskWindow(
+export async function openRobotTaskWindow(
   options: RobotTaskWindowOptions,
   requestBackend: RequestBackend,
-): void {
+): Promise<void> {
   const { humanTaskId, blockerType, captchaUrl, captchaMode, shopId, publishTaskId, prompt } = options;
 
   const existing = handles.get(humanTaskId);
@@ -358,9 +403,12 @@ export function openRobotTaskWindow(
 
   const isLogin = blockerType === 'login_required';
   const isScreenshot = blockerType === 'captcha_image' || captchaMode === 'screenshot';
+  const shopDisplayParams = isLogin
+    ? await resolveShopDisplayParams(shopId, options, requestBackend)
+    : {};
 
-  const windowWidth = isLogin ? 460 : 900;
-  const windowHeight = isLogin ? 300 : 620;
+  const windowWidth = isLogin ? 500 : 900;
+  const windowHeight = isLogin ? 390 : 620;
   const windowTitle = isLogin ? '需要登录' : '需要完成验证码';
 
   const parent = mainWindow && !mainWindow.isDestroyed() ? mainWindow : undefined;
@@ -427,6 +475,7 @@ export function openRobotTaskWindow(
     humanTaskId,
     blockerType,
     shopId,
+    ...shopDisplayParams,
     publishTaskId,
     prompt,
   });

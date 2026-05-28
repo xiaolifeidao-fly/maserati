@@ -13,6 +13,12 @@ esac
 sh "$SCRIPT_DIR/package.sh"
 cd "$APP_DIR"
 
+cleanup_sharp_platform() {
+  node scripts/ensure-sharp-platform.js --cleanup || true
+}
+
+trap cleanup_sharp_platform EXIT
+
 case "$ARCH" in
   x64)
     node scripts/ensure-sharp-platform.js --platform=win32 --arch=x64

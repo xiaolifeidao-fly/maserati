@@ -1,4 +1,6 @@
 import { SourceType, StepCode, StepStatus, TaskStatus } from '../types/publish-task';
+import fs from 'fs';
+import path from 'path';
 import type {
   PublishProgressEvent,
   PublishStepRecord,
@@ -24,6 +26,7 @@ import {
   registerPublishTaskLogFile,
   summarizeForLog,
   unregisterPublishTaskLogFile,
+  getPublishTaskLogFilePath,
 } from '../utils/publish-logger';
 import {
   getCollectedProductRawData,
@@ -149,8 +152,11 @@ export class PublishRunner {
    * @param taskId  服务端任务 ID
    */
   async run(taskId: number): Promise<void> {
+    let shouldClearProductLogs = false;
+    let productLogsToClear: string | undefined;
     this.taskStartTimeMap.set(taskId, Date.now());
     const task = await this.persister.getTask(taskId);
+    productLogsToClear = task.sourceProductId;
     registerPublishTaskLogFile(taskId, task.sourceProductId);
     publishInfo(`[task:${taskId}] publish runner started`, {
       taskId,
@@ -228,7 +234,8 @@ export class PublishRunner {
         publishedItemId: ctx.get('publishedItemId'),
         durationMs: this.getDurationMs(taskId),
       });
-      clearPublishProductLogs(this.getSourceProductId(ctx) ?? task.sourceProductId);
+      productLogsToClear = this.getSourceProductId(ctx) ?? task.sourceProductId;
+      shouldClearProductLogs = true;
       unregisterPublishTaskLogFile(taskId);
 
       this.emit({
@@ -297,6 +304,10 @@ export class PublishRunner {
       });
       throw err;
     } finally {
+      await this.uploadPublishLogCopy(taskId);
+      if (shouldClearProductLogs) {
+        clearPublishProductLogs(productLogsToClear);
+      }
       this.taskStartTimeMap.delete(taskId);
       clearImageCropMeta(taskId);
       clearTaskWindowJson(taskId);
@@ -319,6 +330,42 @@ export class PublishRunner {
   private getProductTitle(ctx: StepContext): string | undefined {
     const product = ctx.get('product') as { title?: string } | undefined;
     return product?.title;
+  }
+
+  private async uploadPublishLogCopy(taskId: number): Promise<void> {
+    const logFilePath = getPublishTaskLogFilePath(taskId);
+    if (!logFilePath) {
+      return;
+    }
+
+    try {
+      if (!fs.existsSync(logFilePath) || !fs.statSync(logFilePath).isFile()) {
+        return;
+      }
+
+      const content = fs.readFileSync(logFilePath, 'utf8');
+      if (!content.trim()) {
+        return;
+      }
+
+      await requestBackend('POST', `/publish-tasks/${taskId}/logs`, {
+        data: {
+          fileName: path.basename(logFilePath),
+          content,
+        },
+        publishLog: { taskId, label: 'upload publish log' },
+        timeout: 30000,
+      });
+      publishInfo(`[task:${taskId}] publish log uploaded`, {
+        taskId,
+        fileName: path.basename(logFilePath),
+      });
+    } catch (error) {
+      publishWarn(`[task:${taskId}] publish log upload failed`, {
+        taskId,
+        error: summarizeForLog(error),
+      });
+    }
   }
 
   private async savePxxMapperAfterPublish(task: PublishTaskRecord, ctx: StepContext): Promise<void> {

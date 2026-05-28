@@ -3,6 +3,7 @@ const path = require('path');
 const { execFileSync } = require('child_process');
 
 const appDir = path.resolve(__dirname, '..');
+const transientStateFile = '.sharp-platform-transient.json';
 
 /**
  * 从已安装的 sharp 包中读取实际版本号和 libvips 版本，
@@ -64,9 +65,13 @@ function sharpRuntimePackage(platform, arch) {
     : `@img/sharp-${platform}-${arch}`;
 }
 
+function packagePath(appDir, packageName) {
+  return path.join(appDir, 'node_modules', ...packageName.split('/'));
+}
+
 function runtimePackagePath(appDir, platform, arch) {
   const runtimePackage = sharpRuntimePackage(platform, arch);
-  return runtimePackage ? path.join(appDir, 'node_modules', ...runtimePackage.split('/')) : null;
+  return runtimePackage ? packagePath(appDir, runtimePackage) : null;
 }
 
 function hasNativeBinary(dir) {
@@ -106,9 +111,13 @@ function installSharpPlatform({ appDir, platform, arch }) {
     env.npm_config_libc = 'glibc';
   }
 
-  // 只安装平台 binary 包，不重装 sharp 主包，避免 --cpu 覆盖引起的 optional dep 清理
+  const tempDir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'maserati-sharp-'));
+
+  // 先安装到临时目录，再复制目标平台 runtime 包，避免 npm 改写当前 node_modules
+  // 或清理本机平台的 sharp optional dependency。
   const args = [
     'install',
+    '--force',
     '--no-save',
     '--no-package-lock',
     '--include=optional',
@@ -118,12 +127,70 @@ function installSharpPlatform({ appDir, platform, arch }) {
     ...packages,
   ];
 
-  console.log(`[sharp] installing ${platform}-${arch}: npm ${args.join(' ')}`);
-  execFileSync('npm', args, {
-    cwd: appDir,
-    stdio: 'inherit',
-    env,
-  });
+  try {
+    console.log(`[sharp] staging ${platform}-${arch}: npm ${args.join(' ')}`);
+    execFileSync('npm', args, {
+      cwd: tempDir,
+      stdio: 'inherit',
+      env,
+    });
+
+    const installedPackages = [];
+    for (const packageSpec of packages) {
+      const packageName = packageSpec.replace(/@[^@]+$/, '');
+      const from = packagePath(tempDir, packageName);
+      const to = packagePath(appDir, packageName);
+
+      if (!fs.existsSync(from)) {
+        throw new Error(`Missing staged sharp package: ${from}`);
+      }
+
+      fs.rmSync(to, { recursive: true, force: true });
+      fs.mkdirSync(path.dirname(to), { recursive: true });
+      fs.cpSync(from, to, { recursive: true });
+      installedPackages.push(packageName);
+      console.log(`[sharp] staged package copied: ${path.relative(appDir, to)}`);
+    }
+
+    recordTransientPackages(appDir, installedPackages);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+}
+
+function readTransientPackages(targetAppDir) {
+  const statePath = path.join(targetAppDir, transientStateFile);
+  if (!fs.existsSync(statePath)) {
+    return [];
+  }
+
+  try {
+    const state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+    return Array.isArray(state.packages) ? state.packages.filter(Boolean) : [];
+  } catch {
+    return [];
+  }
+}
+
+function recordTransientPackages(targetAppDir, packageNames) {
+  const packages = Array.from(new Set([...readTransientPackages(targetAppDir), ...packageNames]));
+  fs.writeFileSync(
+    path.join(targetAppDir, transientStateFile),
+    JSON.stringify({ packages }, null, 2),
+  );
+}
+
+function cleanupSharpPlatform(options = {}) {
+  const targetAppDir = options.appDir || appDir;
+  const packages = readTransientPackages(targetAppDir);
+
+  for (const packageName of packages) {
+    const target = packagePath(targetAppDir, packageName);
+    fs.rmSync(target, { recursive: true, force: true });
+    console.log(`[sharp] cleaned transient package: ${path.relative(targetAppDir, target)}`);
+  }
+
+  fs.rmSync(path.join(targetAppDir, transientStateFile), { force: true });
 }
 
 async function ensureSharpPlatform(options = {}) {
@@ -151,7 +218,10 @@ async function ensureSharpPlatform(options = {}) {
 }
 
 if (require.main === module) {
-  ensureSharpPlatform().catch(error => {
+  const cleanup = process.argv.includes('--cleanup');
+  const action = cleanup ? cleanupSharpPlatform() : ensureSharpPlatform();
+
+  Promise.resolve(action).catch(error => {
     console.error(`[sharp] ${error.stack || error.message}`);
     process.exit(1);
   });
@@ -159,4 +229,5 @@ if (require.main === module) {
 
 module.exports = {
   ensureSharpPlatform,
+  cleanupSharpPlatform,
 };

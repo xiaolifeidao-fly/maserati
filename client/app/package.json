@@ -1,6 +1,6 @@
 {
   "name": "maserati",
-  "version": "1.0.1",
+  "version": "1.0.3",
   "description": "maserati Client Application",
   "main": "dist/main.js",
   "scripts": {
@@ -52,17 +52,13 @@
     "beforeBuild": "./scripts/rebuild-native.js",
     "mac": {
       "target": [
-        {
-          "target": "dmg",
-          "arch": [
-            "x64",
-            "arm64"
-          ]
-        }
+        "dmg",
+        "zip"
       ],
       "icon": "static/logo/logo.jpg",
       "category": "com.x.ds.maserati.category.type"
     },
+    "afterPack": "./scripts/ad-hoc-sign-mac.js",
     "win": {
       "target": [
         {
@@ -81,7 +77,7 @@
       }
     ],
     "releaseInfo": {
-      "releaseNotes": ""
+      "releaseNotes": "AI运营"
     },
     "nsis": {
       "oneClick": false,

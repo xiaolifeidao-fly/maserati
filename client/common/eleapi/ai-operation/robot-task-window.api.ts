@@ -7,6 +7,11 @@ export interface RobotTaskWindowOpenOptions {
   captchaUrl?: string;
   captchaMode?: string;
   shopId: number;
+  shopName?: string;
+  shopAccount?: string;
+  shopCode?: string;
+  platformShopId?: string;
+  businessId?: string;
   publishTaskId?: number;
   prompt: string;
 }

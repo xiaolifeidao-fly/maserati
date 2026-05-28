@@ -29,6 +29,7 @@ import {
   type RobotMonitorShopLinkImportResult,
   type RobotMonitorShopLinkRecord,
   type RobotMonitorShopSnapshot,
+  type RobotRunPublishConfig,
   type RobotRunRecord,
   type RunDetailResult,
   type RunOverviewQuery,
@@ -73,15 +74,21 @@ export class AiOperationImpl extends AiOperationApi {
     return requestBackend("DELETE", `/ai-operation/robots/${id}`);
   }
 
-  async startRobotRun(robotConfigId: number, monitorShops: RobotMonitorShopSnapshot[]): Promise<RobotRunRecord> {
+  async startRobotRun(
+    robotConfigId: number,
+    monitorShops: RobotMonitorShopSnapshot[],
+    publishConfig?: RobotRunPublishConfig,
+  ): Promise<RobotRunRecord> {
     if (!Number.isFinite(robotConfigId) || robotConfigId <= 0) {
       throw new Error("robot config id is invalid");
     }
     const robot = await requestBackend<AiOperationRobotRecord>("GET", `/ai-operation/robots/${robotConfigId}`);
     const snapshots = await this.resolveMonitorShopSnapshots(robot, monitorShops);
+    const publishConfigJson = serializePublishConfig(publishConfig);
     const run = await requestBackend<RobotRunRecord>("POST", `/ai-operation/robots/${robotConfigId}/start`, {
-      data: { monitorShops: snapshots },
+      data: { monitorShops: snapshots, publishConfigJson },
     });
+    run.publishConfigJson = run.publishConfigJson || publishConfigJson;
     robotRuntimeRegistry.upsert(run);
     await robotRunOverviewCacheDb.mergeRun(run);
     robotTaskRuntime.start(run);
@@ -405,6 +412,7 @@ export class AiOperationImpl extends AiOperationApi {
             status: "",
             queueNamespace: "",
             currentTasksJson: "",
+            publishConfigJson: "",
             monitorShopCount: 0,
             collectedCount: 0,
             publishedCount: 0,
@@ -453,6 +461,24 @@ export class AiOperationImpl extends AiOperationApi {
     }
     return null;
   }
+}
+
+function serializePublishConfig(publishConfig?: RobotRunPublishConfig): string {
+  if (!publishConfig) {
+    return "";
+  }
+  const strategy = publishConfig.strategy === "immediate" ? "immediate" : "warehouse";
+  const brandMode = publishConfig.brandMode === "none" ? "none" : "follow_source";
+  const floatRatio = Number(publishConfig.priceSettings?.floatRatio);
+  const floatAmount = Number(publishConfig.priceSettings?.floatAmount);
+  return JSON.stringify({
+    strategy,
+    priceSettings: {
+      floatRatio: Number.isFinite(floatRatio) && floatRatio > 0 ? floatRatio : 1.3,
+      floatAmount: Number.isFinite(floatAmount) && floatAmount >= 0 ? floatAmount : 0,
+    },
+    brandMode,
+  });
 }
 
 function parseMonitorShopUrls(text: string): string[] {

@@ -28,7 +28,9 @@ if /i "%ARCH%"=="x64" (
   call node scripts\ensure-sharp-platform.js --platform=win32 --arch=x64
   if errorlevel 1 exit /b %errorlevel%
   call npx electron-builder --win --x64
-  exit /b %errorlevel%
+  set BUILD_EXIT=%errorlevel%
+  call node scripts\ensure-sharp-platform.js --cleanup
+  exit /b %BUILD_EXIT%
 )
 
 if /i "%ARCH%"=="arm64" (
@@ -40,7 +42,9 @@ if /i "%ARCH%"=="all" (
   call node scripts\ensure-sharp-platform.js --platform=win32 --arch=x64
   if errorlevel 1 exit /b %errorlevel%
   call npx electron-builder --win --x64
-  exit /b %errorlevel%
+  set BUILD_EXIT=%errorlevel%
+  call node scripts\ensure-sharp-platform.js --cleanup
+  exit /b %BUILD_EXIT%
 )
 
 echo Unsupported win arch: %ARCH%. Use x86/x64 or all. 1>&2

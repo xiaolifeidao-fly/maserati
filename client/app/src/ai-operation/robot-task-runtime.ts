@@ -21,7 +21,10 @@ import { openRobotTaskWindow } from "@src/ai-operation/robot-task-window";
 import {
   SourceType,
   TaskStatus,
+  type PublishBrandMode,
+  type PublishConfig,
   type PublishProgressEvent,
+  type PublishStrategy,
   type PublishTaskRecord,
 } from "@src/publish/types/publish-task";
 
@@ -521,6 +524,7 @@ class RobotTaskRuntime {
     const collectBatchId = numberFromPayload(payload, "collectBatchId");
     const sourceRecordId = numberFromPayload(payload, "sourceRecordId") || numberFromPayload(payload, "collectRecordId");
     const appUserId = numberFromPayload(payload, "appUserId");
+    const publishConfig = parseRobotRunPublishConfig(stringFromPayload(payload, "publishConfigJson"));
     if (!sourceProductId) {
       throw new Error("publish sourceProductId is required");
     }
@@ -550,11 +554,12 @@ class RobotTaskRuntime {
         sourceType: SourceType.TB,
         sourceProductId,
         sourceRecordId,
-        remark: JSON.stringify({
+        remark: buildAiOperationPublishRemark({
           entryScene: "ai_operation",
           robotRunId: task.runId,
           robotTaskId: task.taskId,
           robotProductId: numberFromPayload(payload, "robotProductId"),
+          publishConfig,
         }),
       },
     });
@@ -683,7 +688,7 @@ class RobotTaskRuntime {
         shopId,
       });
 
-      openRobotTaskWindow(
+      await openRobotTaskWindow(
         {
           humanTaskId: humanTask.humanTaskId,
           blockerType,
@@ -734,7 +739,7 @@ class RobotTaskRuntime {
         shopId,
       });
 
-      openRobotTaskWindow(
+      await openRobotTaskWindow(
         {
           humanTaskId: humanTask.humanTaskId,
           blockerType: "login_required",
@@ -999,6 +1004,51 @@ function appendTaobaoSpmToUrl(sourceProductUrl: string, sourceProductId: string,
 function buildTaobaoItemUrl(itemId: string): string {
   const normalizedItemId = String(itemId || "").trim();
   return normalizedItemId ? `https://item.taobao.com/item.htm?id=${normalizedItemId}` : "";
+}
+
+function parseRobotRunPublishConfig(value: string): PublishConfig {
+  const fallback: PublishConfig = {
+    strategy: "warehouse",
+    priceSettings: { floatRatio: 1.3, floatAmount: 0 },
+    brandMode: "follow_source",
+  };
+  try {
+    const parsed = JSON.parse(String(value || "{}")) as Partial<PublishConfig>;
+    const strategy: PublishStrategy = parsed.strategy === "immediate" ? "immediate" : "warehouse";
+    const brandMode: PublishBrandMode = parsed.brandMode === "none" ? "none" : "follow_source";
+    const floatRatio = Number(parsed.priceSettings?.floatRatio);
+    const floatAmount = Number(parsed.priceSettings?.floatAmount);
+    return {
+      strategy,
+      priceSettings: {
+        floatRatio: Number.isFinite(floatRatio) && floatRatio > 0 ? floatRatio : fallback.priceSettings!.floatRatio,
+        floatAmount: Number.isFinite(floatAmount) && floatAmount >= 0 ? floatAmount : fallback.priceSettings!.floatAmount,
+      },
+      brandMode,
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+function buildAiOperationPublishRemark(options: {
+  entryScene: string;
+  robotRunId: string;
+  robotTaskId: string;
+  robotProductId: number;
+  publishConfig: PublishConfig;
+}): string {
+  const priceSettings = options.publishConfig.priceSettings || { floatRatio: 1.3, floatAmount: 0 };
+  return [
+    `entryScene:${options.entryScene}`,
+    `robotRun:${encodeURIComponent(options.robotRunId)}`,
+    `robotTask:${encodeURIComponent(options.robotTaskId)}`,
+    `robotProduct:${options.robotProductId}`,
+    `publishStrategy:${options.publishConfig.strategy}`,
+    `priceRatio:${priceSettings.floatRatio}`,
+    `priceAmount:${priceSettings.floatAmount}`,
+    `brandMode:${options.publishConfig.brandMode || "follow_source"}`,
+  ].join(";");
 }
 
 function sleep(ms: number, signal: AbortSignal): Promise<void> {
