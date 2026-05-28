@@ -136,19 +136,19 @@ function resolveManualMacDownloadURL(info: UpdateInfo, feedURL: string): string 
 
   const files = Array.isArray(info.files) ? info.files : [];
   const archKeyword = process.arch === 'arm64' ? 'arm64' : '';
-  const dmgFile = files.find((file: any) => {
+  const zipFile = files.find((file: any) => {
     const url = String(file?.url ?? '');
-    if (!url.toLowerCase().endsWith('.dmg')) {
+    if (!url.toLowerCase().endsWith('.zip')) {
       return false;
     }
     return archKeyword ? url.includes(archKeyword) : !url.includes('arm64');
   });
 
   const fileName =
-    (dmgFile as any)?.url ??
+    (zipFile as any)?.url ??
     (process.arch === 'arm64'
-      ? `maserati-${info.version}-arm64.dmg`
-      : `maserati-${info.version}.dmg`);
+      ? `maserati-${info.version}-arm64-mac.zip`
+      : `maserati-${info.version}-mac.zip`);
 
   try {
     return new URL(fileName, feedURL).toString();
