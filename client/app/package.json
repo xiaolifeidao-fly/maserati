@@ -1,6 +1,6 @@
 {
   "name": "maserati",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "maserati Client Application",
   "main": "dist/main.js",
   "scripts": {
