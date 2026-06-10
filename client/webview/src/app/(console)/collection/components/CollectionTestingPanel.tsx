@@ -95,6 +95,7 @@ function normalizeInjectedItems(items: InjectedCollectTestingItem[], fallbackBat
     rawDataUrl: String(item.rawDataUrl || "").trim(),
     isFavorite: Boolean(item.isFavorite),
     status: String(item.status || "INJECTED").trim() || "INJECTED",
+    publishStatus: "",
     active: 1,
     createdTime: undefined,
     updatedTime: undefined,
@@ -127,6 +128,17 @@ function getStatusLabel(status: string) {
     case "LOADING": return "保存中";
     default: return status || "未知";
   }
+}
+
+function getPublishStatusTag(status: string) {
+  const value = status?.toUpperCase();
+  if (value === "SUCCESS") {
+    return <Tag color="green" style={{ marginInlineEnd: 0, borderRadius: 999 }}>发布成功</Tag>;
+  }
+  if (value === "FAILED") {
+    return <Tag color="red" style={{ marginInlineEnd: 0, borderRadius: 999 }}>发布失败</Tag>;
+  }
+  return null;
 }
 
 async function loadBatchWorkspaceState(batchId: number): Promise<CollectionWorkspaceState> {
@@ -613,6 +625,7 @@ export function CollectionWorkspaceLeftPanel({
                           #{record.sourceProductId.slice(0, 10)}
                         </span>
                       )}
+                      {getPublishStatusTag(record.publishStatus)}
                     </div>
                   </div>
 

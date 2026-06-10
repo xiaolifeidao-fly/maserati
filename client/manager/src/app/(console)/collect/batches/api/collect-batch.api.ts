@@ -28,6 +28,12 @@ export class CollectBatchRecord {
 
   collectedCount = 0;
 
+  publishSuccessCount = 0;
+
+  publishFailedCount = 0;
+
+  publishSuccessRate = "0%";
+
   createdTime?: string;
 
   updatedTime?: string;
@@ -64,6 +70,8 @@ export class CollectRecordRecord {
   isFavorite = false;
 
   status = "PENDING";
+
+  publishStatus = "";
 
   missingFields = "";
 

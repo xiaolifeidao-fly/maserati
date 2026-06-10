@@ -211,6 +211,9 @@ function toInitialCollectBatchRecord(
     status: batch.status || "",
     ossUrl: "",
     collectedCount: Number(batch.collectedCount || 0),
+    publishSuccessCount: 0,
+    publishFailedCount: 0,
+    publishSuccessRate: "0%",
     active: 1,
   };
 }

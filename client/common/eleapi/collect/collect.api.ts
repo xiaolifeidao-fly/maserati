@@ -127,6 +127,9 @@ export class CollectBatchRecord {
   status = "";
   ossUrl = "";
   collectedCount = 0;
+  publishSuccessCount = 0;
+  publishFailedCount = 0;
+  publishSuccessRate = "0%";
   active = 1;
   createdTime?: string;
   updatedTime?: string;
@@ -162,6 +165,7 @@ export class CollectRecordPreview {
   rawDataUrl = "";
   isFavorite = false;
   status = "";
+  publishStatus = "";
   missingFields?: string;
   active = 1;
   isLoading?: boolean;
@@ -175,6 +179,7 @@ export interface CollectRecordListQuery extends Record<string, string | number |
   source?: "file" | "manual";
   productName?: string;
   status?: string;
+  publishStatus?: "ALL" | "SUCCESS" | "FAILED";
   isFavorite?: number;
 }
 

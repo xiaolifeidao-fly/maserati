@@ -6,6 +6,7 @@ import (
 	"fmt"
 	collectDTO "service/collect/dto"
 	collectRepository "service/collect/repository"
+	publishTaskRepository "service/publish_task/repository"
 	"strings"
 
 	"gorm.io/gorm"
@@ -34,6 +35,9 @@ func (s *CollectService) ListCollectBatches(query collectDTO.CollectBatchQueryDT
 		item.ShopPlatform = entity.ShopPlatform
 		data = append(data, item)
 	}
+	if err := s.fillCollectBatchPublishStats(data); err != nil {
+		return nil, err
+	}
 	return baseDTO.BuildPage(int(total), data), nil
 }
 
@@ -45,7 +49,11 @@ func (s *CollectService) GetCollectBatchByID(id uint) (*collectDTO.CollectBatchD
 	if entity.Active == 0 {
 		return nil, gorm.ErrRecordNotFound
 	}
-	return db.ToDTO[collectDTO.CollectBatchDTO](entity), nil
+	item := db.ToDTO[collectDTO.CollectBatchDTO](entity)
+	if err := s.fillCollectBatchPublishStats([]*collectDTO.CollectBatchDTO{item}); err != nil {
+		return nil, err
+	}
+	return item, nil
 }
 
 func (s *CollectService) CreateCollectBatch(req *collectDTO.CreateCollectBatchDTO) (*collectDTO.CollectBatchDTO, error) {
@@ -146,4 +154,47 @@ func (s *CollectService) DeleteCollectBatch(id uint) error {
 	entity.Active = 0
 	_, err = s.collectBatchRepository.SaveOrUpdate(entity)
 	return err
+}
+
+func (s *CollectService) fillCollectBatchPublishStats(items []*collectDTO.CollectBatchDTO) error {
+	if len(items) == 0 || s.publishTaskRepository == nil {
+		return nil
+	}
+	batchIDs := make([]uint64, 0, len(items))
+	for _, item := range items {
+		if item == nil || item.Id == 0 {
+			continue
+		}
+		batchIDs = append(batchIDs, uint64(item.Id))
+	}
+	statsMap, err := s.publishTaskRepository.ListBatchRepublishStats(batchIDs)
+	if err != nil {
+		return err
+	}
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		stats := statsMap[uint64(item.Id)]
+		applyCollectBatchPublishStats(item, stats)
+	}
+	return nil
+}
+
+func applyCollectBatchPublishStats(item *collectDTO.CollectBatchDTO, stats *publishTaskRepository.PublishBatchRepublishStatsRow) {
+	if item == nil || stats == nil {
+		if item != nil {
+			item.PublishSuccessRate = "0%"
+		}
+		return
+	}
+	item.PublishSuccessCount = stats.SuccessCount
+	item.PublishFailedCount = stats.FailedCount
+	denominator := stats.SuccessCount + stats.FailedCount
+	if denominator <= 0 {
+		item.PublishSuccessRate = "0%"
+		return
+	}
+	rate := float64(stats.SuccessCount) / float64(denominator) * 100
+	item.PublishSuccessRate = fmt.Sprintf("%.1f%%", rate)
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Modal, Tabs, message } from "antd";
+import { Modal, Segmented, Space, Tabs, Tag, Typography, message } from "antd";
 import {
   CollectBatchRecord,
   CollectRecordPreview,
@@ -17,6 +17,16 @@ import {
 } from "../api/collection.api";
 import { CollectionWorkspaceLeftPanel } from "./CollectionTestingPanel";
 import { CollectionWorkspaceRightPanel } from "./CollectionTestingPanel";
+
+const { Text } = Typography;
+
+type PublishStatusFilter = "ALL" | "FAILED" | "SUCCESS";
+
+const publishStatusOptions: Array<{ label: string; value: PublishStatusFilter }> = [
+  { label: "全部", value: "ALL" },
+  { label: "发布失败", value: "FAILED" },
+  { label: "发布成功", value: "SUCCESS" },
+];
 
 interface BatchDetailModalProps {
   open: boolean;
@@ -41,6 +51,7 @@ export function BatchDetailModal({
   const [loading, setLoading] = useState(false);
   const [selectedRecordId, setSelectedRecordId] = useState(0);
   const [activeSource, setActiveSource] = useState<CollectRecordSource>("manual");
+  const [publishStatusFilter, setPublishStatusFilter] = useState<PublishStatusFilter>("ALL");
 
   const syncElectronPreview = async (record: CollectRecordPreview | null) => {
     if (!record?.sourceProductId) {
@@ -81,6 +92,7 @@ export function BatchDetailModal({
   useEffect(() => {
     if (open) {
       setActiveSource("manual");
+      setPublishStatusFilter("ALL");
     }
   }, [open]);
 
@@ -97,6 +109,7 @@ export function BatchDetailModal({
       pageSize: 200,
       source: activeSource,
       isFavorite: favoritesOnly ? 1 : undefined,
+      publishStatus: publishStatusFilter === "ALL" ? undefined : publishStatusFilter,
     })
       .then((result) => {
         const rawItems = Array.isArray(result.data) ? result.data : [];
@@ -111,7 +124,7 @@ export function BatchDetailModal({
         message.error(error instanceof Error ? error.message : "加载选品记录失败");
       })
       .finally(() => setLoading(false));
-  }, [open, batch?.id, focusRecordId, activeSource, favoritesOnly]);
+  }, [open, batch?.id, focusRecordId, activeSource, favoritesOnly, publishStatusFilter]);
 
   const workspaceState: CollectionWorkspaceState = {
     batch: batch ?? new CollectBatchRecord(),
@@ -166,6 +179,34 @@ export function BatchDetailModal({
           ]}
           style={{ flex: "0 0 auto", marginBottom: 10 }}
         />
+        <div
+          style={{
+            flex: "0 0 auto",
+            display: "grid",
+            gap: 8,
+            padding: "10px 12px",
+            marginBottom: 10,
+            borderRadius: 8,
+            background: "rgba(255,255,255,0.86)",
+            border: "1px solid rgba(226,232,240,0.9)",
+          }}
+        >
+          <Space style={{ justifyContent: "space-between" }}>
+            <Text type="secondary">发布成功率</Text>
+            <strong style={{ color: "#1f2937", fontSize: 18 }}>{batch?.publishSuccessRate || "0%"}</strong>
+          </Space>
+          <Space size={6}>
+            <Tag color="green">成功 {batch?.publishSuccessCount ?? 0}</Tag>
+            <Tag color="red">失败 {batch?.publishFailedCount ?? 0}</Tag>
+          </Space>
+          <Segmented
+            block
+            size="small"
+            value={publishStatusFilter}
+            options={publishStatusOptions}
+            onChange={(value) => setPublishStatusFilter(value as PublishStatusFilter)}
+          />
+        </div>
         <CollectionWorkspaceLeftPanel
           workspaceState={workspaceState}
           loading={loading}

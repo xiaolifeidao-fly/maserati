@@ -4,17 +4,20 @@ import baseDTO "common/base/dto"
 
 type CollectBatchDTO struct {
 	baseDTO.BaseDTO
-	AppUserID      uint64 `json:"appUserId"`
-	AppUserName    string `json:"appUserName"`
-	AppUsername    string `json:"appUsername"`
-	ShopID         uint64 `json:"shopId"`
-	ShopName       string `json:"shopName"`
-	ShopNickname   string `json:"shopNickname"`
-	ShopPlatform   string `json:"shopPlatform"`
-	Name           string `json:"name"`
-	Status         string `json:"status"`
-	OssURL         string `json:"ossUrl,omitempty"`
-	CollectedCount int64  `json:"collectedCount"`
+	AppUserID           uint64 `json:"appUserId"`
+	AppUserName         string `json:"appUserName"`
+	AppUsername         string `json:"appUsername"`
+	ShopID              uint64 `json:"shopId"`
+	ShopName            string `json:"shopName"`
+	ShopNickname        string `json:"shopNickname"`
+	ShopPlatform        string `json:"shopPlatform"`
+	Name                string `json:"name"`
+	Status              string `json:"status"`
+	OssURL              string `json:"ossUrl,omitempty"`
+	CollectedCount      int64  `json:"collectedCount"`
+	PublishSuccessCount int64  `json:"publishSuccessCount"`
+	PublishFailedCount  int64  `json:"publishFailedCount"`
+	PublishSuccessRate  string `json:"publishSuccessRate"`
 }
 
 type CreateCollectBatchDTO struct {
@@ -57,6 +60,7 @@ type CollectRecordDTO struct {
 	RawDataURL        string `json:"rawDataUrl"`
 	IsFavorite        bool   `json:"isFavorite"`
 	Status            string `json:"status"`
+	PublishStatus     string `json:"publishStatus"`
 	MissingFields     string `json:"missingFields"`
 }
 
@@ -114,6 +118,7 @@ type CollectRecordQueryDTO struct {
 	Source          string `form:"source"`
 	ProductName     string `form:"productName"`
 	Status          string `form:"status"`
+	PublishStatus   string `form:"publishStatus"`
 	IsFavorite      *bool  `form:"isFavorite"`
 }
 

@@ -11,10 +11,16 @@ import (
 type PublishTaskRepository struct{ db.Repository[*PublishTask] }
 
 type PublishBatchRepublishStatsRow struct {
-	TotalCount   int64 `gorm:"column:total_count"`
-	SuccessCount int64 `gorm:"column:success_count"`
-	FailedCount  int64 `gorm:"column:failed_count"`
-	PendingCount int64 `gorm:"column:pending_count"`
+	BatchID      uint64 `gorm:"column:batch_id"`
+	TotalCount   int64  `gorm:"column:total_count"`
+	SuccessCount int64  `gorm:"column:success_count"`
+	FailedCount  int64  `gorm:"column:failed_count"`
+	PendingCount int64  `gorm:"column:pending_count"`
+}
+
+type PublishSourceStatusRow struct {
+	SourceProductID string `gorm:"column:source_product_id"`
+	Status          string `gorm:"column:status"`
 }
 
 func (r *PublishTaskRepository) EnsureTable() error {
@@ -120,6 +126,7 @@ func (r *PublishTaskRepository) GetBatchRepublishStats(batchID, appUserID uint64
 
 	sql := fmt.Sprintf(`
 SELECT
+	? AS batch_id,
 	COUNT(1) AS total_count,
 	SUM(CASE WHEN task_summary.has_success = 1 THEN 1 ELSE 0 END) AS success_count,
 	SUM(CASE WHEN task_summary.has_success = 0 AND task_summary.has_failed = 1 THEN 1 ELSE 0 END) AS failed_count,
@@ -141,10 +148,114 @@ LEFT JOIN (
 `, favoriteWhere, taskWhere)
 
 	row := &PublishBatchRepublishStatsRow{}
-	if err := r.Db.Raw(sql, args...).Scan(row).Error; err != nil {
+	scanArgs := append([]any{batchID}, args...)
+	if err := r.Db.Raw(sql, scanArgs...).Scan(row).Error; err != nil {
 		return nil, err
 	}
 	return row, nil
+}
+
+func (r *PublishTaskRepository) ListBatchRepublishStats(batchIDs []uint64) (map[uint64]*PublishBatchRepublishStatsRow, error) {
+	result := map[uint64]*PublishBatchRepublishStatsRow{}
+	if r.Db == nil {
+		return result, fmt.Errorf("database is not initialized")
+	}
+	if len(batchIDs) == 0 {
+		return result, nil
+	}
+
+	sql := `
+SELECT
+	favorite.collect_batch_id AS batch_id,
+	COUNT(1) AS total_count,
+	SUM(CASE WHEN task_summary.has_success = 1 THEN 1 ELSE 0 END) AS success_count,
+	SUM(CASE WHEN task_summary.has_success = 0 AND task_summary.has_failed = 1 THEN 1 ELSE 0 END) AS failed_count,
+	SUM(CASE WHEN task_summary.source_product_id IS NULL THEN 1 ELSE 0 END) AS pending_count
+FROM (
+	SELECT DISTINCT cr.collect_batch_id, cr.source_product_id
+	FROM collect_record cr
+	WHERE cr.active = 1
+		AND cr.collect_batch_id IN ?
+		AND TRIM(cr.source_product_id) <> ''
+) favorite
+LEFT JOIN (
+	SELECT
+		pt.collect_batch_id,
+		pt.source_product_id,
+		MAX(CASE WHEN pt.status = 'SUCCESS' THEN 1 ELSE 0 END) AS has_success,
+		MAX(CASE WHEN pt.status = 'FAILED' THEN 1 ELSE 0 END) AS has_failed
+	FROM publish_task pt
+	WHERE pt.active = 1
+		AND pt.collect_batch_id IN ?
+		AND TRIM(pt.source_product_id) <> ''
+	GROUP BY pt.collect_batch_id, pt.source_product_id
+) task_summary ON task_summary.collect_batch_id = favorite.collect_batch_id
+	AND task_summary.source_product_id = favorite.source_product_id
+GROUP BY favorite.collect_batch_id
+`
+
+	var rows []*PublishBatchRepublishStatsRow
+	if err := r.Db.Raw(sql, batchIDs, batchIDs).Scan(&rows).Error; err != nil {
+		return result, err
+	}
+	for _, row := range rows {
+		if row == nil {
+			continue
+		}
+		result[row.BatchID] = row
+	}
+	return result, nil
+}
+
+func (r *PublishTaskRepository) ListSourceStatuses(batchID, appUserID uint64, sourceProductIDs []string) (map[string]string, error) {
+	result := map[string]string{}
+	if r.Db == nil {
+		return result, fmt.Errorf("database is not initialized")
+	}
+	sourceIDs := make([]string, 0, len(sourceProductIDs))
+	seen := map[string]struct{}{}
+	for _, item := range sourceProductIDs {
+		value := strings.TrimSpace(item)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		sourceIDs = append(sourceIDs, value)
+	}
+	if batchID == 0 || len(sourceIDs) == 0 {
+		return result, nil
+	}
+
+	dbQuery := r.Db.Table("publish_task").
+		Select(`
+			source_product_id,
+			CASE
+				WHEN MAX(CASE WHEN status = 'SUCCESS' THEN 1 ELSE 0 END) = 1 THEN 'SUCCESS'
+				WHEN MAX(CASE WHEN status = 'FAILED' THEN 1 ELSE 0 END) = 1 THEN 'FAILED'
+				ELSE ''
+			END AS status
+		`).
+		Where("active = ? AND collect_batch_id = ? AND source_product_id IN ?", 1, batchID, sourceIDs).
+		Where("TRIM(source_product_id) <> ''")
+	if appUserID > 0 {
+		dbQuery = dbQuery.Where("app_user_id = ?", appUserID)
+	}
+	dbQuery = dbQuery.Group("source_product_id")
+
+	var rows []*PublishSourceStatusRow
+	if err := dbQuery.Scan(&rows).Error; err != nil {
+		return result, err
+	}
+	for _, row := range rows {
+		if row == nil {
+			continue
+		}
+		result[strings.TrimSpace(row.SourceProductID)] = strings.TrimSpace(row.Status)
+	}
+	return result, nil
 }
 
 // PublishStepRepository 发布步骤数据访问层

@@ -8,6 +8,7 @@ import (
 	appUserRepository "service/app_user/repository"
 	collectRepository "service/collect/repository"
 	collectShareRepository "service/collect_share/repository"
+	publishTaskRepository "service/publish_task/repository"
 	shopRepository "service/shop/repository"
 	"strings"
 
@@ -20,6 +21,7 @@ type CollectService struct {
 	aiSelectionStrategyRepository    *collectRepository.AiSelectionStrategyRepository
 	aiSelectionShopProductRepository *collectRepository.AiSelectionShopProductDetailRepository
 	collectShareRepository           *collectShareRepository.CollectShareRepository
+	publishTaskRepository            *publishTaskRepository.PublishTaskRepository
 	appUserRepository                *appUserRepository.AppUserRepository
 	shopRepository                   *shopRepository.ShopRepository
 }
@@ -31,6 +33,7 @@ func NewCollectService() *CollectService {
 		aiSelectionStrategyRepository:    db.GetRepository[collectRepository.AiSelectionStrategyRepository](),
 		aiSelectionShopProductRepository: db.GetRepository[collectRepository.AiSelectionShopProductDetailRepository](),
 		collectShareRepository:           db.GetRepository[collectShareRepository.CollectShareRepository](),
+		publishTaskRepository:            db.GetRepository[publishTaskRepository.PublishTaskRepository](),
 		appUserRepository:                db.GetRepository[appUserRepository.AppUserRepository](),
 		shopRepository:                   db.GetRepository[shopRepository.ShopRepository](),
 	}

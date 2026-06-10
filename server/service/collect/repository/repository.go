@@ -35,6 +35,76 @@ func applyCollectRecordPlatformFilter(dbQuery *gorm.DB, platform string) *gorm.D
 	}
 }
 
+func applyCollectRecordPublishStatusFilter(dbQuery *gorm.DB, query collectDTO.CollectRecordQueryDTO) *gorm.DB {
+	status := strings.ToUpper(strings.TrimSpace(query.PublishStatus))
+	if status == "" || status == "ALL" || query.CollectBatchID == 0 {
+		return dbQuery
+	}
+
+	successExists := rdbLiteral(`
+		EXISTS (
+			SELECT 1
+			FROM publish_task pt_success
+			WHERE pt_success.active = 1
+				AND pt_success.collect_batch_id = collect_record.collect_batch_id
+				AND pt_success.source_product_id = collect_record.source_product_id
+				AND pt_success.status = 'SUCCESS'
+		)
+	`)
+	failedExists := rdbLiteral(`
+		EXISTS (
+			SELECT 1
+			FROM publish_task pt_failed
+			WHERE pt_failed.active = 1
+				AND pt_failed.collect_batch_id = collect_record.collect_batch_id
+				AND pt_failed.source_product_id = collect_record.source_product_id
+				AND pt_failed.status = 'FAILED'
+		)
+	`)
+	if query.AppUserID > 0 {
+		successExists = rdbLiteral(`
+			EXISTS (
+				SELECT 1
+				FROM publish_task pt_success
+				WHERE pt_success.active = 1
+					AND pt_success.collect_batch_id = collect_record.collect_batch_id
+					AND pt_success.source_product_id = collect_record.source_product_id
+					AND pt_success.app_user_id = ?
+					AND pt_success.status = 'SUCCESS'
+			)
+		`, query.AppUserID)
+		failedExists = rdbLiteral(`
+			EXISTS (
+				SELECT 1
+				FROM publish_task pt_failed
+				WHERE pt_failed.active = 1
+					AND pt_failed.collect_batch_id = collect_record.collect_batch_id
+					AND pt_failed.source_product_id = collect_record.source_product_id
+					AND pt_failed.app_user_id = ?
+					AND pt_failed.status = 'FAILED'
+			)
+		`, query.AppUserID)
+	}
+
+	switch status {
+	case "SUCCESS":
+		return dbQuery.Where(successExists.query, successExists.args...)
+	case "FAILED":
+		return dbQuery.Where("NOT ("+successExists.query+") AND ("+failedExists.query+")", append(successExists.args, failedExists.args...)...)
+	default:
+		return dbQuery
+	}
+}
+
+type rawDBCondition struct {
+	query string
+	args  []any
+}
+
+func rdbLiteral(query string, args ...any) rawDBCondition {
+	return rawDBCondition{query: query, args: args}
+}
+
 type CollectBatchRepository struct{ db.Repository[*CollectBatch] }
 
 type CollectBatchListRow struct {
@@ -202,6 +272,7 @@ func (r *CollectRecordRepository) CountByQuery(query collectDTO.CollectRecordQue
 	if value := strings.TrimSpace(query.Status); value != "" {
 		dbQuery = dbQuery.Where("status = ?", value)
 	}
+	dbQuery = applyCollectRecordPublishStatusFilter(dbQuery, query)
 	var total int64
 	if err := dbQuery.Count(&total).Error; err != nil {
 		return 0, err
@@ -233,6 +304,7 @@ func (r *CollectRecordRepository) ListByQuery(query collectDTO.CollectRecordQuer
 	if value := strings.TrimSpace(query.Status); value != "" {
 		dbQuery = dbQuery.Where("status = ?", value)
 	}
+	dbQuery = applyCollectRecordPublishStatusFilter(dbQuery, query)
 	var entities []*CollectRecord
 	if err := dbQuery.Order("id DESC").Offset((pageIndex - 1) * pageSize).Limit(pageSize).Find(&entities).Error; err != nil {
 		return nil, err

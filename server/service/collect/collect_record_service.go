@@ -23,7 +23,11 @@ func (s *CollectService) ListCollectRecords(query collectDTO.CollectRecordQueryD
 	if err != nil {
 		return nil, err
 	}
-	return baseDTO.BuildPage(int(total), db.ToDTOs[collectDTO.CollectRecordDTO](entities)), nil
+	data := db.ToDTOs[collectDTO.CollectRecordDTO](entities)
+	if err := s.fillCollectRecordPublishStatuses(data, query.CollectBatchID, query.AppUserID); err != nil {
+		return nil, err
+	}
+	return baseDTO.BuildPage(int(total), data), nil
 }
 
 func (s *CollectService) ListCollectRecordsByBatch(batchID uint, query collectDTO.CollectRecordQueryDTO) (*baseDTO.PageDTO[collectDTO.CollectRecordDTO], error) {
@@ -345,4 +349,28 @@ func (s *CollectService) DeleteCollectRecord(id uint) error {
 	entity.Active = 0
 	_, err = s.collectRecordRepository.SaveOrUpdate(entity)
 	return err
+}
+
+func (s *CollectService) fillCollectRecordPublishStatuses(items []*collectDTO.CollectRecordDTO, batchID, appUserID uint64) error {
+	if len(items) == 0 || batchID == 0 || s.publishTaskRepository == nil {
+		return nil
+	}
+	sourceProductIDs := make([]string, 0, len(items))
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		sourceProductIDs = append(sourceProductIDs, item.SourceProductID)
+	}
+	statusMap, err := s.publishTaskRepository.ListSourceStatuses(batchID, appUserID, sourceProductIDs)
+	if err != nil {
+		return err
+	}
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		item.PublishStatus = statusMap[strings.TrimSpace(item.SourceProductID)]
+	}
+	return nil
 }

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { EyeOutlined } from "@ant-design/icons";
-import { Badge, Button, Progress, Space, Tag, Tooltip, Typography } from "antd";
+import { Button, Progress, Space, Tooltip, Typography } from "antd";
 import { CrudManagementPanel } from "../../../components/CrudManagementPanel";
 import type { CrudField, CrudOption, CrudTableColumn } from "../../../components/CrudManagementPanel";
 import { fetchShops, type ShopRecord } from "../../../shop/list/api/shop.api";
@@ -18,32 +18,10 @@ import {
 
 const { Text } = Typography;
 
-const statusOptions: CrudOption[] = [
-  { label: "待选品", value: "PENDING" },
-  { label: "选品中", value: "RUNNING" },
-  { label: "成功", value: "SUCCESS" },
-  { label: "失败", value: "FAILED" },
-];
-
 function buildCollectAccountLabel(shop: ShopRecord) {
   const displayName = shop.name || shop.nickname || shop.remark || shop.code || `账号 #${shop.id}`;
   const platform = shop.platform ? ` · ${shop.platform}` : "";
   return `${displayName}${platform}`;
-}
-
-function renderBatchStatus(value: unknown) {
-  const status = String(value || "PENDING").toUpperCase();
-  const statusMap: Record<string, { text: string; color: "default" | "processing" | "success" | "error"; tag: string }> = {
-    PENDING: { text: "待选品", color: "default", tag: "default" },
-    RUNNING: { text: "选品中", color: "processing", tag: "processing" },
-    SUCCESS: { text: "已完成", color: "success", tag: "success" },
-    FAILED: { text: "异常", color: "error", tag: "error" },
-  };
-  const current = statusMap[status] ?? { text: status, color: "default" as const, tag: "default" };
-
-  return (
-    <Badge status={current.color} text={<Tag color={current.tag} className="manager-status-tag">{current.text}</Tag>} />
-  );
 }
 
 function renderCollectCount(value: unknown) {
@@ -128,7 +106,6 @@ export function CollectBatchManagementPanel() {
         options: collectAccountOptions,
       },
       { name: "name", label: "批次名称", required: true },
-      { name: "status", label: "状态", type: "select", options: statusOptions },
       { name: "collectedCount", label: "选品数量", type: "number", min: 0, precision: 0 },
     ],
     [collectAccountOptions],
@@ -179,12 +156,6 @@ export function CollectBatchManagementPanel() {
         },
       },
       {
-        name: "status",
-        label: "状态",
-        width: 130,
-        render: renderBatchStatus,
-      },
-      {
         name: "collectedCount",
         label: "选品数量",
         width: 150,
@@ -205,15 +176,13 @@ export function CollectBatchManagementPanel() {
       <CrudManagementPanel<CollectBatchRecord, CollectBatchPayload>
         title="选品批次"
         createText="新增选品批次"
-        description="集中管理选品来源、批次状态和采集资产，面向电商运营团队的日常复盘、排期与发布前准备。"
+        description="集中管理选品来源和采集资产，面向电商运营团队的日常复盘、排期与发布前准备。"
         tableTitle="批次资产列表"
-        tableSubtitle="按批次沉淀选品结果，优先关注进行中、失败和高产出的选品集合。"
+        tableSubtitle="按批次沉淀选品结果，优先关注高产出的选品集合。"
         searchPlaceholder="批次名称"
         searchParam="name"
         fields={fields}
         columns={columns}
-        statusField="status"
-        statusOptions={statusOptions}
         actionWidth={172}
         rowActions={(record) => (
           <Tooltip title="详情">
