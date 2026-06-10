@@ -3,6 +3,7 @@ package initialization
 import (
 	"common/middleware/db"
 	"common/middleware/redis"
+	"common/middleware/storage/oss"
 	"common/middleware/vipper"
 	"context"
 	"fmt"
@@ -62,26 +63,25 @@ var initializers = []Initializer{
 		},
 	},
 
-	// {
-	// 	Order: OssInit,
-	// 	Name:  "Router",
-	// 	InitFn: func() error {
-	// 		dirPrefix := vipper.GetString("oss.dirPrefix")
-	// 		bucketName := vipper.GetString("oss.bucketName")
-	// 		accessKeyId := vipper.GetString("oss.accessKeyId")
-	// 		accessKeySecret := vipper.GetString("oss.accessKeySecret")
-	// 		endpoint := vipper.GetString("oss.endpoint")
-	// 		ossEntity := &oss.OssEntity{
-	// 			DirPrefix:       dirPrefix,
-	// 			Endpoint:        endpoint,
-	// 			BucketName:      bucketName,
-	// 			AccessKeyId:     accessKeyId,
-	// 			AccessKeySecret: accessKeySecret,
-	// 		}
-	// 		oss.Setup(ossEntity)
-	// 		return nil
-	// 	},
-	// },
+	{
+		Order: OssInit,
+		Name:  "OSS",
+		InitFn: func() error {
+			ossEntity := &oss.OssEntity{
+				Enabled:         vipper.GetBool("oss.enabled"),
+				DirPrefix:       vipper.GetString("oss.dirPrefix"),
+				Endpoint:        vipper.GetString("oss.endpoint"),
+				BucketName:      vipper.GetString("oss.bucketName"),
+				AccessKeyId:     vipper.GetString("oss.accessKeyId"),
+				AccessKeySecret: vipper.GetString("oss.accessKeySecret"),
+				ExpireTime:      vipper.GetInt64("oss.expireTime"),
+				CallbackUrl:     vipper.GetString("oss.callbackUrl"),
+				TokenExpireTime: vipper.GetInt64("oss.tokenExpireTime"),
+			}
+			oss.Setup(ossEntity)
+			return nil
+		},
+	},
 	// {
 	// 	Order:  IpManagerInit,
 	// 	Name:   "IP Manager",

@@ -2,14 +2,19 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  AppstoreOutlined,
   ArrowLeftOutlined,
   ArrowRightOutlined,
+  CheckCircleOutlined,
+  ClockCircleOutlined,
   CloseOutlined,
   DownloadOutlined,
   EditOutlined,
   FolderOpenOutlined,
   PlayCircleOutlined,
   ReloadOutlined,
+  SettingOutlined,
+  ShopOutlined,
   StopOutlined,
 } from "@ant-design/icons";
 import {
@@ -1628,6 +1633,93 @@ export function ProductPublishModal({
     [publishQueue],
   );
 
+  const selectedBatchTotalText = batchStatsLoading
+    ? "统计中..."
+    : batchStatsMap[selectedBatchId] != null
+      ? `${batchStatsMap[selectedBatchId]!.totalCollectCount} 条`
+      : selectedBatch
+        ? `${selectedBatch.collectedCount ?? 0} 条`
+        : "—";
+
+  const selectedBatchFavoriteText = batchStatsLoading
+    ? "统计中..."
+    : batchStatsMap[selectedBatchId] != null
+      ? `${batchStatsMap[selectedBatchId]!.totalFavoriteCount} 条`
+      : "—";
+
+  const publishScopeCount = showBatchHistory
+    ? (selectedBatchRepublishStats?.totalCount ?? runningPublishStats.total)
+    : runningPublishStats.total;
+
+  const modalTitleNode = (
+    <div className="publish-modal-title">
+      <div>
+        <div className="publish-modal-kicker">商品发布工作台</div>
+        <div className="publish-modal-heading">批量发布商品</div>
+      </div>
+      <div className="publish-title-meta">
+        <Tag color={publishRunning ? "processing" : "default"}>
+          {publishRunning ? "发布中" : "流程配置"}
+        </Tag>
+        {selectedBatchId > 0 ? <span>批次 #{selectedBatchId}</span> : null}
+      </div>
+    </div>
+  );
+
+  const renderMetricCard = (
+    label: string,
+    value: string | number,
+    tone: "primary" | "success" | "warning" | "danger" | "neutral" = "neutral",
+  ) => (
+    <div className={`publish-metric-card publish-metric-card-${tone}`}>
+      <div className="publish-metric-value">{value}</div>
+      <div className="publish-metric-label">{label}</div>
+    </div>
+  );
+
+  const renderContextRail = () => (
+    <div className="publish-context-rail">
+      <div className="publish-context-item">
+        <AppstoreOutlined />
+        <div>
+          <div className="publish-context-label">选品来源</div>
+          <div className="publish-context-value">{selectedBatch?.name ?? "待选择批次"}</div>
+        </div>
+      </div>
+      <div className="publish-context-item">
+        <ShopOutlined />
+        <div>
+          <div className="publish-context-label">目标店铺</div>
+          <div className="publish-context-value">
+            {selectedTargetShopId > 0 ? shopNameMap.get(selectedTargetShopId) ?? `#${selectedTargetShopId}` : "待选择店铺"}
+          </div>
+        </div>
+      </div>
+      <div className="publish-context-item">
+        <SettingOutlined />
+        <div>
+          <div className="publish-context-label">发布策略</div>
+          <div className="publish-context-value">
+            {priceSettings.strategy === "immediate" ? "立即上架" : "放入仓库"} · ×{priceSettings.floatRatio} + {priceSettings.floatAmount} 元
+          </div>
+        </div>
+      </div>
+      <div className="publish-context-item">
+        <ClockCircleOutlined />
+        <div>
+          <div className="publish-context-label">任务状态</div>
+          <div className="publish-context-value">
+            {step4Phase === "running"
+              ? `${runningPublishStats.progress}% 完成`
+              : step4Phase === "recovery"
+                ? "可恢复"
+                : "准备中"}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
   const handlePublishLogin = async (taskId: number, shopId: number) => {
     if (handlingLogin) return;
     setHandlingLogin(true);
@@ -1662,25 +1754,38 @@ export function ProductPublishModal({
     <>
       <Modal
         wrapClassName="manager-publish-modal"
-        title="商品发布"
+        title={modalTitleNode}
         open={open}
         onCancel={onCancel}
         maskClosable={false}
         keyboard={false}
         footer={null}
-        width={760}
+        width={1080}
         destroyOnClose={false}
       >
-        <div style={{ padding: "16px 0 8px" }}>
+        <div className="publish-workbench">
+          {renderContextRail()}
+
           <Steps
             current={displayedStep}
             items={stepItems}
-            style={{ marginBottom: 36 }}
+            className="publish-steps"
+            labelPlacement="vertical"
           />
+
+          <div className="publish-step-surface">
 
           {currentStep === 1 && (
             <div>
-              <div className="manager-panel-title" style={{ marginBottom: 12 }}>选择选品批次</div>
+              <div className="publish-section-header">
+                <div>
+                  <div className="manager-panel-title">选择选品批次</div>
+                  <div className="manager-muted" style={{ marginTop: 6, fontSize: 13 }}>
+                    先确认要发布的选品池，系统只会发布已收藏且去重后的商品。
+                  </div>
+                </div>
+                {renderMetricCard("可选批次", collectBatches.length, "primary")}
+              </div>
               {!isCollectionEntry ? (
                 <div className="manager-muted" style={{ marginBottom: 20, fontSize: 13 }}>
                   当前仅支持按选品批次发起发布。
@@ -1705,26 +1810,19 @@ export function ProductPublishModal({
               />
 
               {selectedBatch && (
-                <div className="publish-info-card" style={{ marginTop: 20 }}>
+                <div className="publish-info-card publish-info-card-strong" style={{ marginTop: 20 }}>
+                  <div className="publish-metric-grid" style={{ marginBottom: 16 }}>
+                    {renderMetricCard("选品总数", selectedBatchTotalText, "primary")}
+                    {renderMetricCard("收藏商品", selectedBatchFavoriteText, "success")}
+                    {renderMetricCard("批次状态", selectedBatch.status || "—", "neutral")}
+                  </div>
                   <Descriptions size="small" column={2} colon>
                     <Descriptions.Item label="批次名称">{selectedBatch.name}</Descriptions.Item>
-                    <Descriptions.Item label="总选品数">
-                      {batchStatsLoading
-                        ? "统计中..."
-                        : batchStatsMap[selectedBatch.id] != null
-                          ? `${batchStatsMap[selectedBatch.id]!.totalCollectCount} 条`
-                          : `${selectedBatch.collectedCount ?? 0} 条`}
-                    </Descriptions.Item>
+                    <Descriptions.Item label="总选品数">{selectedBatchTotalText}</Descriptions.Item>
                     <Descriptions.Item label="所属店铺">
                       {shopNameMap.get(selectedBatch.shopId) ?? `#${selectedBatch.shopId}`}
                     </Descriptions.Item>
-                    <Descriptions.Item label="总收藏数">
-                      {batchStatsLoading
-                        ? "统计中..."
-                        : batchStatsMap[selectedBatch.id] != null
-                          ? `${batchStatsMap[selectedBatch.id]!.totalFavoriteCount} 条`
-                          : "—"}
-                    </Descriptions.Item>
+                    <Descriptions.Item label="总收藏数">{selectedBatchFavoriteText}</Descriptions.Item>
                     <Descriptions.Item label="状态">{selectedBatch.status}</Descriptions.Item>
                   </Descriptions>
                 </div>
@@ -1748,7 +1846,15 @@ export function ProductPublishModal({
           {/* ─── Step 2：选择目标店铺 ─────────────────────────────── */}
           {currentStep === 2 && (
             <div>
-              <div className="manager-panel-title" style={{ marginBottom: 12 }}>选择平台与店铺</div>
+              <div className="publish-section-header">
+                <div>
+                  <div className="manager-panel-title">选择平台与店铺</div>
+                  <div className="manager-muted" style={{ marginTop: 6, fontSize: 13 }}>
+                    目标店铺必须已授权且保持登录，发布任务会复用该店铺会话。
+                  </div>
+                </div>
+                {renderMetricCard("可发布店铺", publishShops.length, selectedTargetShopNeedsLogin ? "warning" : "primary")}
+              </div>
 
               <Select
                 value={selectedTargetPlatform}
@@ -1787,7 +1893,7 @@ export function ProductPublishModal({
               />
 
               {selectedTargetShopId > 0 && (
-                <div className="publish-info-card" style={{ marginTop: 20 }}>
+                <div className="publish-info-card publish-info-card-strong" style={{ marginTop: 20 }}>
                   {selectedTargetShopNotAuthorized ? (
                     <Alert
                       type="error"
@@ -1805,6 +1911,11 @@ export function ProductPublishModal({
                       description={<span>当前选中的店铺未登录，需要去店铺管理中重新<a onClick={() => { void handleShopLoginFromPublish(selectedTargetShopId); }} style={{ cursor: "pointer", textDecoration: "underline" }}>授权登录</a></span>}
                     />
                   ) : null}
+                  <div className="publish-metric-grid" style={{ marginBottom: 16 }}>
+                    {renderMetricCard("授权状态", selectedTargetShopNotAuthorized ? "未授权" : "已授权", selectedTargetShopNotAuthorized ? "danger" : "success")}
+                    {renderMetricCard("登录状态", selectedTargetShopNeedsLogin ? "未登录" : "已登录", selectedTargetShopNeedsLogin ? "warning" : "success")}
+                    {renderMetricCard("店铺 ID", selectedTargetShopId, "neutral")}
+                  </div>
                   <Descriptions size="small" column={2} colon>
                     <Descriptions.Item label="目标店铺">
                       {shopNameMap.get(selectedTargetShopId) ?? `#${selectedTargetShopId}`}
@@ -1848,89 +1959,91 @@ export function ProductPublishModal({
           {/* ─── Step 3：发布配置 ─────────────────────────────────── */}
           {currentStep === 3 && (
             <div>
-              <div className="manager-panel-title" style={{ marginBottom: 6 }}>发布配置</div>
-              <div className="manager-muted" style={{ marginBottom: 24, fontSize: 13 }}>
-                这里统一设置价格调整和发布策略，设置后会自动保存
+              <div className="publish-section-header">
+                <div>
+                  <div className="manager-panel-title">发布配置</div>
+                  <div className="manager-muted" style={{ marginTop: 6, fontSize: 13 }}>
+                    统一设置价格、品牌和上架策略，调整会自动保存到本机。
+                  </div>
+                </div>
+                {renderMetricCard("示例售价", `${(100 * priceSettings.floatRatio + priceSettings.floatAmount).toFixed(2)} 元`, "success")}
               </div>
 
-              <div style={{ marginBottom: 24 }}>
-                <div className="publish-field-label">发布策略</div>
-                <Select
-                  value={priceSettings.strategy}
-                  onChange={(value) => setPriceSettings((p) => ({ ...p, strategy: value }))}
-                  options={[
-                    { label: "放入仓库", value: "warehouse" },
-                    { label: "立即上架", value: "immediate" },
-                  ]}
-                  style={{ width: "100%" }}
-                  size="large"
-                />
-              </div>
+              <div className="publish-config-grid">
+                <div className="publish-config-panel">
+                  <div style={{ marginBottom: 24 }}>
+                    <div className="publish-field-label">发布策略</div>
+                    <Select
+                      value={priceSettings.strategy}
+                      onChange={(value) => setPriceSettings((p) => ({ ...p, strategy: value }))}
+                      options={[
+                        { label: "放入仓库", value: "warehouse" },
+                        { label: "立即上架", value: "immediate" },
+                      ]}
+                      style={{ width: "100%" }}
+                      size="large"
+                    />
+                  </div>
 
-              <div style={{ marginBottom: 24 }}>
-                <div className="publish-field-label">品牌配置</div>
-                <Radio.Group
-                  value={priceSettings.brandMode}
-                  onChange={(event) => {
-                    const nextValue = event.target.value as PublishBrandMode;
-                    setPriceSettings((current) => ({ ...current, brandMode: nextValue }));
-                  }}
-                  optionType="button"
-                  buttonStyle="solid"
-                  size="large"
-                >
-                  <Radio.Button value="none">无品牌</Radio.Button>
-                  <Radio.Button value="follow_source">跟随原商品</Radio.Button>
-                </Radio.Group>
-              </div>
+                  <div style={{ marginBottom: 24 }}>
+                    <div className="publish-field-label">品牌配置</div>
+                    <Radio.Group
+                      value={priceSettings.brandMode}
+                      onChange={(event) => {
+                        const nextValue = event.target.value as PublishBrandMode;
+                        setPriceSettings((current) => ({ ...current, brandMode: nextValue }));
+                      }}
+                      optionType="button"
+                      buttonStyle="solid"
+                      size="large"
+                    >
+                      <Radio.Button value="none">无品牌</Radio.Button>
+                      <Radio.Button value="follow_source">跟随原商品</Radio.Button>
+                    </Radio.Group>
+                  </div>
 
-              <div style={{ display: "flex", gap: 16, marginBottom: 24 }}>
-                <div style={{ flex: 1 }}>
-                  <div className="publish-field-label">浮动比例</div>
-                  <Input
-                    value={priceRatioInput}
-                    onChange={(event) => handlePriceRatioChange(event.target.value)}
-                    onBlur={commitPriceRatioInput}
-                    placeholder="例如 1.3"
-                    style={{ width: "100%" }}
-                    size="large"
-                    addonAfter="×"
-                  />
-                </div>
-                <div style={{ flex: 1 }}>
-                  <div className="publish-field-label">浮动金额</div>
-                  <Input
-                    value={priceAmountInput}
-                    onChange={(event) => handlePriceAmountChange(event.target.value)}
-                    onBlur={commitPriceAmountInput}
-                    placeholder="例如 0"
-                    style={{ width: "100%" }}
-                    size="large"
-                    addonAfter="元"
-                  />
-                </div>
-              </div>
+                  <div style={{ display: "flex", gap: 16, marginBottom: 16 }}>
+                    <div style={{ flex: 1 }}>
+                      <div className="publish-field-label">浮动比例</div>
+                      <Input
+                        value={priceRatioInput}
+                        onChange={(event) => handlePriceRatioChange(event.target.value)}
+                        onBlur={commitPriceRatioInput}
+                        placeholder="例如 1.3"
+                        style={{ width: "100%" }}
+                        size="large"
+                        addonAfter="×"
+                      />
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <div className="publish-field-label">浮动金额</div>
+                      <Input
+                        value={priceAmountInput}
+                        onChange={(event) => handlePriceAmountChange(event.target.value)}
+                        onBlur={commitPriceAmountInput}
+                        placeholder="例如 0"
+                        style={{ width: "100%" }}
+                        size="large"
+                        addonAfter="元"
+                      />
+                    </div>
+                  </div>
 
-              <div style={{ marginBottom: 16 }}>
-                <IconOnlyButton type="link" shape="default" icon={<ReloadOutlined />} tooltip="恢复默认值（×1.3 + 0 元）" style={{ paddingInline: 0 }} onClick={handleResetPriceSettings} />
-              </div>
+                  <IconOnlyButton type="link" shape="default" icon={<ReloadOutlined />} tooltip="恢复默认值（×1.3 + 0 元）" style={{ paddingInline: 0 }} onClick={handleResetPriceSettings} />
+                </div>
 
-              <div className="publish-info-card">
-                <div style={{ fontSize: 12, color: "var(--manager-text-faint)", marginBottom: 8 }}>配置预览</div>
-                <div style={{ fontSize: 14, fontWeight: 600, color: "var(--manager-text)", marginBottom: 6 }}>
-                  发布策略：{priceSettings.strategy === "immediate" ? "立即上架" : "放入仓库"}
-                </div>
-                <div style={{ fontSize: 14, fontWeight: 600, color: "var(--manager-text)", marginBottom: 6 }}>
-                  品牌配置：{priceSettings.brandMode === "none" ? "无品牌" : "跟随原商品"}
-                </div>
-                <div style={{ fontSize: 15, fontWeight: 600, color: "var(--manager-text)", marginBottom: 6 }}>
-                  最终价格 = 原价 × {priceSettings.floatRatio} + {priceSettings.floatAmount} 元
-                </div>
-                <div className="manager-muted" style={{ fontSize: 12 }}>
-                  示例：原价 100 元 → 约&nbsp;
-                  <strong style={{ color: "var(--manager-text)" }}>
-                    {(100 * priceSettings.floatRatio + priceSettings.floatAmount).toFixed(2)} 元
-                  </strong>
+                <div className="publish-info-card publish-config-preview">
+                  <div className="publish-preview-icon"><CheckCircleOutlined /></div>
+                  <div style={{ fontSize: 12, color: "var(--manager-text-faint)", marginBottom: 8 }}>配置预览</div>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: "var(--manager-text)", marginBottom: 8 }}>
+                    {priceSettings.strategy === "immediate" ? "立即上架" : "放入仓库"} · {priceSettings.brandMode === "none" ? "无品牌" : "跟随原商品"}
+                  </div>
+                  <div style={{ fontSize: 18, fontWeight: 800, color: "var(--manager-text)", marginBottom: 8 }}>
+                    原价 × {priceSettings.floatRatio} + {priceSettings.floatAmount} 元
+                  </div>
+                  <div className="manager-muted" style={{ fontSize: 12, lineHeight: 1.7 }}>
+                    示例：原价 100 元，发布价约为 {(100 * priceSettings.floatRatio + priceSettings.floatAmount).toFixed(2)} 元。若选择立即上架，请确认标题、图片、库存与店铺登录状态已准备好。
+                  </div>
                 </div>
               </div>
 
@@ -1952,6 +2065,15 @@ export function ProductPublishModal({
           {/* ─── Step 4：预览 & 发布进度 ──────────────────────────────── */}
           {currentStep === 4 && step4Phase === "preview" && (
             <div>
+              <div className="publish-section-header">
+                <div>
+                  <div className="manager-panel-title">发布前确认</div>
+                  <div className="manager-muted" style={{ marginTop: 6, fontSize: 13 }}>
+                    请确认发布范围、目标店铺和价格规则，确认后将创建批量发布任务。
+                  </div>
+                </div>
+                {renderMetricCard("待发布", publishQueue.length, publishQueue.length > 0 ? "primary" : "warning")}
+              </div>
               {selectedTargetShopNeedsLogin ? (
                 <Alert
                   type="warning"
@@ -1963,12 +2085,10 @@ export function ProductPublishModal({
               ) : null}
               {/* 汇总信息 */}
               <div className="publish-info-card" style={{ marginBottom: 20 }}>
-                <div style={{ display: "flex", gap: 32, alignItems: "center" }}>
-                  <div style={{ textAlign: "center" }}>
-                    <div style={{ fontSize: 32, fontWeight: 700, color: "var(--manager-primary, #1677ff)", lineHeight: 1 }}>
-                      {publishQueue.length}
-                    </div>
-                    <div className="manager-muted" style={{ fontSize: 12, marginTop: 4 }}>待发布条数</div>
+                <div style={{ display: "flex", gap: 24, alignItems: "center" }}>
+                  <div className="publish-hero-count">
+                    <div>{publishQueue.length}</div>
+                    <span>待发布条数</span>
                   </div>
                   <div style={{ flex: 1, borderLeft: "1px solid rgba(170,192,238,0.25)", paddingLeft: 24 }}>
                     <Descriptions size="small" column={2} colon>
@@ -1990,7 +2110,7 @@ export function ProductPublishModal({
                       <Descriptions.Item label="选品总数">
                         {selectedBatchRepublishStatsLoading
                           ? "正在统计喜欢的商品..."
-                          : `${showBatchHistory ? (selectedBatchRepublishStats?.totalCount ?? runningPublishStats.total) : runningPublishStats.total} 条`}
+                          : `${publishScopeCount} 条`}
                       </Descriptions.Item>
                     </Descriptions>
                   </div>
@@ -2048,6 +2168,15 @@ export function ProductPublishModal({
 
           {currentStep === 4 && step4Phase === "recovery" && (
             <div>
+              <div className="publish-section-header">
+                <div>
+                  <div className="manager-panel-title">恢复未完成任务</div>
+                  <div className="manager-muted" style={{ marginTop: 6, fontSize: 13 }}>
+                    系统检测到该批次有历史发布记录，你可以继续断点任务或重新发布。
+                  </div>
+                </div>
+                {renderMetricCard("历史任务", selectedBatchRepublishStats?.totalCount ?? 0, "warning")}
+              </div>
               <Alert
                 type="info"
                 showIcon
@@ -2057,12 +2186,12 @@ export function ProductPublishModal({
               />
 
               <div className="publish-info-card">
-                <Descriptions size="small" column={2} colon>
-                  <Descriptions.Item label="喜欢总数量">{selectedBatchRepublishStats?.totalCount ?? 0} 条</Descriptions.Item>
-                  <Descriptions.Item label="已发布成功">{selectedBatchRepublishStats?.successCount ?? 0} 条</Descriptions.Item>
-                  <Descriptions.Item label="未发布">{selectedBatchRepublishStats?.pendingCount ?? 0} 条</Descriptions.Item>
-                  <Descriptions.Item label="失败">{selectedBatchRepublishStats?.failedCount ?? 0} 条</Descriptions.Item>
-                </Descriptions>
+                <div className="publish-metric-grid">
+                  {renderMetricCard("喜欢总数量", selectedBatchRepublishStats?.totalCount ?? 0, "primary")}
+                  {renderMetricCard("已发布成功", selectedBatchRepublishStats?.successCount ?? 0, "success")}
+                  {renderMetricCard("未发布", selectedBatchRepublishStats?.pendingCount ?? 0, "warning")}
+                  {renderMetricCard("失败", selectedBatchRepublishStats?.failedCount ?? 0, "danger")}
+                </div>
               </div>
 
               <div className="publish-step-footer" style={{ justifyContent: "space-between" }}>
@@ -2134,10 +2263,10 @@ export function ProductPublishModal({
                     />
                   ) : null}
                   {/* 发布任务进度 */}
-                  <div style={{ marginBottom: 20 }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, marginBottom: 10 }}>
+                  <div className="publish-running-panel">
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, marginBottom: 16 }}>
                       <div>
-                        <span style={{ fontSize: 14, fontWeight: 600, color: "var(--manager-text)" }}>
+                        <span style={{ fontSize: 18, fontWeight: 800, color: "var(--manager-text)" }}>
                           发布任务进行中
                         </span>
                         <div className="manager-muted" style={{ fontSize: 12, marginTop: 4 }}>
@@ -2169,6 +2298,12 @@ export function ProductPublishModal({
                         <IconOnlyButton icon={<ReloadOutlined />} tooltip={selectedTargetShopNotAuthorized ? "店铺未授权，无法重新发布" : "重新发布"} disabled={selectedTargetShopNotAuthorized} onClick={handleRepublishAll} loading={stoppingAll} />
                       </div>
                     </div>
+                    <div className="publish-metric-grid" style={{ marginBottom: 16 }}>
+                      {renderMetricCard("总任务", runningPublishStats.total, "primary")}
+                      {renderMetricCard("成功", runningPublishStats.successCount, "success")}
+                      {renderMetricCard("待处理", runningPublishStats.pendingCount, "warning")}
+                      {renderMetricCard("失败", runningPublishStats.failedCount, runningPublishStats.failedCount > 0 ? "danger" : "neutral")}
+                    </div>
                     <Progress
                       percent={runningPublishStats.progress}
                       status={progressStatus}
@@ -2192,6 +2327,7 @@ export function ProductPublishModal({
               )}
             </div>
           )}
+          </div>
         </div>
       </Modal>
 
@@ -2226,15 +2362,255 @@ export function ProductPublishModal({
       <style jsx global>{`
         /* Modal 尺寸控制 */
         .manager-publish-modal .ant-modal {
-          top: 12vh;
+          top: 32px;
+          max-width: calc(100vw - 32px);
+        }
+
+        .manager-publish-modal .ant-modal-content {
+          padding: 0;
+          overflow: hidden;
+          border: 1px solid rgba(108, 124, 151, 0.16);
+          box-shadow: 0 24px 70px rgba(15, 23, 42, 0.18);
+        }
+
+        .manager-publish-modal .ant-modal-header {
+          margin: 0;
+          padding: 22px 28px 18px;
+          border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+          background: linear-gradient(180deg, rgba(248, 250, 252, 0.96), rgba(255, 255, 255, 0.92));
+        }
+
+        .manager-publish-modal .ant-modal-close {
+          top: 20px;
+          inset-inline-end: 22px;
+        }
+
+        .manager-publish-modal .ant-modal-body {
+          padding: 0;
+        }
+
+        .publish-modal-title {
+          display: flex;
+          align-items: flex-end;
+          justify-content: space-between;
+          gap: 20px;
+          padding-right: 40px;
+        }
+
+        .publish-modal-kicker {
+          color: var(--manager-primary, #1677ff);
+          font-size: 12px;
+          font-weight: 700;
+          letter-spacing: 0;
+          margin-bottom: 4px;
+        }
+
+        .publish-modal-heading {
+          color: var(--manager-text);
+          font-size: 20px;
+          font-weight: 800;
+          line-height: 1.2;
+        }
+
+        .publish-title-meta {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          color: var(--manager-text-faint);
+          font-size: 12px;
+          white-space: nowrap;
+        }
+
+        .publish-workbench {
+          padding: 20px 28px 24px;
+          background:
+            linear-gradient(180deg, rgba(248, 250, 252, 0.76), rgba(255, 255, 255, 0.96) 36%),
+            #fff;
+        }
+
+        .publish-context-rail {
+          display: grid;
+          grid-template-columns: repeat(4, minmax(0, 1fr));
+          gap: 10px;
+          margin-bottom: 20px;
+        }
+
+        .publish-context-item {
+          min-width: 0;
+          display: flex;
+          gap: 10px;
+          align-items: flex-start;
+          padding: 12px 14px;
+          border: 1px solid rgba(148, 163, 184, 0.2);
+          border-radius: 8px;
+          background: rgba(255, 255, 255, 0.8);
+        }
+
+        .publish-context-item .anticon {
+          color: var(--manager-primary, #1677ff);
+          margin-top: 3px;
+        }
+
+        .publish-context-label {
+          color: var(--manager-text-faint);
+          font-size: 12px;
+          line-height: 1.2;
+          margin-bottom: 5px;
+        }
+
+        .publish-context-value {
+          color: var(--manager-text);
+          font-size: 13px;
+          font-weight: 700;
+          line-height: 1.35;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+
+        .publish-steps {
+          padding: 4px 4px 18px;
+          margin-bottom: 14px;
+          border-bottom: 1px solid rgba(148, 163, 184, 0.16);
+        }
+
+        .publish-step-surface {
+          min-height: 460px;
+          padding: 8px 0 0;
+        }
+
+        .publish-section-header {
+          display: flex;
+          align-items: flex-start;
+          justify-content: space-between;
+          gap: 20px;
+          margin-bottom: 20px;
+        }
+
+        .publish-config-grid {
+          display: grid;
+          grid-template-columns: minmax(0, 1.5fr) minmax(280px, 0.85fr);
+          gap: 18px;
+          align-items: stretch;
+        }
+
+        .publish-config-panel {
+          padding: 18px 20px;
+          border-radius: 8px;
+          border: 1px solid rgba(148, 163, 184, 0.18);
+          background: rgba(255, 255, 255, 0.82);
+        }
+
+        .publish-config-preview {
+          position: relative;
+          min-height: 100%;
+          background: linear-gradient(145deg, rgba(22, 119, 255, 0.08), rgba(82, 196, 26, 0.08));
+        }
+
+        .publish-preview-icon {
+          width: 34px;
+          height: 34px;
+          display: grid;
+          place-items: center;
+          margin-bottom: 18px;
+          border-radius: 8px;
+          color: #237804;
+          background: rgba(82, 196, 26, 0.14);
+          font-size: 18px;
+        }
+
+        .publish-metric-grid {
+          display: grid;
+          grid-template-columns: repeat(4, minmax(0, 1fr));
+          gap: 10px;
+        }
+
+        .publish-metric-card {
+          min-width: 112px;
+          padding: 12px 14px;
+          border-radius: 8px;
+          border: 1px solid rgba(148, 163, 184, 0.18);
+          background: rgba(255, 255, 255, 0.72);
+        }
+
+        .publish-metric-value {
+          color: var(--manager-text);
+          font-size: 20px;
+          font-weight: 800;
+          line-height: 1.1;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+
+        .publish-metric-label {
+          color: var(--manager-text-faint);
+          font-size: 12px;
+          margin-top: 6px;
+        }
+
+        .publish-metric-card-primary {
+          border-color: rgba(22, 119, 255, 0.22);
+          background: rgba(22, 119, 255, 0.06);
+        }
+
+        .publish-metric-card-success {
+          border-color: rgba(82, 196, 26, 0.26);
+          background: rgba(82, 196, 26, 0.07);
+        }
+
+        .publish-metric-card-warning {
+          border-color: rgba(250, 173, 20, 0.28);
+          background: rgba(250, 173, 20, 0.08);
+        }
+
+        .publish-metric-card-danger {
+          border-color: rgba(255, 77, 79, 0.28);
+          background: rgba(255, 77, 79, 0.07);
+        }
+
+        .publish-hero-count {
+          width: 132px;
+          flex: 0 0 132px;
+          text-align: center;
+          padding: 18px 12px;
+          border-radius: 8px;
+          background: rgba(22, 119, 255, 0.07);
+          border: 1px solid rgba(22, 119, 255, 0.18);
+        }
+
+        .publish-hero-count div {
+          font-size: 42px;
+          font-weight: 800;
+          color: var(--manager-primary, #1677ff);
+          line-height: 1;
+        }
+
+        .publish-hero-count span {
+          display: block;
+          margin-top: 8px;
+          font-size: 12px;
+          color: var(--manager-text-faint);
+        }
+
+        .publish-running-panel {
+          margin-bottom: 20px;
+          padding: 18px 20px;
+          border-radius: 8px;
+          border: 1px solid rgba(148, 163, 184, 0.18);
+          background: rgba(248, 250, 252, 0.74);
         }
 
         /* 步骤内容卡片 */
         .publish-info-card {
           padding: 16px 20px;
-          border-radius: 10px;
+          border-radius: 8px;
           background: rgba(170, 192, 238, 0.08);
           border: 1px solid rgba(170, 192, 238, 0.2);
+        }
+
+        .publish-info-card-strong {
+          background: rgba(248, 250, 252, 0.78);
         }
 
         /* 字段标签 */
@@ -2248,7 +2624,9 @@ export function ProductPublishModal({
         .publish-step-footer {
           display: flex;
           justify-content: flex-end;
-          margin-top: 28px;
+          margin-top: 24px;
+          padding-top: 18px;
+          border-top: 1px solid rgba(148, 163, 184, 0.14);
         }
 
         .publish-row-captcha-pending > td {
@@ -2267,6 +2645,43 @@ export function ProductPublishModal({
           cursor: help;
           text-decoration: underline dotted rgba(255, 77, 79, 0.55);
           text-underline-offset: 2px;
+        }
+
+        @media (max-width: 900px) {
+          .publish-context-rail,
+          .publish-metric-grid,
+          .publish-config-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+          }
+        }
+
+        @media (max-width: 640px) {
+          .manager-publish-modal .ant-modal {
+            top: 12px;
+            max-width: calc(100vw - 16px);
+          }
+
+          .manager-publish-modal .ant-modal-header,
+          .publish-workbench {
+            padding-inline: 16px;
+          }
+
+          .publish-modal-title,
+          .publish-section-header {
+            flex-direction: column;
+            align-items: stretch;
+          }
+
+          .publish-context-rail,
+          .publish-metric-grid,
+          .publish-config-grid {
+            grid-template-columns: 1fr;
+          }
+
+          .publish-hero-count {
+            width: 100%;
+            flex-basis: auto;
+          }
         }
 
       `}</style>

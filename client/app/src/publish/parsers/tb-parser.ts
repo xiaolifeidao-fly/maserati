@@ -1,4 +1,4 @@
-import { convertTbToStandard } from '@product/standard-product';
+import { convertSourceProductRawDataToTargetData } from '@product/standard-product';
 import { SourceType } from '../types/publish-task';
 import type { RawSourceData, NormalizedProduct } from '../types/source-data';
 import type { ISourceParser } from './parser.interface';
@@ -16,6 +16,6 @@ export class TbSourceParser implements ISourceParser {
   readonly sourceType = SourceType.TB;
 
   parse(raw: RawSourceData): NormalizedProduct {
-    return convertTbToStandard(raw);
+    return convertSourceProductRawDataToTargetData('tb', raw);
   }
 }

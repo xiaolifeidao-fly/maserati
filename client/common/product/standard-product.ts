@@ -49,6 +49,15 @@ export interface StandardProductData {
   logistics: LogisticsInfo;
 }
 
+export type RawSourceProductData = Record<string, unknown>;
+export type TargetProductData = StandardProductData;
+
+export interface SourceProductConvertMeta {
+  productName?: string;
+  sourceProductId?: string;
+  sourceUrl?: string;
+}
+
 function tryImageList(val: unknown): string[] {
   if (!Array.isArray(val)) return [];
   return val
@@ -75,6 +84,46 @@ function normalizeImageUrl(url: unknown): string {
   return text;
 }
 
+function utf8Bytes(text: string): Uint8Array {
+  if (typeof TextEncoder !== "undefined") {
+    return new TextEncoder().encode(text);
+  }
+
+  const runtimeBuffer = (globalThis as { Buffer?: { from(value: string, encoding?: string): Uint8Array } }).Buffer;
+  if (runtimeBuffer) {
+    return runtimeBuffer.from(text, "utf8");
+  }
+
+  return Uint8Array.from(Array.from(text).map((char) => char.charCodeAt(0) & 0xff));
+}
+
+function base64Bytes(text: string): Uint8Array {
+  if (typeof atob === "function") {
+    const binary = atob(text);
+    return Uint8Array.from(Array.from(binary).map((char) => char.charCodeAt(0)));
+  }
+
+  const runtimeBuffer = (globalThis as { Buffer?: { from(value: string, encoding?: string): Uint8Array } }).Buffer;
+  if (runtimeBuffer) {
+    return runtimeBuffer.from(text, "base64");
+  }
+
+  return new Uint8Array();
+}
+
+function decodeUtf8(bytes: Uint8Array): string {
+  if (typeof TextDecoder !== "undefined") {
+    return new TextDecoder().decode(bytes);
+  }
+
+  const runtimeBuffer = (globalThis as { Buffer?: { from(value: Uint8Array): { toString(encoding?: string): string } } }).Buffer;
+  if (runtimeBuffer) {
+    return runtimeBuffer.from(bytes).toString("utf8");
+  }
+
+  return Array.from(bytes).map((byte) => String.fromCharCode(byte)).join("");
+}
+
 // Taobao encrypts prices as [keyId#seq#base64Data#].
 // keyId is embedded in the price field itself and used directly as the XOR key.
 function decryptTbEncryptedPrice(text: string): string | null {
@@ -84,13 +133,13 @@ function decryptTbEncryptedPrice(text: string): string | null {
   }
   try {
     const [, keyId, base64Data] = match;
-    const keyBytes = Buffer.from(keyId, "utf8");
-    const cipherBytes = Buffer.from(base64Data, "base64");
-    const plainBytes = Buffer.alloc(cipherBytes.length);
+    const keyBytes = utf8Bytes(keyId);
+    const cipherBytes = base64Bytes(base64Data);
+    const plainBytes = new Uint8Array(cipherBytes.length);
     for (let i = 0; i < cipherBytes.length; i++) {
       plainBytes[i] = cipherBytes[i] ^ keyBytes[i % keyBytes.length];
     }
-    const plain = plainBytes.toString("utf8").replace(/[^\d.]/g, "");
+    const plain = decodeUtf8(plainBytes).replace(/[^\d.]/g, "");
     const price = parseFloat(plain);
     if (!Number.isFinite(price)) {
       return null;
@@ -546,11 +595,7 @@ function convertExternalPddToStandard(
 
 export function convertPxxToStandard(
   rawData: Record<string, unknown>,
-  meta?: {
-    productName?: string;
-    sourceProductId?: string;
-    sourceUrl?: string;
-  }
+  meta?: SourceProductConvertMeta
 ): StandardProductData {
   if (isExternalPddRawData(rawData)) {
     return convertExternalPddToStandard(rawData, meta);
@@ -834,11 +879,7 @@ export function convertPxxToStandard(
 
 export function convertTbToStandard(
   rawData: Record<string, unknown>,
-  meta?: {
-    productName?: string;
-    sourceProductId?: string;
-    sourceUrl?: string;
-  }
+  meta?: SourceProductConvertMeta
 ): StandardProductData {
   const detailContainer = (rawData.detailData as Record<string, unknown> | undefined) ?? rawData;
   const detailRes = ((detailContainer.res as Record<string, unknown> | undefined) ?? detailContainer) as Record<string, unknown>;
@@ -897,12 +938,16 @@ export function convertTbToStandard(
 export function convertRawDataToStandard(
   sourceType: CollectSourceType,
   rawData: Record<string, unknown>,
-  meta?: {
-    productName?: string;
-    sourceProductId?: string;
-    sourceUrl?: string;
-  }
+  meta?: SourceProductConvertMeta
 ): StandardProductData {
+  return convertSourceProductRawDataToTargetData(sourceType, rawData, meta);
+}
+
+export function convertSourceProductRawDataToTargetData(
+  sourceType: CollectSourceType,
+  rawData: RawSourceProductData,
+  meta?: SourceProductConvertMeta
+): TargetProductData {
   switch (sourceType) {
     case "pxx":
       return convertPxxToStandard(rawData, meta);

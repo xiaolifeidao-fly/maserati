@@ -236,6 +236,9 @@ func (s *PublishTaskManagementService) UpdateTask(id uint, req *publishTaskDTO.U
 	if req.OuterItemID != nil {
 		entity.OuterItemID = strings.TrimSpace(*req.OuterItemID)
 	}
+	if req.LogOssPath != nil {
+		entity.LogOssPath = strings.TrimSpace(*req.LogOssPath)
+	}
 	if req.ProductTitle != nil {
 		successPayload.ProductTitle = strings.TrimSpace(*req.ProductTitle)
 	}

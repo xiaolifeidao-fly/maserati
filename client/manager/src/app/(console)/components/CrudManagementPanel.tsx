@@ -87,6 +87,14 @@ interface CrudManagementPanelProps<R extends CrudRecord, P extends Record<string
   createText: string;
   searchPlaceholder: string;
   searchParam: string;
+  description?: string;
+  tableTitle?: string;
+  tableSubtitle?: string;
+  highlights?: Array<{
+    label: string;
+    value: ReactNode;
+    hint?: string;
+  }>;
   fields: CrudField<R>[];
   columns: CrudTableColumn<R>[];
   api: CrudApi<R, P>;
@@ -141,6 +149,10 @@ export function CrudManagementPanel<R extends CrudRecord, P extends Record<strin
   createText,
   searchPlaceholder,
   searchParam,
+  description,
+  tableTitle,
+  tableSubtitle,
+  highlights,
   fields,
   columns,
   api,
@@ -185,17 +197,20 @@ export function CrudManagementPanel<R extends CrudRecord, P extends Record<strin
     void loadRecords();
   }, []);
 
-  const stats = useMemo(
-    () => [
+  const stats = useMemo(() => {
+    if (highlights?.length) {
+      return highlights;
+    }
+
+    return [
       { label: `${title}总数`, value: total },
       { label: "当前页数量", value: records.length },
       {
         label: "最近更新",
         value: records[0]?.updatedTime ? String(records[0].updatedTime).slice(0, 10) : "-",
       },
-    ],
-    [records, title, total],
-  );
+    ];
+  }, [highlights, records, title, total]);
 
   const tableColumns: ColumnsType<R> = [
     {
@@ -313,22 +328,44 @@ export function CrudManagementPanel<R extends CrudRecord, P extends Record<strin
 
   return (
     <div className="manager-page-stack">
+      <section className="manager-page-heading">
+        <div>
+          <div className="manager-section-label">Commerce Operations</div>
+          <h1>{title}</h1>
+          {description ? <Text>{description}</Text> : null}
+        </div>
+        <Button
+          type="primary"
+          icon={<PlusOutlined />}
+          onClick={() => {
+            setEditingRecord(null);
+            form.resetFields();
+            setModalOpen(true);
+          }}
+        >
+          {createText}
+        </Button>
+      </section>
+
       <section
         className="manager-stats-grid"
-        style={{ gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))" }}
+        style={{ gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))" }}
       >
         {stats.map((item) => (
           <div key={item.label} className="manager-data-card">
             <div className="manager-section-label">{item.label}</div>
-            <div className="manager-display-title" style={{ fontSize: 32, marginTop: 12 }}>
+            <div className="manager-display-title" style={{ fontSize: 30, marginTop: 12 }}>
               {item.value}
             </div>
+            {"hint" in item && item.hint ? (
+              <Text className="manager-card-hint">{item.hint}</Text>
+            ) : null}
           </div>
         ))}
       </section>
 
-      <section className="manager-data-card">
-        <div style={{ display: "flex", gap: 12, flexWrap: "wrap", justifyContent: "space-between" }}>
+      <section className="manager-data-card manager-filter-card">
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap", justifyContent: "space-between", alignItems: "center" }}>
           <Space wrap size={12}>
             <Input
               className="manager-filter-input"
@@ -346,7 +383,7 @@ export function CrudManagementPanel<R extends CrudRecord, P extends Record<strin
                 value={statusValue}
                 onChange={setStatusValue}
                 options={statusOptions}
-                style={{ width: 180 }}
+              style={{ width: 180 }}
               />
             ) : null}
             <Button type="primary" icon={<SearchOutlined />} onClick={() => void loadRecords(filterQuery())}>
@@ -358,30 +395,22 @@ export function CrudManagementPanel<R extends CrudRecord, P extends Record<strin
           </Space>
 
           <Space wrap>
-            <Tag style={{ color: "var(--manager-text-soft)", background: "rgba(170,192,238,0.16)", border: "none" }}>
+            <Tag className="manager-count-tag">
               共 {total} 条
             </Tag>
-            <Button
-              type="primary"
-              icon={<PlusOutlined />}
-              onClick={() => {
-                setEditingRecord(null);
-                form.resetFields();
-                setModalOpen(true);
-              }}
-              style={{
-                color: "#ffffff",
-                border: "none",
-                background: "linear-gradient(135deg, #5d7df6 0%, #6d8cff 100%)",
-              }}
-            >
-              {createText}
-            </Button>
           </Space>
         </div>
       </section>
 
       <section className="manager-data-card manager-table">
+        {tableTitle || tableSubtitle ? (
+          <div className="manager-table-heading">
+            <div>
+              {tableTitle ? <h2>{tableTitle}</h2> : null}
+              {tableSubtitle ? <Text>{tableSubtitle}</Text> : null}
+            </div>
+          </div>
+        ) : null}
         <Table<R>
           rowKey="id"
           loading={loading}
@@ -399,6 +428,7 @@ export function CrudManagementPanel<R extends CrudRecord, P extends Record<strin
       </section>
 
       <Modal
+        className="manager-form-skin"
         title={editingRecord ? `编辑${title}` : createText}
         open={modalOpen}
         okText="保存"

@@ -20,6 +20,7 @@ type PublishTaskDTO struct {
 	CurrentStepCode string `json:"currentStepCode"`
 	ErrorMessage    string `json:"errorMessage"`
 	OuterItemID     string `json:"outerItemId"`
+	LogOssPath      string `json:"-"`
 	Remark          string `json:"remark"`
 }
 
@@ -41,6 +42,7 @@ type UpdatePublishTaskDTO struct {
 	CurrentStepCode *string `json:"currentStepCode,omitempty"`
 	ErrorMessage    *string `json:"errorMessage,omitempty"`
 	OuterItemID     *string `json:"outerItemId,omitempty"`
+	LogOssPath      *string `json:"logOssPath,omitempty"`
 	ProductTitle    *string `json:"productTitle,omitempty"`
 	TbCatID         *string `json:"tbCatId,omitempty"`
 	CategoryInfo    *string `json:"categoryInfo,omitempty"`
@@ -75,6 +77,31 @@ type UploadPublishLogDTO struct {
 
 type UploadPublishLogResultDTO struct {
 	Path string `json:"path"`
+}
+
+type PublishTaskLogDTO struct {
+	Path      string `json:"-"`
+	FileName  string `json:"fileName"`
+	Content   string `json:"content"`
+	Size      int    `json:"size"`
+	Truncated bool   `json:"truncated"`
+}
+
+type PublishTaskLogFileDTO struct {
+	FileName    string
+	ContentType string
+	Data        []byte
+}
+
+type PublishStepWithLogDTO struct {
+	PublishStepDTO
+	Log *PublishTaskLogDTO `json:"log,omitempty"`
+}
+
+type PublishTaskDetailDTO struct {
+	Task  *PublishTaskDTO          `json:"task"`
+	Steps []*PublishStepWithLogDTO `json:"steps"`
+	Log   *PublishTaskLogDTO       `json:"log,omitempty"`
 }
 
 // ─── PublishStep DTOs ─────────────────────────────────────────────────────────

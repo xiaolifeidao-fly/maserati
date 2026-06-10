@@ -300,6 +300,40 @@ func (s *CollectService) GetCollectRecordRawDataBySource(query collectDTO.Collec
 	}, nil
 }
 
+func (s *CollectService) GetCollectRecordRawDataByID(query collectDTO.CollectRecordRawDataByIDDTO) (*collectDTO.CollectRecordRawDataDTO, error) {
+	if query.RecordID == 0 {
+		return nil, fmt.Errorf("recordId is required")
+	}
+	entity, err := s.collectRecordRepository.FindById(uint(query.RecordID))
+	if err != nil {
+		return nil, err
+	}
+	if entity.Active == 0 {
+		return nil, gorm.ErrRecordNotFound
+	}
+	if query.CollectBatchID > 0 && entity.CollectBatchID != query.CollectBatchID {
+		return nil, gorm.ErrRecordNotFound
+	}
+	if strings.TrimSpace(entity.RawDataURL) == "" {
+		return nil, gorm.ErrRecordNotFound
+	}
+	rawBytes, err := oss.Get(entity.RawDataURL)
+	if err != nil {
+		return nil, err
+	}
+
+	var rawData any
+	if err := json.Unmarshal(rawBytes, &rawData); err != nil {
+		rawData = string(rawBytes)
+	}
+	return &collectDTO.CollectRecordRawDataDTO{
+		SourceProductID: entity.SourceProductID,
+		SourcePlatform:  "",
+		RawDataURL:      entity.RawDataURL,
+		RawData:         rawData,
+	}, nil
+}
+
 func (s *CollectService) DeleteCollectRecord(id uint) error {
 	entity, err := s.collectRecordRepository.FindById(id)
 	if err != nil {

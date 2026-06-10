@@ -30,3 +30,4 @@ package
 old_source_code
 old_client_code
 */**/application.properties
+client/app/dist/*

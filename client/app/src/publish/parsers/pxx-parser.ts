@@ -1,4 +1,4 @@
-import { convertPxxToStandard } from '@product/standard-product';
+import { convertSourceProductRawDataToTargetData } from '@product/standard-product';
 import { SourceType } from '../types/publish-task';
 import type { RawSourceData, NormalizedProduct } from '../types/source-data';
 import type { ISourceParser } from './parser.interface';
@@ -15,6 +15,6 @@ export class PxxSourceParser implements ISourceParser {
   readonly sourceType = SourceType.PXX;
 
   parse(raw: RawSourceData): NormalizedProduct {
-    return convertPxxToStandard(raw);
+    return convertSourceProductRawDataToTargetData('pxx', raw);
   }
 }

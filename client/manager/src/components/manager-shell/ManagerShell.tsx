@@ -11,7 +11,7 @@ import {
   ShoppingOutlined,
   TeamOutlined,
 } from "@ant-design/icons";
-import { Avatar, Badge, Button, Layout, Menu, Space, Typography } from "antd";
+import { Avatar, Badge, Button, Divider, Layout, Menu, Space, Typography } from "antd";
 import type { MenuProps } from "antd";
 import { usePathname, useRouter } from "next/navigation";
 import { PropsWithChildren, useMemo } from "react";
@@ -179,44 +179,49 @@ export function ManagerShell({ children }: ManagerShellProps) {
   };
 
   return (
-    <div style={{ minHeight: "100vh", padding: 24 }}>
+    <div className="manager-shell-root">
       <div className="manager-shell-surface">
         <Layout
+          className="manager-shell-layout"
           style={{
-            minHeight: "calc(100vh - 48px)",
+            minHeight: "100vh",
             background: "transparent",
-            gap: 20,
           }}
         >
           <Sider
-            width={248}
-            style={{
-              background: "transparent",
-            }}
+            className="manager-shell-sider"
+            width={240}
+            breakpoint="lg"
+            collapsedWidth={0}
+            style={{ background: "transparent" }}
           >
             <div
-              className="manager-shell-card manager-sidebar-card manager-stagger-1"
+              className="manager-sidebar-card manager-stagger-1"
               style={{
                 height: "100%",
-                borderRadius: 30,
-                padding: 20,
+                padding: "20px 14px",
                 display: "flex",
                 flexDirection: "column",
-                gap: 18,
+                gap: 12,
               }}
             >
-              <div>
-                <div className="manager-brand-kicker" style={{ color: "rgba(255,255,255,0.72)" }}>
-                  管理控制台
-                </div>
-                <Space align="start" size={12} style={{ marginTop: 18 }}>
+              <div className="manager-brand-block">
+                <div className="manager-brand-kicker">Management Console</div>
+                <Space align="center" size={10} style={{ marginTop: 16 }}>
                   <div className="manager-crest" />
                   <div className="manager-wordmark">
-                    <strong style={{ color: "#fff" }}>PHOENIX</strong>
-                    <span style={{ color: "rgba(255,255,255,0.72)" }}>云控制台</span>
+                    <strong>MASERATI</strong>
+                    <span>运营管理平台</span>
                   </div>
                 </Space>
+                <div className="manager-brand-meta">
+                  <span>商品</span>
+                  <span>店铺</span>
+                  <span>选品</span>
+                </div>
               </div>
+
+              <Divider className="manager-sidebar-divider" />
 
               <Menu
                 className="manager-shell-menu"
@@ -229,10 +234,7 @@ export function ManagerShell({ children }: ManagerShellProps) {
                     router.push(key);
                   }
                 }}
-                style={{
-                  fontSize: 15,
-                  marginTop: 8,
-                }}
+                style={{ fontSize: 14, flex: 1 }}
               />
             </div>
           </Sider>
@@ -243,117 +245,104 @@ export function ManagerShell({ children }: ManagerShellProps) {
               style={{
                 height: "auto",
                 lineHeight: "normal",
-                padding: 0,
-                background: "transparent",
+                padding: "12px 20px",
+                background: "var(--manager-surface)",
+                borderBottom: "1px solid var(--manager-border)",
+                boxShadow: "var(--manager-shadow-sm)",
+                display: "grid",
+                gridTemplateColumns: "minmax(0, 1fr) auto",
+                gap: 16,
+                alignItems: "center",
               }}
             >
-              <div
-                className="manager-shell-card"
-                style={{
-                  borderRadius: 28,
-                  padding: 18,
-                  display: "grid",
-                  gridTemplateColumns: "minmax(0, 1fr) auto",
-                  gap: 16,
-                  alignItems: "center",
-                }}
-              >
-                <div style={{ minWidth: 0 }}>
-                  <div
-                    style={{
-                      fontSize: 13,
-                      fontWeight: 700,
-                      letterSpacing: "0.08em",
-                      color: "var(--manager-text-soft)",
-                      textTransform: "uppercase",
-                      marginBottom: 10,
-                    }}
-                  >
-                    快捷入口
-                  </div>
-                  <Space size={12} wrap style={{ width: "100%" }}>
-                    {quickActions.map((action) => {
-                      const isActive = activePath === action.key;
-
-                      return (
-                        <Button
-                          key={action.key}
-                          type={isActive ? "primary" : "default"}
-                          icon={action.icon}
-                          className={isActive ? "manager-soft-button" : undefined}
-                          onClick={() => router.push(action.key)}
-                          style={{
-                            height: 44,
-                            paddingInline: 18,
-                            borderRadius: 16,
-                            fontWeight: 700,
-                          }}
-                        >
-                          {action.label}
-                        </Button>
-                      );
-                    })}
-                  </Space>
+              <div style={{ minWidth: 0 }}>
+                <div className="manager-topbar-kicker">
+                  <span>快捷入口</span>
+                  <span>高频功能直达</span>
                 </div>
+                <Space className="manager-quick-actions" size={8} wrap style={{ width: "100%" }}>
+                  {quickActions.map((action) => {
+                    const isActive = activePath === action.key;
 
-                <Space size={12} wrap>
-                  <Badge dot offset={[-2, 2]}>
-                    <div
-                      style={{
-                        width: 52,
-                        height: 52,
-                        display: "grid",
-                        placeItems: "center",
-                        borderRadius: 16,
-                        background: "rgba(248,250,255,0.98)",
-                        border: "1px solid rgba(145,171,212,0.22)",
-                      }}
-                    >
-                      <BellOutlined style={{ color: "var(--manager-text-soft)", fontSize: 18 }} />
-                    </div>
-                  </Badge>
-                  <div
-                    style={{
-                      padding: "8px 12px 8px 8px",
-                      borderRadius: 18,
-                      border: "1px solid rgba(145,171,212,0.22)",
-                      background: "rgba(248,250,255,0.98)",
-                    }}
-                  >
-                    <Space size={12}>
-                      <Avatar
-                        style={{
-                          width: 38,
-                          height: 38,
-                          background: "linear-gradient(135deg, #8ba9ff, #5d7df6)",
-                          color: "#fff",
-                          fontWeight: 700,
-                        }}
-                      >
-                        A
-                      </Avatar>
-                      <div>
-                        <div style={{ fontWeight: 700, color: "var(--manager-text)" }}>林安</div>
-                        <Text style={{ color: "var(--manager-text-soft)" }}>系统管理员</Text>
-                      </div>
+                    return (
                       <Button
-                        type="text"
-                        onClick={handleLogout}
-                        icon={<LogoutOutlined />}
+                        key={action.key}
+                        type={isActive ? "primary" : "default"}
+                        icon={action.icon}
+                        onClick={() => router.push(action.key)}
                         style={{
-                          color: "var(--manager-text-soft)",
+                          height: 34,
+                          paddingInline: 12,
+                          borderRadius: 6,
                           fontWeight: 600,
+                          fontSize: 13,
                         }}
                       >
-                        退出
+                        {action.label}
                       </Button>
-                    </Space>
-                  </div>
+                    );
+                  })}
                 </Space>
               </div>
+
+              <Space className="manager-user-cluster" size={10} wrap>
+                <Badge dot offset={[-2, 2]}>
+                  <div
+                    className="manager-icon-button"
+                    style={{
+                      width: 38,
+                      height: 38,
+                      display: "grid",
+                      placeItems: "center",
+                      borderRadius: 6,
+                      background: "var(--manager-panel)",
+                      border: "1px solid var(--manager-border)",
+                      cursor: "pointer",
+                    }}
+                  >
+                    <BellOutlined style={{ color: "var(--manager-text-soft)", fontSize: 16 }} />
+                  </div>
+                </Badge>
+                <div
+                  className="manager-user-card"
+                  style={{
+                    padding: "6px 10px 6px 6px",
+                    borderRadius: 8,
+                    border: "1px solid var(--manager-border)",
+                    background: "var(--manager-surface)",
+                  }}
+                >
+                  <Space size={10}>
+                    <Avatar
+                      size={32}
+                      style={{
+                        background: "var(--manager-primary)",
+                        color: "#fff",
+                        fontWeight: 700,
+                        fontSize: 13,
+                      }}
+                    >
+                      A
+                    </Avatar>
+                    <div>
+                      <div style={{ fontWeight: 700, fontSize: 13, color: "var(--manager-text)", lineHeight: 1.3 }}>林安</div>
+                      <Text style={{ color: "var(--manager-text-faint)", fontSize: 12 }}>管理员</Text>
+                    </div>
+                    <Button
+                      type="text"
+                      size="small"
+                      onClick={handleLogout}
+                      icon={<LogoutOutlined />}
+                      style={{ color: "var(--manager-text-faint)", fontWeight: 600, fontSize: 12 }}
+                    >
+                      退出
+                    </Button>
+                  </Space>
+                </div>
+              </Space>
             </Header>
 
-            <Content style={{ paddingTop: 18 }}>
+            <Content style={{ padding: 20, minHeight: "calc(100vh - 68px)" }}>
               <div className="manager-stagger-3">{children}</div>
             </Content>
           </Layout>

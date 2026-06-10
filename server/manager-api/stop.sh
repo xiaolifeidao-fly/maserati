@@ -3,6 +3,7 @@ set -eu
 
 APP_NAME="manager-api"
 PORT="8291"
+TMUX_SESSION="${TMUX_SESSION:-maserati-$APP_NAME}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PID_FILE="$SCRIPT_DIR/$APP_NAME.pid"
 
@@ -30,6 +31,11 @@ if [ -f "$PID_FILE" ]; then
   stop_pid "$PID"
   rm -f "$PID_FILE"
   echo "$APP_NAME stopped by pid file, pid: $PID"
+fi
+
+if command -v tmux >/dev/null 2>&1 && tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
+  tmux kill-session -t "$TMUX_SESSION" 2>/dev/null || true
+  echo "$APP_NAME tmux session stopped: $TMUX_SESSION"
 fi
 
 if command -v lsof >/dev/null 2>&1; then

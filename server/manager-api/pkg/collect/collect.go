@@ -29,9 +29,11 @@ func NewCollectHandler() *CollectHandler {
 func (h *CollectHandler) RegisterHandler(engine *gin.RouterGroup) {
 	engine.GET("/collect-batches", h.listBatches)
 	engine.GET("/collect-batches/:id", h.getBatchByID)
+	engine.GET("/collect-batches/:id/records", h.listBatchRecords)
 	engine.POST("/collect-batches", h.createBatch)
 	engine.PUT("/collect-batches/:id", h.updateBatch)
 	engine.DELETE("/collect-batches/:id", h.deleteBatch)
+	engine.GET("/collect-records/:id/raw-data", h.getCollectRecordRawData)
 	engine.GET("/ai-selection-strategies", h.listAiSelectionStrategies)
 	engine.GET("/ai-selection-strategies/:id", h.getAiSelectionStrategyByID)
 	engine.POST("/ai-selection-strategies", h.createAiSelectionStrategy)
@@ -104,6 +106,43 @@ func (h *CollectHandler) deleteBatch(context *gin.Context) {
 		return
 	}
 	commonRouter.ToJson(context, gin.H{"deleted": true}, err)
+}
+
+func (h *CollectHandler) listBatchRecords(context *gin.Context) {
+	id, ok := parseCollectID(context)
+	if !ok {
+		return
+	}
+	var query collectDTO.CollectRecordQueryDTO
+	if err := context.ShouldBindQuery(&query); err != nil {
+		commonRouter.ToError(context, "参数错误")
+		return
+	}
+	result, err := h.service.ListCollectRecordsByBatch(id, query)
+	if err == gorm.ErrRecordNotFound {
+		commonRouter.ToError(context, "collect batch not found")
+		return
+	}
+	commonRouter.ToJson(context, result, err)
+}
+
+func (h *CollectHandler) getCollectRecordRawData(context *gin.Context) {
+	id, ok := parseCollectID(context)
+	if !ok {
+		return
+	}
+	var query collectDTO.CollectRecordRawDataByIDDTO
+	if err := context.ShouldBindQuery(&query); err != nil {
+		commonRouter.ToError(context, "参数错误")
+		return
+	}
+	query.RecordID = uint64(id)
+	result, err := h.service.GetCollectRecordRawDataByID(query)
+	if err == gorm.ErrRecordNotFound {
+		commonRouter.ToError(context, "collect record raw data not found")
+		return
+	}
+	commonRouter.ToJson(context, result, err)
 }
 
 func (h *CollectHandler) listAiSelectionStrategies(context *gin.Context) {

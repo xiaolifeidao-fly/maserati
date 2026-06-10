@@ -5,10 +5,15 @@ import baseDTO "common/base/dto"
 type CollectBatchDTO struct {
 	baseDTO.BaseDTO
 	AppUserID      uint64 `json:"appUserId"`
+	AppUserName    string `json:"appUserName"`
+	AppUsername    string `json:"appUsername"`
 	ShopID         uint64 `json:"shopId"`
+	ShopName       string `json:"shopName"`
+	ShopNickname   string `json:"shopNickname"`
+	ShopPlatform   string `json:"shopPlatform"`
 	Name           string `json:"name"`
 	Status         string `json:"status"`
-	OssURL         string `json:"ossUrl"`
+	OssURL         string `json:"ossUrl,omitempty"`
 	CollectedCount int64  `json:"collectedCount"`
 }
 
@@ -60,6 +65,11 @@ type CollectRecordRawDataDTO struct {
 	SourcePlatform  string `json:"sourcePlatform"`
 	RawDataURL      string `json:"rawDataUrl"`
 	RawData         any    `json:"rawData"`
+}
+
+type CollectRecordRawDataByIDDTO struct {
+	RecordID       uint64 `form:"recordId"`
+	CollectBatchID uint64 `form:"collectBatchId"`
 }
 
 type CreateCollectRecordDTO struct {

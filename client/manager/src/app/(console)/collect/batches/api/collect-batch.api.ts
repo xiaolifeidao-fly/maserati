@@ -1,6 +1,6 @@
 "use client";
 
-import { getPage, instance, unwrapApiResponse, type ApiResponse } from "@/utils/axios";
+import { getData, getPage, instance, unwrapApiResponse, type ApiResponse } from "@/utils/axios";
 import type { CrudListQuery } from "../../../components/CrudManagementPanel";
 
 export class CollectBatchRecord {
@@ -8,7 +8,17 @@ export class CollectBatchRecord {
 
   appUserId = 0;
 
+  appUserName = "";
+
+  appUsername = "";
+
   shopId = 0;
+
+  shopName = "";
+
+  shopNickname = "";
+
+  shopPlatform = "";
 
   name = "";
 
@@ -34,8 +44,56 @@ export interface CollectBatchPayload extends Record<string, unknown> {
   collectedCount?: number;
 }
 
+export class CollectRecordRecord {
+  id!: number;
+
+  appUserId = 0;
+
+  collectBatchId = 0;
+
+  source = "";
+
+  productName = "";
+
+  sourceProductId = "";
+
+  sourceSnapshotUrl = "";
+
+  rawDataUrl = "";
+
+  isFavorite = false;
+
+  status = "PENDING";
+
+  missingFields = "";
+
+  createdTime?: string;
+
+  updatedTime?: string;
+
+  [key: string]: unknown;
+}
+
+export class CollectRecordRawDataRecord {
+  sourceProductId = "";
+
+  sourcePlatform = "";
+
+  rawDataUrl = "";
+
+  rawData: unknown = null;
+}
+
 export function fetchCollectBatches(query: CrudListQuery) {
   return getPage(CollectBatchRecord, "/collect-batches", query);
+}
+
+export function fetchCollectBatchRecords(batchId: number, query: CrudListQuery) {
+  return getPage(CollectRecordRecord, `/collect-batches/${batchId}/records`, query);
+}
+
+export function fetchCollectRecordRawData(recordId: number, collectBatchId: number) {
+  return getData(CollectRecordRawDataRecord, `/collect-records/${recordId}/raw-data`, { collectBatchId });
 }
 
 export async function createCollectBatch(payload: CollectBatchPayload) {

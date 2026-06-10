@@ -19,6 +19,7 @@ type PublishTask struct {
 	CurrentStepCode string `gorm:"column:current_step_code;type:varchar(64)" description:"当前执行的步骤码"`
 	ErrorMessage    string `gorm:"column:error_message;type:text" description:"最近一次错误信息"`
 	OuterItemID     string `gorm:"column:outer_item_id;type:varchar(128)" description:"发布成功后平台商品ID"`
+	LogOssPath      string `gorm:"column:log_oss_path;type:varchar(512)" description:"发布日志OSS路径"`
 	Remark          string `gorm:"column:remark;type:varchar(512)" description:"备注"`
 }
 

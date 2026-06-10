@@ -1994,6 +1994,17 @@ export async function updateWorkspaceRecord(recordId: number, payload: { isFavor
     throw new Error(`选品记录 #${recordId} 不存在`);
   }
 
+  // recordId <= 0 表示该记录尚未成功保存到服务端（仅本地占位），无法调用后端接口，
+  // 否则会因 id 非法被后端拒绝（400 invalid id）。此时仅更新本地状态。
+  if (recordId <= 0) {
+    const normalizedRecord = Object.assign(new CollectRecordPreview(), record, payload);
+    workspaceState.records = workspaceState.records.map((item) =>
+      item.id === recordId ? normalizedRecord : item,
+    );
+    await renderSidePanes();
+    return getCollectionWorkspaceState();
+  }
+
   const savedRecord = await requestBackend<CollectRecordPreview>("PUT", `/collect-records/${recordId}`, {
     data: payload,
   });

@@ -21,7 +21,20 @@ func (s *CollectService) ListCollectBatches(query collectDTO.CollectBatchQueryDT
 	if err != nil {
 		return nil, err
 	}
-	return baseDTO.BuildPage(int(total), db.ToDTOs[collectDTO.CollectBatchDTO](entities)), nil
+	data := make([]*collectDTO.CollectBatchDTO, 0, len(entities))
+	for _, entity := range entities {
+		if entity == nil {
+			continue
+		}
+		item := db.ToDTO[collectDTO.CollectBatchDTO](&entity.CollectBatch)
+		item.AppUserName = entity.AppUserName
+		item.AppUsername = entity.AppUsername
+		item.ShopName = entity.ShopName
+		item.ShopNickname = entity.ShopNickname
+		item.ShopPlatform = entity.ShopPlatform
+		data = append(data, item)
+	}
+	return baseDTO.BuildPage(int(total), data), nil
 }
 
 func (s *CollectService) GetCollectBatchByID(id uint) (*collectDTO.CollectBatchDTO, error) {

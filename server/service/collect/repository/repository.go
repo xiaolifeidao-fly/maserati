@@ -37,6 +37,15 @@ func applyCollectRecordPlatformFilter(dbQuery *gorm.DB, platform string) *gorm.D
 
 type CollectBatchRepository struct{ db.Repository[*CollectBatch] }
 
+type CollectBatchListRow struct {
+	CollectBatch
+	AppUserName  string `gorm:"column:app_user_name"`
+	AppUsername  string `gorm:"column:app_username"`
+	ShopName     string `gorm:"column:shop_name"`
+	ShopNickname string `gorm:"column:shop_nickname"`
+	ShopPlatform string `gorm:"column:shop_platform"`
+}
+
 func (r *CollectBatchRepository) EnsureTable() error {
 	if r.Db == nil {
 		return fmt.Errorf("database is not initialized")
@@ -44,11 +53,7 @@ func (r *CollectBatchRepository) EnsureTable() error {
 	return r.Db.AutoMigrate(&CollectBatch{})
 }
 
-func (r *CollectBatchRepository) CountByQuery(query collectDTO.CollectBatchQueryDTO) (int64, error) {
-	if r.Db == nil {
-		return 0, fmt.Errorf("database is not initialized")
-	}
-	dbQuery := r.Db.Model(&CollectBatch{}).Where("collect_batch.active = ?", 1)
+func applyCollectBatchQuery(dbQuery *gorm.DB, query collectDTO.CollectBatchQueryDTO) *gorm.DB {
 	if query.AppUserID > 0 {
 		dbQuery = dbQuery.Where("collect_batch.app_user_id = ?", query.AppUserID)
 	}
@@ -62,9 +67,19 @@ func (r *CollectBatchRepository) CountByQuery(query collectDTO.CollectBatchQuery
 		dbQuery = dbQuery.Where("collect_batch.status = ?", value)
 	}
 	if value := strings.TrimSpace(query.Platform); value != "" {
-		dbQuery = dbQuery.Joins("JOIN shop ON shop.id = collect_batch.shop_id AND shop.active = ?", 1).
-			Where("shop.platform = ?", value)
+		dbQuery = dbQuery.Where("shop.platform = ?", value)
 	}
+	return dbQuery
+}
+
+func (r *CollectBatchRepository) CountByQuery(query collectDTO.CollectBatchQueryDTO) (int64, error) {
+	if r.Db == nil {
+		return 0, fmt.Errorf("database is not initialized")
+	}
+	dbQuery := r.Db.Model(&CollectBatch{}).
+		Joins("LEFT JOIN shop ON shop.id = collect_batch.shop_id AND shop.active = ?", 1).
+		Where("collect_batch.active = ?", 1)
+	dbQuery = applyCollectBatchQuery(dbQuery, query)
 	var total int64
 	if err := dbQuery.Count(&total).Error; err != nil {
 		return 0, err
@@ -72,29 +87,24 @@ func (r *CollectBatchRepository) CountByQuery(query collectDTO.CollectBatchQuery
 	return total, nil
 }
 
-func (r *CollectBatchRepository) ListByQuery(query collectDTO.CollectBatchQueryDTO, pageIndex, pageSize int) ([]*CollectBatch, error) {
+func (r *CollectBatchRepository) ListByQuery(query collectDTO.CollectBatchQueryDTO, pageIndex, pageSize int) ([]*CollectBatchListRow, error) {
 	if r.Db == nil {
 		return nil, fmt.Errorf("database is not initialized")
 	}
-	dbQuery := r.Db.Model(&CollectBatch{}).Where("collect_batch.active = ?", 1)
-	if query.AppUserID > 0 {
-		dbQuery = dbQuery.Where("collect_batch.app_user_id = ?", query.AppUserID)
-	}
-	if query.ShopID > 0 {
-		dbQuery = dbQuery.Where("collect_batch.shop_id = ?", query.ShopID)
-	}
-	if value := strings.TrimSpace(query.Name); value != "" {
-		dbQuery = dbQuery.Where("collect_batch.name LIKE ?", "%"+value+"%")
-	}
-	if value := strings.TrimSpace(query.Status); value != "" {
-		dbQuery = dbQuery.Where("collect_batch.status = ?", value)
-	}
-	if value := strings.TrimSpace(query.Platform); value != "" {
-		dbQuery = dbQuery.Joins("JOIN shop ON shop.id = collect_batch.shop_id AND shop.active = ?", 1).
-			Where("shop.platform = ?", value)
-	}
-	var entities []*CollectBatch
-	if err := dbQuery.Select("collect_batch.*").Order("collect_batch.id DESC").Offset((pageIndex - 1) * pageSize).Limit(pageSize).Find(&entities).Error; err != nil {
+	dbQuery := r.Db.Model(&CollectBatch{}).
+		Joins("LEFT JOIN app_user ON app_user.id = collect_batch.app_user_id AND app_user.active = ?", 1).
+		Joins("LEFT JOIN shop ON shop.id = collect_batch.shop_id AND shop.active = ?", 1).
+		Where("collect_batch.active = ?", 1)
+	dbQuery = applyCollectBatchQuery(dbQuery, query)
+	var entities []*CollectBatchListRow
+	if err := dbQuery.Select(`
+		collect_batch.*,
+		app_user.name AS app_user_name,
+		app_user.username AS app_username,
+		shop.name AS shop_name,
+		shop.nickname AS shop_nickname,
+		shop.platform AS shop_platform
+	`).Order("collect_batch.id DESC").Offset((pageIndex - 1) * pageSize).Limit(pageSize).Scan(&entities).Error; err != nil {
 		return nil, err
 	}
 	return entities, nil

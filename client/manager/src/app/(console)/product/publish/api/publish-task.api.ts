@@ -1,6 +1,6 @@
 "use client";
 
-import { getPage, instance, unwrapApiResponse, type ApiResponse } from "@/utils/axios";
+import { getData, getPage, instance, unwrapApiResponse, type ApiResponse } from "@/utils/axios";
 import type { CrudListQuery } from "../../../components/CrudManagementPanel";
 
 export class PublishTaskRecord {
@@ -28,6 +28,8 @@ export class PublishTaskRecord {
 
   outerItemId = "";
 
+  logOssPath = "";
+
   remark = "";
 
   createdTime?: string;
@@ -49,11 +51,73 @@ export interface PublishTaskPayload extends Record<string, unknown> {
   currentStepCode?: string;
   errorMessage?: string;
   outerItemId?: string;
+  logOssPath?: string;
   remark?: string;
+}
+
+export class PublishTaskLogRecord {
+  path = "";
+
+  fileName = "";
+
+  content = "";
+
+  size = 0;
+
+  truncated = false;
+}
+
+export class PublishStepRecord {
+  id!: number;
+
+  publishTaskId = 0;
+
+  stepCode = "";
+
+  stepOrder = 0;
+
+  status = "PENDING";
+
+  errorMessage = "";
+
+  retryCount = 0;
+
+  startedAt?: string;
+
+  completedAt?: string;
+
+  log?: PublishTaskLogRecord | null;
+
+  createdTime?: string;
+
+  updatedTime?: string;
+}
+
+export class PublishTaskDetailRecord {
+  task!: PublishTaskRecord;
+
+  steps: PublishStepRecord[] = [];
+
+  log?: PublishTaskLogRecord | null;
 }
 
 export function fetchPublishTasks(query: CrudListQuery) {
   return getPage(PublishTaskRecord, "/publish-tasks", query);
+}
+
+export function fetchPublishTaskDetail(id: number) {
+  return getData(PublishTaskDetailRecord, `/publish-tasks/${id}/detail`);
+}
+
+export async function downloadPublishTaskLog(id: number) {
+  const response = await instance.get<Blob>(`/publish-tasks/${id}/log/download`, {
+    responseType: "blob",
+  });
+  const disposition = response.headers["content-disposition"];
+  return {
+    blob: response.data,
+    fileName: parseDownloadFileName(disposition) || `publish-task-${id}.log`,
+  };
 }
 
 export async function createPublishTask(payload: PublishTaskPayload) {
@@ -69,4 +133,18 @@ export async function updatePublishTask(id: number, payload: Partial<PublishTask
 export async function deletePublishTask(id: number) {
   const response = await instance.delete<ApiResponse<{ deleted: boolean }>>(`/publish-tasks/${id}`);
   return unwrapApiResponse(response.data);
+}
+
+function parseDownloadFileName(disposition: string | undefined) {
+  if (!disposition) return "";
+  const utf8Match = /filename\*=UTF-8''([^;]+)/i.exec(disposition);
+  if (utf8Match?.[1]) {
+    try {
+      return decodeURIComponent(utf8Match[1]);
+    } catch {
+      return utf8Match[1];
+    }
+  }
+  const asciiMatch = /filename="?([^";]+)"?/i.exec(disposition);
+  return asciiMatch?.[1] ?? "";
 }
