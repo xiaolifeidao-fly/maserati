@@ -1,18 +1,24 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Modal, Segmented, Space, Tabs, Tag, Typography, message } from "antd";
+import { SaveOutlined, ShareAltOutlined } from "@ant-design/icons";
+import { Button, Form, Input, Modal, Popconfirm, Segmented, Space, Spin, Tabs, Tag, Typography, message } from "antd";
 import {
   CollectBatchRecord,
   CollectRecordPreview,
   CollectionWorkspaceState,
+  type CollectShareRecord,
   type CollectSourceType,
   type CollectRecordSource,
 } from "../api/collection.api";
 import {
+  batchUpdateCollectRecordShare,
+  cancelCollectBatchShare,
+  fetchCollectBatchShares,
   fetchCollectBatchRecords,
   normalizeCollectRecordSource,
   previewCollectedRecord,
+  shareCollectBatch,
   updateCollectRecord,
 } from "../api/collection.api";
 import { CollectionWorkspaceLeftPanel } from "./CollectionTestingPanel";
@@ -35,6 +41,9 @@ interface BatchDetailModalProps {
   focusRecordId?: number;
   readOnly?: boolean;
   favoritesOnly?: boolean;
+  sharedOnly?: boolean;
+  showPublishStatus?: boolean;
+  showFavoriteInfo?: boolean;
   onClose: () => void;
 }
 
@@ -45,13 +54,25 @@ export function BatchDetailModal({
   focusRecordId = 0,
   readOnly = false,
   favoritesOnly = false,
+  sharedOnly = false,
+  showPublishStatus = true,
+  showFavoriteInfo = true,
   onClose,
 }: BatchDetailModalProps) {
+  const [shareForm] = Form.useForm<{ username: string }>();
   const [records, setRecords] = useState<CollectRecordPreview[]>([]);
   const [loading, setLoading] = useState(false);
   const [selectedRecordId, setSelectedRecordId] = useState(0);
   const [activeSource, setActiveSource] = useState<CollectRecordSource>("manual");
   const [publishStatusFilter, setPublishStatusFilter] = useState<PublishStatusFilter>("ALL");
+  const [shareDrafts, setShareDrafts] = useState<Record<number, boolean>>({});
+  const [shareSaving, setShareSaving] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
+  const [shareSubmitting, setShareSubmitting] = useState(false);
+  const [sharedUsers, setSharedUsers] = useState<CollectShareRecord[]>([]);
+  const [sharedUsersLoading, setSharedUsersLoading] = useState(false);
+  const [cancellingShareId, setCancellingShareId] = useState(0);
+  const canManageShare = !readOnly && Boolean(batch?.id);
 
   const syncElectronPreview = async (record: CollectRecordPreview | null) => {
     if (!record?.sourceProductId) {
@@ -89,17 +110,133 @@ export function BatchDetailModal({
     }
   };
 
+  const loadBatchShares = async () => {
+    if (!batch?.id || !canManageShare) {
+      setSharedUsers([]);
+      return;
+    }
+    setSharedUsersLoading(true);
+    try {
+      setSharedUsers(await fetchCollectBatchShares(batch.id));
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "加载分享用户失败");
+    } finally {
+      setSharedUsersLoading(false);
+    }
+  };
+
+  const getRecordShareValue = (record: CollectRecordPreview) => {
+    return shareDrafts[record.id] ?? record.isShared;
+  };
+
+  const setRecordsShareDraft = (recordIds: number[], isShared: boolean) => {
+    setShareDrafts((current) => {
+      const next = { ...current };
+      const recordMap = new Map(records.map((record) => [record.id, record]));
+      recordIds.forEach((recordId) => {
+        const record = recordMap.get(recordId);
+        if (!record) return;
+        if (record.isShared === isShared) {
+          delete next[recordId];
+        } else {
+          next[recordId] = isShared;
+        }
+      });
+      return next;
+    });
+  };
+
+  const toggleRecordShareDraft = (record: CollectRecordPreview) => {
+    setRecordsShareDraft([record.id], !getRecordShareValue(record));
+  };
+
+  const saveShareDrafts = async () => {
+    if (!batch?.id) return;
+    const entries = Object.entries(shareDrafts).map(([recordId, isShared]) => ({ recordId: Number(recordId), isShared }));
+    if (entries.length === 0) {
+      message.info("没有需要保存的分享设置");
+      return;
+    }
+    setShareSaving(true);
+    try {
+      const enabledIds = entries.filter((item) => item.isShared).map((item) => item.recordId);
+      const disabledIds = entries.filter((item) => !item.isShared).map((item) => item.recordId);
+      if (enabledIds.length > 0) {
+        await batchUpdateCollectRecordShare(batch.id, { recordIds: enabledIds, isShared: true });
+      }
+      if (disabledIds.length > 0) {
+        await batchUpdateCollectRecordShare(batch.id, { recordIds: disabledIds, isShared: false });
+      }
+      setRecords((current) =>
+        current.map((record) => {
+          const changed = entries.find((item) => item.recordId === record.id);
+          return changed ? Object.assign(new CollectRecordPreview(), { ...record, isShared: changed.isShared }) : record;
+        }),
+      );
+      setShareDrafts({});
+      message.success("分享设置已保存");
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "保存分享设置失败");
+    } finally {
+      setShareSaving(false);
+    }
+  };
+
+  const handleShareSubmit = async () => {
+    if (!batch?.id) return;
+    const values = await shareForm.validateFields();
+    setShareSubmitting(true);
+    try {
+      await shareCollectBatch({
+        collectBatchId: batch.id,
+        username: values.username.trim(),
+      });
+      message.success("分享成功");
+      setShareOpen(false);
+      shareForm.resetFields();
+      await loadBatchShares();
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "分享选品批次失败");
+    } finally {
+      setShareSubmitting(false);
+    }
+  };
+
+  const handleCancelShare = async (record: CollectShareRecord) => {
+    if (!batch?.id || !record.id) return;
+    setCancellingShareId(record.id);
+    try {
+      await cancelCollectBatchShare(batch.id, record.id);
+      message.success("已取消该用户分享");
+      await loadBatchShares();
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "取消分享失败");
+    } finally {
+      setCancellingShareId(0);
+    }
+  };
+
   useEffect(() => {
     if (open) {
       setActiveSource("manual");
       setPublishStatusFilter("ALL");
+      setShareDrafts({});
     }
   }, [open]);
+
+  useEffect(() => {
+    if (!open || !canManageShare) {
+      setSharedUsers([]);
+      return;
+    }
+    void loadBatchShares();
+  }, [open, batch?.id, canManageShare]);
 
   useEffect(() => {
     if (!open || !batch?.id) {
       setRecords([]);
       setSelectedRecordId(0);
+      setShareDrafts({});
       return;
     }
 
@@ -109,7 +246,8 @@ export function BatchDetailModal({
       pageSize: 200,
       source: activeSource,
       isFavorite: favoritesOnly ? 1 : undefined,
-      publishStatus: publishStatusFilter === "ALL" ? undefined : publishStatusFilter,
+      isShared: sharedOnly ? 1 : undefined,
+      publishStatus: showPublishStatus && publishStatusFilter !== "ALL" ? publishStatusFilter : undefined,
     })
       .then((result) => {
         const rawItems = Array.isArray(result.data) ? result.data : [];
@@ -118,13 +256,14 @@ export function BatchDetailModal({
         );
         const items = focusRecordId > 0 ? normalizedItems.filter((item) => item.id === focusRecordId) : normalizedItems;
         setRecords(items);
+        setShareDrafts({});
         setSelectedRecordId(items.find((item) => item.id === focusRecordId)?.id || items[0]?.id || 0);
       })
       .catch((error) => {
         message.error(error instanceof Error ? error.message : "加载选品记录失败");
       })
       .finally(() => setLoading(false));
-  }, [open, batch?.id, focusRecordId, activeSource, favoritesOnly, publishStatusFilter]);
+  }, [open, batch?.id, focusRecordId, activeSource, favoritesOnly, sharedOnly, publishStatusFilter, showPublishStatus]);
 
   const workspaceState: CollectionWorkspaceState = {
     batch: batch ?? new CollectBatchRecord(),
@@ -152,7 +291,24 @@ export function BatchDetailModal({
             height: "78vh",
           },
         }}
-        title={batch ? `选品详情 · ${batch.name}` : "选品详情"}
+        title={
+          <Space style={{ width: "100%", justifyContent: "space-between", paddingRight: 28 }}>
+            <span>{batch ? `选品详情 · ${batch.name}` : "选品详情"}</span>
+            {canManageShare ? (
+              <Button
+                type="primary"
+                size="small"
+                icon={<ShareAltOutlined />}
+                onClick={() => {
+                  shareForm.resetFields();
+                  setShareOpen(true);
+                }}
+              >
+                分享批次
+              </Button>
+            ) : null}
+          </Space>
+        }
         destroyOnClose
       >
       {/* Left Panel */}
@@ -179,34 +335,122 @@ export function BatchDetailModal({
           ]}
           style={{ flex: "0 0 auto", marginBottom: 10 }}
         />
-        <div
-          style={{
-            flex: "0 0 auto",
-            display: "grid",
-            gap: 8,
-            padding: "10px 12px",
-            marginBottom: 10,
-            borderRadius: 8,
-            background: "rgba(255,255,255,0.86)",
-            border: "1px solid rgba(226,232,240,0.9)",
-          }}
-        >
-          <Space style={{ justifyContent: "space-between" }}>
-            <Text type="secondary">发布成功率</Text>
-            <strong style={{ color: "#1f2937", fontSize: 18 }}>{batch?.publishSuccessRate || "0%"}</strong>
-          </Space>
-          <Space size={6}>
-            <Tag color="green">成功 {batch?.publishSuccessCount ?? 0}</Tag>
-            <Tag color="red">失败 {batch?.publishFailedCount ?? 0}</Tag>
-          </Space>
-          <Segmented
-            block
-            size="small"
-            value={publishStatusFilter}
-            options={publishStatusOptions}
-            onChange={(value) => setPublishStatusFilter(value as PublishStatusFilter)}
-          />
-        </div>
+        {showPublishStatus ? (
+          <div
+            style={{
+              flex: "0 0 auto",
+              display: "grid",
+              gap: 8,
+              padding: "10px 12px",
+              marginBottom: 10,
+              borderRadius: 8,
+              background: "rgba(255,255,255,0.86)",
+              border: "1px solid rgba(226,232,240,0.9)",
+            }}
+          >
+            <Space style={{ justifyContent: "space-between" }}>
+              <Text type="secondary">发布成功率</Text>
+              <strong style={{ color: "#1f2937", fontSize: 18 }}>{batch?.publishSuccessRate || "0%"}</strong>
+            </Space>
+            <Space size={6}>
+              <Tag color="green">成功 {batch?.publishSuccessCount ?? 0}</Tag>
+              <Tag color="red">失败 {batch?.publishFailedCount ?? 0}</Tag>
+            </Space>
+            <Segmented
+              block
+              size="small"
+              value={publishStatusFilter}
+              options={publishStatusOptions}
+              onChange={(value) => setPublishStatusFilter(value as PublishStatusFilter)}
+            />
+          </div>
+        ) : null}
+        {canManageShare ? (
+          <>
+            <div
+              style={{
+                flex: "0 0 auto",
+                display: "grid",
+                gap: 8,
+                padding: "10px 12px",
+                marginBottom: 10,
+                borderRadius: 8,
+                background: "rgba(255,255,255,0.86)",
+                border: "1px solid rgba(226,232,240,0.9)",
+              }}
+            >
+              <Space style={{ justifyContent: "space-between" }}>
+                <Text type="secondary">已分享用户</Text>
+                <Tag>{sharedUsers.length}</Tag>
+              </Space>
+              {sharedUsersLoading ? (
+                <div style={{ display: "grid", placeItems: "center", minHeight: 32 }}>
+                  <Spin size="small" />
+                </div>
+              ) : sharedUsers.length === 0 ? (
+                <Text type="secondary" style={{ fontSize: 12 }}>暂未分享给其他用户</Text>
+              ) : (
+                <div style={{ display: "grid", gap: 6, maxHeight: 96, overflowY: "auto", paddingRight: 2 }}>
+                  {sharedUsers.map((item) => (
+                    <div
+                      key={item.id}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        gap: 8,
+                        minWidth: 0,
+                        padding: "6px 8px",
+                        borderRadius: 7,
+                        background: "rgba(248,250,252,0.9)",
+                      }}
+                    >
+                      <Text ellipsis style={{ minWidth: 0, fontSize: 12 }}>
+                        {item.shareUsername || `用户 #${item.shareUserId}`}
+                      </Text>
+                      <Popconfirm
+                        title="确认取消该用户的分享吗？"
+                        okText="取消分享"
+                        cancelText="保留"
+                        onConfirm={() => void handleCancelShare(item)}
+                      >
+                        <Button danger size="small" type="text" loading={cancellingShareId === item.id}>
+                          删除
+                        </Button>
+                      </Popconfirm>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            <Space size={6} wrap style={{ flex: "0 0 auto", marginBottom: 10 }}>
+              <Button
+                size="small"
+                disabled={records.length === 0}
+                onClick={() => setRecordsShareDraft(records.map((record) => record.id), true)}
+              >
+                批量分享
+              </Button>
+              <Button
+                size="small"
+                disabled={records.length === 0}
+                onClick={() => setRecordsShareDraft(records.map((record) => record.id), false)}
+              >
+                批量关闭分享
+              </Button>
+              <Button
+                type="primary"
+                size="small"
+                icon={<SaveOutlined />}
+                loading={shareSaving}
+                disabled={Object.keys(shareDrafts).length === 0}
+                onClick={() => void saveShareDrafts()}
+              >
+                保存
+              </Button>
+            </Space>
+          </>
+        ) : null}
         <CollectionWorkspaceLeftPanel
           workspaceState={workspaceState}
           loading={loading}
@@ -214,6 +458,10 @@ export function BatchDetailModal({
           readOnly={readOnly}
           onToggleFavorite={readOnly ? undefined : (record) => void handleToggleFavorite(record)}
           onPreviewRecord={(record) => void syncElectronPreview(record)}
+          showPublishStatus={showPublishStatus}
+          showFavoriteInfo={showFavoriteInfo}
+          getRecordShareValue={canManageShare ? getRecordShareValue : undefined}
+          onToggleRecordShare={canManageShare ? toggleRecordShareDraft : undefined}
         />
       </div>
 
@@ -236,8 +484,26 @@ export function BatchDetailModal({
           loading={loading}
           readOnly={readOnly}
           onToggleFavorite={readOnly ? undefined : (record) => void handleToggleFavorite(record)}
+          showFavoriteInfo={showFavoriteInfo}
         />
       </div>
+      </Modal>
+      <Modal
+        title={batch ? `分享选品批次 · ${batch.name}` : "分享选品批次"}
+        open={shareOpen}
+        onCancel={() => {
+          setShareOpen(false);
+          shareForm.resetFields();
+        }}
+        onOk={() => void handleShareSubmit()}
+        confirmLoading={shareSubmitting}
+        destroyOnClose
+      >
+        <Form<{ username: string }> form={shareForm} layout="vertical" preserve={false}>
+          <Form.Item name="username" label="用户名" rules={[{ required: true, message: "请输入要分享给的用户名" }]}>
+            <Input placeholder="请输入对方用户名" maxLength={50} />
+          </Form.Item>
+        </Form>
       </Modal>
       <style jsx global>{`
         .batch-detail-modal .ant-modal {

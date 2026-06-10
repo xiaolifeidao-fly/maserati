@@ -14,7 +14,6 @@ import {
   PlusOutlined,
   ReloadOutlined,
   SearchOutlined,
-  ShareAltOutlined,
   StopOutlined,
   UploadOutlined,
 } from "@ant-design/icons";
@@ -40,7 +39,6 @@ import {
   subscribeAiSelectionTaskChanged,
   type CollectBatchRecord,
   normalizeCollectSourceType,
-  shareCollectBatch,
   startAiSelectionTask,
   stopAiSelectionTask,
   startCollection as startCollectionByRoute,
@@ -67,10 +65,6 @@ interface CollectionFormValues {
 
 interface ImportFormValues {
   shopType: "tb" | "pdd";
-}
-
-interface ShareFormValues {
-  username: string;
 }
 
 interface AiStrategyFormValues {
@@ -129,7 +123,6 @@ export function CollectionManagementSimplePanel() {
   const searchParams = useSearchParams();
   const [form] = Form.useForm<CollectionFormValues>();
   const [importForm] = Form.useForm<ImportFormValues>();
-  const [shareForm] = Form.useForm<ShareFormValues>();
   const [aiStrategyForm] = Form.useForm<AiStrategyFormValues>();
   const [aiSelectionForm] = Form.useForm<AiSelectionFormValues>();
   const { collections, shops, total, query, loading, submitting, refresh, refreshOptions, saveCollection, removeCollection } =
@@ -149,9 +142,6 @@ export function CollectionManagementSimplePanel() {
   const [importSubmitting, setImportSubmitting] = useState(false);
   const [importProgress, setImportProgress] = useState<ImportCollectBatchProgress | null>(null);
   const [startingBatchId, setStartingBatchId] = useState(0);
-  const [sharingRecord, setSharingRecord] = useState<CollectBatchRecord | null>(null);
-  const [shareModalOpen, setShareModalOpen] = useState(false);
-  const [shareSubmitting, setShareSubmitting] = useState(false);
   const [aiStrategyDrawerOpen, setAiStrategyDrawerOpen] = useState(false);
   const [aiStrategyModalOpen, setAiStrategyModalOpen] = useState(false);
   const [aiStrategySubmitting, setAiStrategySubmitting] = useState(false);
@@ -372,12 +362,6 @@ export function CollectionManagementSimplePanel() {
     });
   };
 
-  const openShareModal = (record: CollectBatchRecord) => {
-    setSharingRecord(record);
-    shareForm.resetFields();
-    setShareModalOpen(true);
-  };
-
   const openImportModal = (record: CollectBatchRecord) => {
     const shop = shopMap.get(record.shopId);
     const defaultShopType = normalizeCollectSourceType(shop?.platform) === "tb" ? "tb" : "pdd";
@@ -589,28 +573,6 @@ export function CollectionManagementSimplePanel() {
     }
   };
 
-  const handleShareSubmit = async () => {
-    if (!sharingRecord?.id) {
-      return;
-    }
-    const values = await shareForm.validateFields();
-    setShareSubmitting(true);
-    try {
-      await shareCollectBatch({
-        collectBatchId: sharingRecord.id,
-        username: values.username.trim(),
-      });
-      message.success(`已分享批次「${sharingRecord.name}」`);
-      setShareModalOpen(false);
-      setSharingRecord(null);
-      shareForm.resetFields();
-    } catch (error) {
-      message.error(error instanceof Error ? error.message : "分享选品批次失败");
-    } finally {
-      setShareSubmitting(false);
-    }
-  };
-
   const columns: ColumnsType<CollectBatchRecord> = [
     {
       title: "选品批次",
@@ -682,7 +644,6 @@ export function CollectionManagementSimplePanel() {
             tooltip="发布进度"
             onClick={() => openPublishProgressModal(record)}
           />
-          <IconOnlyButton type="text" icon={<ShareAltOutlined />} tooltip="分享选品批次" onClick={() => openShareModal(record)} />
           <IconOnlyButton type="text" icon={<EditOutlined />} tooltip="编辑选品批次" onClick={() => openEditModal(record)} />
           <Popconfirm
             title="确认删除这条选品批次吗？"
@@ -909,6 +870,7 @@ export function CollectionManagementSimplePanel() {
         open={detailModalOpen}
         batch={detailBatch}
         sourceType={detailSourceType}
+        showPublishStatus={false}
         onClose={() => setDetailModalOpen(false)}
       />
 
@@ -1220,29 +1182,6 @@ export function CollectionManagementSimplePanel() {
             },
           ]}
         />
-      </Modal>
-
-      <Modal
-        title={sharingRecord ? `分享选品批次 · ${sharingRecord.name}` : "分享选品批次"}
-        open={shareModalOpen}
-        onCancel={() => {
-          setShareModalOpen(false);
-          setSharingRecord(null);
-          shareForm.resetFields();
-        }}
-        onOk={() => void handleShareSubmit()}
-        confirmLoading={shareSubmitting}
-        destroyOnClose
-      >
-        <Form<ShareFormValues> form={shareForm} layout="vertical" preserve={false}>
-          <Form.Item
-            name="username"
-            label="用户名"
-            rules={[{ required: true, message: "请输入要分享给的用户名" }]}
-          >
-            <Input placeholder="请输入对方用户名" maxLength={50} />
-          </Form.Item>
-        </Form>
       </Modal>
 
       <Modal

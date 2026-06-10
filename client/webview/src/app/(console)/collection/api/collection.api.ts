@@ -19,6 +19,7 @@ import {
   type CollectShareRecord,
   type ImportCollectBatchProgress,
   type CollectRecordListQuery,
+  type CollectRecordSharePayload,
   type CollectRecordUpdatePayload,
   CollectBatchRecord,
   type ImportCollectBatchResult,
@@ -51,6 +52,7 @@ export type {
   CollectShareRecord,
   CollectRecordListQuery,
   CollectRecordUpdatePayload,
+  CollectRecordSharePayload,
   ShopRecord,
   CollectedProductData,
   CollectSourceType,
@@ -163,6 +165,18 @@ export async function deleteCollectBatch(id: number) {
 
 export async function shareCollectBatch(payload: CollectSharePayload) {
   return getCollectApi().shareCollectBatch(payload);
+}
+
+export async function fetchCollectBatchShares(batchId: number) {
+  return getCollectApi().listCollectBatchShares(batchId);
+}
+
+export async function cancelCollectBatchShare(batchId: number, shareId: number) {
+  return getCollectApi().cancelCollectBatchShare(batchId, shareId);
+}
+
+export async function batchUpdateCollectRecordShare(batchId: number, payload: CollectRecordSharePayload) {
+  return getCollectApi().batchUpdateCollectRecordShare(batchId, payload);
 }
 
 export async function fetchMyCollectShares(query: CollectShareQuery) {

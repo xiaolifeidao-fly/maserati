@@ -121,6 +121,56 @@ func (s *CollectShareService) ListMyShares(ownerUserID uint64, query collectShar
 	return baseDTO.BuildPage(int(total), data), nil
 }
 
+func (s *CollectShareService) ListBatchShares(ownerUserID, batchID uint64) ([]*collectShareDTO.CollectShareDTO, error) {
+	if ownerUserID == 0 {
+		return nil, fmt.Errorf("用户未登录")
+	}
+	if batchID == 0 {
+		return nil, fmt.Errorf("collectBatchId is required")
+	}
+	batch, err := s.collectBatchRepository.FindById(uint(batchID))
+	if err != nil {
+		return nil, err
+	}
+	if batch.Active == 0 || batch.AppUserID != ownerUserID {
+		return nil, gorm.ErrRecordNotFound
+	}
+	rows, err := s.shareRepository.ListActiveByBatch(ownerUserID, batchID)
+	if err != nil {
+		return nil, err
+	}
+	data := make([]*collectShareDTO.CollectShareDTO, 0, len(rows))
+	for _, row := range rows {
+		data = append(data, &collectShareDTO.CollectShareDTO{
+			BaseDTO:        shareBaseDTO(row.BaseEntity),
+			CollectBatchID: row.CollectBatchID,
+			OwnerUserID:    row.OwnerUserID,
+			ShareUserID:    row.ShareUserID,
+			Status:         row.Status,
+			BatchName:      row.BatchName,
+			OwnerUsername:  row.OwnerUsername,
+			ShareUsername:  row.ShareUsername,
+		})
+	}
+	return data, nil
+}
+
+func (s *CollectShareService) CancelBatchShare(ownerUserID, batchID uint64, shareID uint) error {
+	if batchID == 0 {
+		return fmt.Errorf("collectBatchId is required")
+	}
+	entity, err := s.shareRepository.FindById(shareID)
+	if err != nil {
+		return err
+	}
+	if entity.Active == 0 || entity.OwnerUserID != ownerUserID || entity.CollectBatchID != batchID {
+		return gorm.ErrRecordNotFound
+	}
+	entity.Status = "CANCELLED"
+	_, err = s.shareRepository.SaveOrUpdate(entity)
+	return err
+}
+
 func (s *CollectShareService) ListSharedToMe(shareUserID uint64, query collectShareDTO.CollectShareQueryDTO) (*baseDTO.PageDTO[collectShareDTO.SharedCollectBatchDTO], error) {
 	if shareUserID == 0 {
 		return nil, fmt.Errorf("用户未登录")

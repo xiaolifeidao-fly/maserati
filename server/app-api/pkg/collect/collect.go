@@ -27,6 +27,7 @@ func (h *CollectHandler) RegisterHandler(engine *gin.RouterGroup) {
 	engine.GET("/collect-batches", h.listCollectBatches)
 	engine.GET("/collect-batches/:id", h.getCollectBatchByID)
 	engine.GET("/collect-batches/:id/records", h.listCollectBatchRecords)
+	engine.PUT("/collect-batches/:id/records/share", h.batchUpdateRecordShare)
 	engine.POST("/collect-batches", h.createCollectBatch)
 	engine.PUT("/collect-batches/:id", h.updateCollectBatch)
 	engine.DELETE("/collect-batches/:id", h.deleteCollectBatch)
@@ -64,6 +65,29 @@ func (h *CollectHandler) listCollectBatchRecords(c *gin.Context) {
 		return
 	}
 	commonRouter.ToJson(c, r, e)
+}
+
+func (h *CollectHandler) batchUpdateRecordShare(c *gin.Context) {
+	id, ok := parseCollectID(c)
+	if !ok {
+		return
+	}
+	var req collectDTO.BatchUpdateCollectRecordShareDTO
+	if c.ShouldBindJSON(&req) != nil {
+		commonRouter.ToError(c, "参数错误")
+		return
+	}
+	appUserID, ok := currentCollectUserID(c)
+	if !ok {
+		commonRouter.ToError(c, "用户未登录")
+		return
+	}
+	e := h.collectService.BatchUpdateCollectRecordShare(id, appUserID, &req)
+	if e == gorm.ErrRecordNotFound {
+		commonRouter.ToError(c, "collect batch not found")
+		return
+	}
+	commonRouter.ToJson(c, gin.H{"updated": true}, e)
 }
 
 func (h *CollectHandler) listCollectBatches(c *gin.Context) {

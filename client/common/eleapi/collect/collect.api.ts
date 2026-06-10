@@ -164,6 +164,7 @@ export class CollectRecordPreview {
   sourceSnapshotUrl = "";
   rawDataUrl = "";
   isFavorite = false;
+  isShared = true;
   status = "";
   publishStatus = "";
   missingFields?: string;
@@ -181,14 +182,21 @@ export interface CollectRecordListQuery extends Record<string, string | number |
   status?: string;
   publishStatus?: "ALL" | "SUCCESS" | "FAILED";
   isFavorite?: number;
+  isShared?: number;
 }
 
 export interface CollectRecordUpdatePayload {
   source?: "file" | "manual";
   productName?: string;
   isFavorite?: boolean;
+  isShared?: boolean;
   status?: string;
   missingFields?: string;
+}
+
+export interface CollectRecordSharePayload {
+  recordIds: number[];
+  isShared: boolean;
 }
 
 export interface CollectBatchStats {
@@ -354,6 +362,21 @@ export class CollectApi extends ElectronApi {
   @InvokeType(Protocols.INVOKE)
   async shareCollectBatch(payload: CollectSharePayload): Promise<CollectShareRecord> {
     return this.invokeApi("shareCollectBatch", payload);
+  }
+
+  @InvokeType(Protocols.INVOKE)
+  async listCollectBatchShares(batchId: number): Promise<CollectShareRecord[]> {
+    return this.invokeApi("listCollectBatchShares", batchId);
+  }
+
+  @InvokeType(Protocols.INVOKE)
+  async cancelCollectBatchShare(batchId: number, shareId: number): Promise<{ cancelled: boolean }> {
+    return this.invokeApi("cancelCollectBatchShare", batchId, shareId);
+  }
+
+  @InvokeType(Protocols.INVOKE)
+  async batchUpdateCollectRecordShare(batchId: number, payload: CollectRecordSharePayload): Promise<{ updated: boolean }> {
+    return this.invokeApi("batchUpdateCollectRecordShare", batchId, payload);
   }
 
   @InvokeType(Protocols.INVOKE)

@@ -61,12 +61,12 @@ export function CollectBatchManagementPanel() {
     let ignore = false;
 
     void fetchShops({ pageIndex: 1, pageSize: 200, shopUsage: "COLLECT" })
-      .then((result) => {
+      .then((shopResult) => {
         if (ignore) {
           return;
         }
         setCollectAccountOptions(
-          result.data.map((shop) => ({
+          shopResult.data.map((shop) => ({
             label: buildCollectAccountLabel(shop),
             value: shop.id,
           })),

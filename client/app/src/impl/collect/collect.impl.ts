@@ -26,6 +26,7 @@ import {
   type ImportCollectBatchResult,
   type CollectRecordPreview,
   type CollectRecordListQuery,
+  type CollectRecordSharePayload,
   type CollectRecordUpdatePayload,
   type PageResult,
   type SharedCollectBatchRecord,
@@ -343,6 +344,18 @@ export class CollectImpl extends CollectApi {
 
   async shareCollectBatch(payload: CollectSharePayload): Promise<CollectShareRecord> {
     return requestBackend("POST", "/collect-shares", { data: payload });
+  }
+
+  async listCollectBatchShares(batchId: number): Promise<CollectShareRecord[]> {
+    return requestBackend("GET", `/collect-batches/${batchId}/shares`);
+  }
+
+  async cancelCollectBatchShare(batchId: number, shareId: number): Promise<{ cancelled: boolean }> {
+    return requestBackend("PUT", `/collect-batches/${batchId}/shares/${shareId}/cancel`);
+  }
+
+  async batchUpdateCollectRecordShare(batchId: number, payload: CollectRecordSharePayload): Promise<{ updated: boolean }> {
+    return requestBackend("PUT", `/collect-batches/${batchId}/records/share`, { data: payload });
   }
 
   async listMyCollectShares(query: CollectShareQuery): Promise<PageResult<CollectShareRecord>> {

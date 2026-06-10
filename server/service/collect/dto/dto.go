@@ -59,6 +59,7 @@ type CollectRecordDTO struct {
 	SourceSnapshotURL string `json:"sourceSnapshotUrl"`
 	RawDataURL        string `json:"rawDataUrl"`
 	IsFavorite        bool   `json:"isFavorite"`
+	IsShared          bool   `json:"isShared"`
 	Status            string `json:"status"`
 	PublishStatus     string `json:"publishStatus"`
 	MissingFields     string `json:"missingFields"`
@@ -87,6 +88,7 @@ type CreateCollectRecordDTO struct {
 	RawDataURL        string `json:"rawDataUrl"`
 	RawSourceData     string `json:"rawSourceData"`
 	IsFavorite        bool   `json:"isFavorite"`
+	IsShared          *bool  `json:"isShared,omitempty"`
 	Status            string `json:"status"`
 	MissingFields     string `json:"missingFields"`
 }
@@ -102,8 +104,14 @@ type UpdateCollectRecordDTO struct {
 	RawDataURL        *string `json:"rawDataUrl,omitempty"`
 	RawSourceData     *string `json:"rawSourceData,omitempty"`
 	IsFavorite        *bool   `json:"isFavorite,omitempty"`
+	IsShared          *bool   `json:"isShared,omitempty"`
 	Status            *string `json:"status,omitempty"`
 	MissingFields     *string `json:"missingFields,omitempty"`
+}
+
+type BatchUpdateCollectRecordShareDTO struct {
+	RecordIDs []uint64 `json:"recordIds"`
+	IsShared  bool     `json:"isShared"`
 }
 
 type CollectRecordQueryDTO struct {
@@ -120,6 +128,7 @@ type CollectRecordQueryDTO struct {
 	Status          string `form:"status"`
 	PublishStatus   string `form:"publishStatus"`
 	IsFavorite      *bool  `form:"isFavorite"`
+	IsShared        *bool  `form:"isShared"`
 }
 
 type AiSelectionStrategyDTO struct {

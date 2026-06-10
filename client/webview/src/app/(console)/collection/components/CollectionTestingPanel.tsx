@@ -13,6 +13,7 @@ import {
   RightOutlined,
   CloseOutlined,
   InboxOutlined,
+  ShareAltOutlined,
 } from "@ant-design/icons";
 import { Button, Empty, Input, Select, Space, Spin, Tag, Tooltip, message } from "antd";
 import {
@@ -57,6 +58,7 @@ interface InjectedCollectTestingItem {
   sourceSnapshotUrl?: string;
   rawDataUrl?: string;
   isFavorite?: boolean;
+  isShared?: boolean;
   status?: string;
 }
 
@@ -94,6 +96,7 @@ function normalizeInjectedItems(items: InjectedCollectTestingItem[], fallbackBat
     sourceSnapshotUrl: String(item.sourceSnapshotUrl || "").trim(),
     rawDataUrl: String(item.rawDataUrl || "").trim(),
     isFavorite: Boolean(item.isFavorite),
+    isShared: item.isShared !== false,
     status: String(item.status || "INJECTED").trim() || "INJECTED",
     publishStatus: "",
     active: 1,
@@ -262,6 +265,10 @@ export function CollectionWorkspaceLeftPanel({
   onPreviewRecord: propOnPreviewRecord,
   fallbackBatchId,
   readOnly = false,
+  showPublishStatus = true,
+  showFavoriteInfo = true,
+  getRecordShareValue,
+  onToggleRecordShare,
 }: {
   workspaceState?: CollectionWorkspaceState;
   loading?: boolean;
@@ -270,6 +277,10 @@ export function CollectionWorkspaceLeftPanel({
   onPreviewRecord?: (record: CollectRecordPreview) => Promise<void> | void;
   fallbackBatchId?: number;
   readOnly?: boolean;
+  showPublishStatus?: boolean;
+  showFavoriteInfo?: boolean;
+  getRecordShareValue?: (record: CollectRecordPreview) => boolean;
+  onToggleRecordShare?: (record: CollectRecordPreview) => void;
 } = {}) {
   const isControlled = propState !== undefined;
   const { workspaceState: hookState, loading: hookLoading } = useCollectionWorkspaceState({
@@ -349,13 +360,14 @@ export function CollectionWorkspaceLeftPanel({
 
   const records = workspaceState.records;
   const favoriteCount = records.filter((record) => record.isFavorite).length;
+  const showShareControl = Boolean(getRecordShareValue);
 
   return (
     <section
       style={{
-        flex: "0 0 auto",
+        flex: "1 1 auto",
         width: "100%",
-        height: "100%",
+        height: isControlled ? "auto" : "100%",
         minHeight: 0,
         minWidth: 0,
         display: "flex",
@@ -386,41 +398,43 @@ export function CollectionWorkspaceLeftPanel({
         <div style={{ fontSize: 12, opacity: 0.65 }}>
           ID: {workspaceState.batch?.id || 0} · 已加载 {records.length} 件商品
         </div>
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 10,
-            marginTop: 10,
-            flexWrap: "wrap",
-          }}
-        >
+        {showFavoriteInfo ? (
           <div
             style={{
-              padding: "5px 10px",
-              borderRadius: 999,
-              background: "rgba(255,255,255,0.82)",
-              border: "1px solid rgba(128,164,214,0.18)",
-              fontSize: 12,
-              fontWeight: 600,
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              marginTop: 10,
+              flexWrap: "wrap",
             }}
           >
-            已关注 {favoriteCount}
+            <div
+              style={{
+                padding: "5px 10px",
+                borderRadius: 999,
+                background: "rgba(255,255,255,0.82)",
+                border: "1px solid rgba(128,164,214,0.18)",
+                fontSize: 12,
+                fontWeight: 600,
+              }}
+            >
+              已关注 {favoriteCount}
+            </div>
+            <div
+              style={{
+                padding: "5px 10px",
+                borderRadius: 999,
+                background: "rgba(216,161,47,0.12)",
+                border: "1px solid rgba(216,161,47,0.22)",
+                color: "#8a6a1d",
+                fontSize: 12,
+                fontWeight: 600,
+              }}
+            >
+              占比 {records.length > 0 ? `${Math.round((favoriteCount / records.length) * 100)}%` : "0%"}
+            </div>
           </div>
-          <div
-            style={{
-              padding: "5px 10px",
-              borderRadius: 999,
-              background: "rgba(216,161,47,0.12)",
-              border: "1px solid rgba(216,161,47,0.22)",
-              color: "#8a6a1d",
-              fontSize: 12,
-              fontWeight: 600,
-            }}
-          >
-            占比 {records.length > 0 ? `${Math.round((favoriteCount / records.length) * 100)}%` : "0%"}
-          </div>
-        </div>
+        ) : null}
       </div>
 
       {/* Navigation - only shown in Electron workspace context */}
@@ -503,7 +517,7 @@ export function CollectionWorkspaceLeftPanel({
           display: "grid",
           gap: 8,
           alignContent: "start",
-          paddingRight: 4,
+          padding: "0 4px 12px 0",
           scrollbarGutter: "stable",
         }}
       >
@@ -524,6 +538,7 @@ export function CollectionWorkspaceLeftPanel({
             const isSelected = record.id === workspaceState.selectedRecordId;
             const isLoadingRecord = record.isLoading === true;
             const isToggling = togglingIds.has(record.id);
+            const shareEnabled = getRecordShareValue?.(record);
 
             return (
               <button
@@ -536,7 +551,7 @@ export function CollectionWorkspaceLeftPanel({
                   textAlign: "left",
                   cursor: isLoadingRecord ? "default" : "pointer",
                   borderRadius: 12,
-                  padding: "8px 80px 8px 12px",
+                  padding: showShareControl ? "8px 116px 8px 12px" : "8px 80px 8px 12px",
                   border: isSelected
                     ? "1.5px solid rgba(59,130,246,0.7)"
                     : "1px solid rgba(226,232,240,0.7)",
@@ -625,7 +640,7 @@ export function CollectionWorkspaceLeftPanel({
                           #{record.sourceProductId.slice(0, 10)}
                         </span>
                       )}
-                      {getPublishStatusTag(record.publishStatus)}
+                      {showPublishStatus ? getPublishStatusTag(record.publishStatus) : null}
                     </div>
                   </div>
 
@@ -669,6 +684,32 @@ export function CollectionWorkspaceLeftPanel({
                             <HeartOutlined style={{ color: "#cbd5e1" }} />
                           )}
                         </button>
+                      ) : null}
+                      {getRecordShareValue ? (
+                        <Tooltip title={shareEnabled ? "允许分享" : "关闭分享"}>
+                          <button
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              onToggleRecordShare?.(record);
+                            }}
+                            style={{
+                              width: 28,
+                              height: 28,
+                              borderRadius: 7,
+                              border: shareEnabled ? "1px solid rgba(82,196,26,0.36)" : "1px solid rgba(226,232,240,0.8)",
+                              background: shareEnabled ? "rgba(240,253,232,0.95)" : "rgba(248,250,252,0.9)",
+                              cursor: onToggleRecordShare ? "pointer" : "default",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              fontSize: 13,
+                              padding: 0,
+                            }}
+                          >
+                            <ShareAltOutlined style={{ color: shareEnabled ? "#52c41a" : "#cbd5e1" }} />
+                          </button>
+                        </Tooltip>
                       ) : null}
                       <button
                         type="button"
@@ -714,12 +755,14 @@ export function CollectionWorkspaceRightPanel({
   onToggleFavorite: propOnToggleFavorite,
   fallbackBatchId,
   readOnly = false,
+  showFavoriteInfo = true,
 }: {
   workspaceState?: CollectionWorkspaceState;
   loading?: boolean;
   onToggleFavorite?: (record: CollectRecordPreview) => Promise<void> | void;
   fallbackBatchId?: number;
   readOnly?: boolean;
+  showFavoriteInfo?: boolean;
 } = {}) {
   const isControlled = propState !== undefined;
   const { workspaceState: hookState, loading: hookLoading } = useCollectionWorkspaceState({
@@ -880,7 +923,7 @@ export function CollectionWorkspaceRightPanel({
                 }}
               />
             )}
-            {!readOnly ? (
+            {!readOnly && showFavoriteInfo ? (
               <IconOnlyButton
                 type="primary"
                 size="small"

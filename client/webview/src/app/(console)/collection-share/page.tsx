@@ -371,7 +371,9 @@ export default function CollectionSharePage() {
         batch={detailBatch}
         sourceType={normalizeCollectSourceType(detailBatch?.platform)}
         readOnly
-        favoritesOnly
+        sharedOnly
+        showPublishStatus={false}
+        showFavoriteInfo={false}
         onClose={() => setDetailOpen(false)}
       />
 

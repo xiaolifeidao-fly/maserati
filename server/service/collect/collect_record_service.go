@@ -46,8 +46,8 @@ func (s *CollectService) ListCollectRecordsByBatch(batchID uint, query collectDT
 		if !shared {
 			return nil, gorm.ErrRecordNotFound
 		}
-		onlyFavorite := true
-		query.IsFavorite = &onlyFavorite
+		onlyShared := true
+		query.IsShared = &onlyShared
 		query.AppUserID = batch.AppUserID
 	}
 	if query.AppUserID == 0 {
@@ -89,7 +89,7 @@ func (s *CollectService) GetCollectRecordByIDForUser(id uint, appUserID uint64) 
 	if err != nil {
 		return nil, err
 	}
-	if !shared || !entity.IsFavorite {
+	if !shared || !entity.IsShared {
 		return nil, gorm.ErrRecordNotFound
 	}
 	return db.ToDTO[collectDTO.CollectRecordDTO](entity), nil
@@ -109,6 +109,10 @@ func (s *CollectService) CreateCollectRecord(req *collectDTO.CreateCollectRecord
 	if err != nil {
 		return nil, err
 	}
+	isShared := true
+	if req.IsShared != nil {
+		isShared = *req.IsShared
+	}
 	entity, err := s.collectRecordRepository.Create(&collectRepository.CollectRecord{
 		AppUserID:         req.AppUserID,
 		CollectBatchID:    req.CollectBatchID,
@@ -118,6 +122,7 @@ func (s *CollectService) CreateCollectRecord(req *collectDTO.CreateCollectRecord
 		SourceSnapshotURL: strings.TrimSpace(req.SourceSnapshotURL),
 		RawDataURL:        rawDataURL,
 		IsFavorite:        req.IsFavorite,
+		IsShared:          isShared,
 		Status:            normalizeCollectRecordStatus(req.Status),
 		MissingFields:     normalizeCollectMissingFields(req.MissingFields),
 	})
@@ -193,6 +198,9 @@ func (s *CollectService) UpdateCollectRecord(id uint, req *collectDTO.UpdateColl
 	}
 	if req.IsFavorite != nil {
 		entity.IsFavorite = *req.IsFavorite
+	}
+	if req.IsShared != nil {
+		entity.IsShared = *req.IsShared
 	}
 	if req.Status != nil {
 		entity.Status = normalizeCollectRecordStatus(*req.Status)
@@ -284,7 +292,7 @@ func (s *CollectService) GetCollectRecordRawDataBySource(query collectDTO.Collec
 	if strings.TrimSpace(entity.RawDataURL) == "" {
 		return nil, gorm.ErrRecordNotFound
 	}
-	if query.AppUserID > 0 && entity.AppUserID != query.AppUserID && !entity.IsFavorite {
+	if query.AppUserID > 0 && entity.AppUserID != query.AppUserID && !entity.IsShared {
 		return nil, gorm.ErrRecordNotFound
 	}
 	rawBytes, err := oss.Get(entity.RawDataURL)
@@ -349,6 +357,23 @@ func (s *CollectService) DeleteCollectRecord(id uint) error {
 	entity.Active = 0
 	_, err = s.collectRecordRepository.SaveOrUpdate(entity)
 	return err
+}
+
+func (s *CollectService) BatchUpdateCollectRecordShare(batchID uint, appUserID uint64, req *collectDTO.BatchUpdateCollectRecordShareDTO) error {
+	if req == nil {
+		return fmt.Errorf("request is nil")
+	}
+	batch, err := s.collectBatchRepository.FindById(batchID)
+	if err != nil {
+		return err
+	}
+	if batch.Active == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	if appUserID > 0 && batch.AppUserID != appUserID {
+		return fmt.Errorf("只能更新自己的采集记录分享设置")
+	}
+	return s.collectRecordRepository.UpdateShareByIDs(uint64(batchID), batch.AppUserID, req.RecordIDs, req.IsShared)
 }
 
 func (s *CollectService) fillCollectRecordPublishStatuses(items []*collectDTO.CollectRecordDTO, batchID, appUserID uint64) error {

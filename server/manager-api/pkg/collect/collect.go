@@ -5,6 +5,8 @@ import (
 	"net/http"
 	collectService "service/collect"
 	collectDTO "service/collect/dto"
+	collectShareService "service/collect_share"
+	collectShareDTO "service/collect_share/dto"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
@@ -13,16 +15,20 @@ import (
 
 type CollectHandler struct {
 	*commonRouter.BaseHandler
-	service *collectService.CollectService
+	service      *collectService.CollectService
+	shareService *collectShareService.CollectShareService
 }
 
 func NewCollectHandler() *CollectHandler {
 	service := collectService.NewCollectService()
 	_ = service.EnsureTable()
+	shareService := collectShareService.NewCollectShareService()
+	_ = shareService.EnsureTable()
 
 	return &CollectHandler{
-		BaseHandler: &commonRouter.BaseHandler{},
-		service:     service,
+		BaseHandler:  &commonRouter.BaseHandler{},
+		service:      service,
+		shareService: shareService,
 	}
 }
 
@@ -33,6 +39,11 @@ func (h *CollectHandler) RegisterHandler(engine *gin.RouterGroup) {
 	engine.POST("/collect-batches", h.createBatch)
 	engine.PUT("/collect-batches/:id", h.updateBatch)
 	engine.DELETE("/collect-batches/:id", h.deleteBatch)
+	engine.POST("/collect-batches/:id/share", h.shareBatch)
+	engine.GET("/collect-batches/:id/shares", h.listBatchShares)
+	engine.PUT("/collect-batches/:id/shares/:shareId/cancel", h.cancelBatchShare)
+	engine.PUT("/collect-batches/:id/records/share", h.batchUpdateRecordShare)
+	engine.PUT("/collect-records/:id", h.updateCollectRecord)
 	engine.GET("/collect-records/:id/raw-data", h.getCollectRecordRawData)
 	engine.GET("/ai-selection-strategies", h.listAiSelectionStrategies)
 	engine.GET("/ai-selection-strategies/:id", h.getAiSelectionStrategyByID)
@@ -108,6 +119,74 @@ func (h *CollectHandler) deleteBatch(context *gin.Context) {
 	commonRouter.ToJson(context, gin.H{"deleted": true}, err)
 }
 
+func (h *CollectHandler) shareBatch(context *gin.Context) {
+	id, ok := parseCollectID(context)
+	if !ok {
+		return
+	}
+	var req collectShareDTO.CreateCollectShareDTO
+	if err := context.ShouldBindJSON(&req); err != nil {
+		commonRouter.ToError(context, "参数错误")
+		return
+	}
+	req.CollectBatchID = uint64(id)
+	batch, err := h.service.GetCollectBatchByID(id)
+	if err == gorm.ErrRecordNotFound {
+		commonRouter.ToError(context, "collect batch not found")
+		return
+	}
+	if err != nil {
+		commonRouter.ToJson(context, nil, err)
+		return
+	}
+	result, err := h.shareService.ShareCollectBatch(batch.AppUserID, &req)
+	commonRouter.ToJson(context, result, err)
+}
+
+func (h *CollectHandler) listBatchShares(context *gin.Context) {
+	id, ok := parseCollectID(context)
+	if !ok {
+		return
+	}
+	batch, err := h.service.GetCollectBatchByID(id)
+	if err == gorm.ErrRecordNotFound {
+		commonRouter.ToError(context, "collect batch not found")
+		return
+	}
+	if err != nil {
+		commonRouter.ToJson(context, nil, err)
+		return
+	}
+	result, err := h.shareService.ListBatchShares(batch.AppUserID, uint64(id))
+	commonRouter.ToJson(context, result, err)
+}
+
+func (h *CollectHandler) cancelBatchShare(context *gin.Context) {
+	id, ok := parseCollectID(context)
+	if !ok {
+		return
+	}
+	shareID, ok := parseCollectShareID(context)
+	if !ok {
+		return
+	}
+	batch, err := h.service.GetCollectBatchByID(id)
+	if err == gorm.ErrRecordNotFound {
+		commonRouter.ToError(context, "collect batch not found")
+		return
+	}
+	if err != nil {
+		commonRouter.ToJson(context, nil, err)
+		return
+	}
+	err = h.shareService.CancelBatchShare(batch.AppUserID, uint64(id), shareID)
+	if err == gorm.ErrRecordNotFound {
+		commonRouter.ToError(context, "collect share not found")
+		return
+	}
+	commonRouter.ToJson(context, gin.H{"cancelled": true}, err)
+}
+
 func (h *CollectHandler) listBatchRecords(context *gin.Context) {
 	id, ok := parseCollectID(context)
 	if !ok {
@@ -124,6 +203,42 @@ func (h *CollectHandler) listBatchRecords(context *gin.Context) {
 		return
 	}
 	commonRouter.ToJson(context, result, err)
+}
+
+func (h *CollectHandler) updateCollectRecord(context *gin.Context) {
+	id, ok := parseCollectID(context)
+	if !ok {
+		return
+	}
+	var req collectDTO.UpdateCollectRecordDTO
+	if err := context.ShouldBindJSON(&req); err != nil {
+		commonRouter.ToError(context, "参数错误")
+		return
+	}
+	result, err := h.service.UpdateCollectRecord(id, &req)
+	if err == gorm.ErrRecordNotFound {
+		commonRouter.ToError(context, "collect record not found")
+		return
+	}
+	commonRouter.ToJson(context, result, err)
+}
+
+func (h *CollectHandler) batchUpdateRecordShare(context *gin.Context) {
+	id, ok := parseCollectID(context)
+	if !ok {
+		return
+	}
+	var req collectDTO.BatchUpdateCollectRecordShareDTO
+	if err := context.ShouldBindJSON(&req); err != nil {
+		commonRouter.ToError(context, "参数错误")
+		return
+	}
+	err := h.service.BatchUpdateCollectRecordShare(id, 0, &req)
+	if err == gorm.ErrRecordNotFound {
+		commonRouter.ToError(context, "collect batch not found")
+		return
+	}
+	commonRouter.ToJson(context, gin.H{"updated": true}, err)
 }
 
 func (h *CollectHandler) getCollectRecordRawData(context *gin.Context) {
@@ -251,6 +366,20 @@ func parseCollectID(context *gin.Context) (uint, bool) {
 			"code":  commonRouter.FailCode,
 			"data":  "参数错误",
 			"error": "id必须是正整数",
+		})
+		return 0, false
+	}
+	return uint(id), true
+}
+
+func parseCollectShareID(context *gin.Context) (uint, bool) {
+	idValue := context.Param("shareId")
+	id, err := strconv.ParseUint(idValue, 10, 32)
+	if err != nil || id == 0 {
+		context.JSON(http.StatusOK, gin.H{
+			"code":  commonRouter.FailCode,
+			"data":  "参数错误",
+			"error": "shareId必须是正整数",
 		})
 		return 0, false
 	}

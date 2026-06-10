@@ -83,6 +83,36 @@ func (r *CollectShareRepository) ListMine(ownerUserID uint64, query collectShare
 	return rows, err
 }
 
+func (r *CollectShareRepository) ListActiveByBatch(ownerUserID, batchID uint64) ([]CollectShareListRow, error) {
+	if r.Db == nil {
+		return nil, fmt.Errorf("database is not initialized")
+	}
+	var rows []CollectShareListRow
+	err := r.Db.Model(&CollectShare{}).
+		Joins("JOIN collect_batch ON collect_batch.id = collect_share.collect_batch_id AND collect_batch.active = ?", 1).
+		Joins("LEFT JOIN app_user owner ON owner.id = collect_share.owner_user_id AND owner.active = ?", 1).
+		Joins("LEFT JOIN app_user share_user ON share_user.id = collect_share.share_user_id AND share_user.active = ?", 1).
+		Where("collect_share.active = ? AND collect_share.owner_user_id = ? AND collect_share.collect_batch_id = ? AND collect_share.status = ?", 1, ownerUserID, batchID, "ACTIVE").
+		Select(`
+			collect_share.id,
+			collect_share.active,
+			collect_share.created_time,
+			collect_share.updated_time,
+			collect_share.created_by,
+			collect_share.updated_by,
+			collect_share.collect_batch_id,
+			collect_share.owner_user_id,
+			collect_share.share_user_id,
+			collect_share.status,
+			collect_batch.name AS batch_name,
+			owner.username AS owner_username,
+			share_user.username AS share_username
+		`).
+		Order("collect_share.id DESC").
+		Scan(&rows).Error
+	return rows, err
+}
+
 func (r *CollectShareRepository) CountSharedToMe(shareUserID uint64, query collectShareDTO.CollectShareQueryDTO) (int64, error) {
 	dbQuery, err := r.buildSharedToMeQuery(shareUserID, query)
 	if err != nil {

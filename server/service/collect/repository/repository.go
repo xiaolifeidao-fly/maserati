@@ -245,7 +245,14 @@ func (r *CollectRecordRepository) EnsureTable() error {
 	if r.Db == nil {
 		return fmt.Errorf("database is not initialized")
 	}
-	return r.Db.AutoMigrate(&CollectRecord{})
+	hadIsSharedColumn := r.Db.Migrator().HasColumn(&CollectRecord{}, "is_shared")
+	if err := r.Db.AutoMigrate(&CollectRecord{}); err != nil {
+		return err
+	}
+	if !hadIsSharedColumn {
+		return r.Db.Model(&CollectRecord{}).Update("is_shared", 1).Error
+	}
+	return nil
 }
 
 func (r *CollectRecordRepository) CountByQuery(query collectDTO.CollectRecordQueryDTO) (int64, error) {
@@ -265,6 +272,9 @@ func (r *CollectRecordRepository) CountByQuery(query collectDTO.CollectRecordQue
 	if query.IsFavorite != nil {
 		dbQuery = dbQuery.Where("is_favorite = ?", *query.IsFavorite)
 	}
+	if query.IsShared != nil {
+		dbQuery = dbQuery.Where("is_shared = ?", *query.IsShared)
+	}
 	dbQuery = applyCollectRecordSourceFilter(dbQuery, query.Source)
 	if value := strings.TrimSpace(query.ProductName); value != "" {
 		dbQuery = dbQuery.Where("product_name LIKE ?", "%"+value+"%")
@@ -278,6 +288,36 @@ func (r *CollectRecordRepository) CountByQuery(query collectDTO.CollectRecordQue
 		return 0, err
 	}
 	return total, nil
+}
+
+func (r *CollectRecordRepository) UpdateShareByIDs(batchID, appUserID uint64, recordIDs []uint64, isShared bool) error {
+	if r.Db == nil {
+		return fmt.Errorf("database is not initialized")
+	}
+	ids := make([]uint64, 0, len(recordIDs))
+	seen := map[uint64]struct{}{}
+	for _, id := range recordIDs {
+		if id == 0 {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	if batchID == 0 {
+		return fmt.Errorf("collectBatchId is required")
+	}
+	if len(ids) == 0 {
+		return fmt.Errorf("recordIds is required")
+	}
+	dbQuery := r.Db.Model(&CollectRecord{}).
+		Where("active = ? AND collect_batch_id = ? AND id IN ?", 1, batchID, ids)
+	if appUserID > 0 {
+		dbQuery = dbQuery.Where("app_user_id = ?", appUserID)
+	}
+	return dbQuery.Update("is_shared", isShared).Error
 }
 
 func (r *CollectRecordRepository) ListByQuery(query collectDTO.CollectRecordQueryDTO, pageIndex, pageSize int) ([]*CollectRecord, error) {
@@ -296,6 +336,9 @@ func (r *CollectRecordRepository) ListByQuery(query collectDTO.CollectRecordQuer
 	}
 	if query.IsFavorite != nil {
 		dbQuery = dbQuery.Where("is_favorite = ?", *query.IsFavorite)
+	}
+	if query.IsShared != nil {
+		dbQuery = dbQuery.Where("is_shared = ?", *query.IsShared)
 	}
 	dbQuery = applyCollectRecordSourceFilter(dbQuery, query.Source)
 	if value := strings.TrimSpace(query.ProductName); value != "" {
