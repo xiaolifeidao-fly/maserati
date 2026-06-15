@@ -107,6 +107,29 @@ export class EditDraftStep extends PublishStep {
       },
     });
 
+    // [EDIT-DRAFT-DEBUG] 打印刷新后 window.Json 中原始的 catProp 数据源（未经 parser 裁剪字段），
+    // 用于核对联动属性（如型号 p-20000-xxx）是否已出现、及其 parent/async/dataSource 原始内容
+    const rawCatProps = extractRawCatProps(rawWindowJson);
+    publishInfo(`[task:${ctx.taskId}] [TB] [draft-update] raw catProps from window.Json`, {
+      taskId: ctx.taskId,
+      draftId: draftCtx.draftId,
+      output: {
+        count: rawCatProps.length,
+        names: rawCatProps.map(p => ({
+          name: p?.['name'],
+          parent: p?.['parent'],
+          required: p?.['required'],
+          uiType: p?.['uiType'],
+          hasAsync: Boolean(p?.['async']),
+          dataSourceLength: Array.isArray(p?.['dataSource']) ? (p['dataSource'] as unknown[]).length : 0,
+        })),
+        p20000Related: rawCatProps.filter(p => {
+          const name = p?.['name'];
+          return typeof name === 'string' && (name === 'p-20000' || name.startsWith('p-20000-') || p?.['parent'] === 'p-20000');
+        }),
+      },
+    });
+
     // 更新 draftContext 中的 pageJsonData 与 catId（平台可能调整类目）
     draftCtx.pageJsonData = rawWindowJson as Record<string, unknown>;
     draftCtx.saleSpecUiMode = saleSpecUiState.mode;
@@ -309,4 +332,27 @@ export class EditDraftStep extends PublishStep {
 
     return missing;
   }
+}
+
+/**
+ * 从原始 window.Json 中提取 catProp 的原始数据源（不经 parser 裁剪字段），
+ * 镜像 parseTbWindowJsonForDraft 中 catPropsSource 的取值逻辑：
+ * 优先 models.catProp.dataSource，为空时回退 components.catProp.props.dataSource。
+ * 仅用于 [EDIT-DRAFT-DEBUG] 日志，保留 parent/async 等 parser 未提取的原始字段。
+ */
+function extractRawCatProps(raw: unknown): Array<Record<string, unknown>> {
+  const root = raw as Record<string, unknown> | null | undefined;
+  const models = root?.['models'] as Record<string, unknown> | undefined;
+  const components = root?.['components'] as Record<string, unknown> | undefined;
+
+  const modelsCatProp = models?.['catProp'] as Record<string, unknown> | undefined;
+  const modelsDataSource = modelsCatProp?.['dataSource'];
+  if (Array.isArray(modelsDataSource) && modelsDataSource.length) {
+    return modelsDataSource as Array<Record<string, unknown>>;
+  }
+
+  const catPropComponent = components?.['catProp'] as Record<string, unknown> | undefined;
+  const props = catPropComponent?.['props'] as Record<string, unknown> | undefined;
+  const compDataSource = props?.['dataSource'];
+  return Array.isArray(compDataSource) ? (compDataSource as Array<Record<string, unknown>>) : [];
 }

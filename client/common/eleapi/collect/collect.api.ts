@@ -123,6 +123,7 @@ export class CollectBatchRecord {
   appUserId = 0;
   shopId = 0;
   platform = "";
+  shopPlatform = "";
   name = "";
   status = "";
   ossUrl = "";

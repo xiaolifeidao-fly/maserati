@@ -193,13 +193,15 @@ interface ProductPublishModalProps {
   onCancel: () => void;
   onPublished?: () => Promise<void> | void;
   initialBatchId?: number;
-  initialBatch?: Pick<CollectBatchRecord, "id" | "shopId" | "platform" | "name" | "status" | "collectedCount">;
+  initialBatch?: Pick<CollectBatchRecord, "id" | "shopId" | "platform" | "name" | "status" | "collectedCount">
+    & Partial<Pick<CollectBatchRecord, "shopPlatform">>;
   initialEntryScene?: "collection" | "product";
   initialView?: "default" | "progress";
 }
 
 function toInitialCollectBatchRecord(
-  batch?: Pick<CollectBatchRecord, "id" | "shopId" | "platform" | "name" | "status" | "collectedCount">,
+  batch?: Pick<CollectBatchRecord, "id" | "shopId" | "platform" | "name" | "status" | "collectedCount">
+    & Partial<Pick<CollectBatchRecord, "shopPlatform">>,
 ): CollectBatchRecord | null {
   if (!batch || Number(batch.id) <= 0) {
     return null;
@@ -208,7 +210,8 @@ function toInitialCollectBatchRecord(
     id: Number(batch.id),
     appUserId: 0,
     shopId: Number(batch.shopId || 0),
-    platform: batch.platform || "",
+    platform: resolveCollectBatchPlatform(batch),
+    shopPlatform: batch.shopPlatform || "",
     name: batch.name || `批次 #${batch.id}`,
     status: batch.status || "",
     ossUrl: "",
@@ -1106,7 +1109,7 @@ export function ProductPublishModal({
       return;
     }
 
-    const sourceType = collectSourceTypeToPublishSourceType(normalizeCollectSourceType(selectedBatch.platform));
+    const sourceType = collectSourceTypeToPublishSourceType(normalizeCollectSourceType(resolveCollectBatchPlatform(selectedBatch)));
     if (!sourceType) {
       message.error("当前选品批次来源平台暂不支持发布");
       return;
@@ -2843,6 +2846,10 @@ function normalizePlatform(platform: string) {
     return "pxx";
   }
   return normalized;
+}
+
+function resolveCollectBatchPlatform(batch?: Pick<CollectBatchRecord, "platform"> & Partial<Pick<CollectBatchRecord, "shopPlatform">> | null) {
+  return batch?.platform || batch?.shopPlatform || "";
 }
 
 function normalizeShopUsage(shopUsage: string) {

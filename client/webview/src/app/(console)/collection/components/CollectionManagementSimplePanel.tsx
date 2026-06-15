@@ -110,6 +110,10 @@ const platformOptions = [
   { key: "pxx", label: "拼多多", value: "pxx" },
 ];
 
+function resolveCollectBatchPlatform(batch?: Pick<CollectBatchRecord, "platform" | "shopPlatform"> | null) {
+  return batch?.platform || batch?.shopPlatform || "";
+}
+
 const aiStrategyTypeOptions = [
   { label: "按店铺", value: "SHOP" },
   { label: "按搜索品类", value: "SEARCH_CATEGORY" },
@@ -332,12 +336,13 @@ export function CollectionManagementSimplePanel() {
   };
 
   const openPublishModal = (record: CollectBatchRecord) => {
+    const platform = resolveCollectBatchPlatform(record);
     void getPublishWindowApi().openPublishWindow({
       batchId: record.id,
       batch: {
         id: record.id,
         shopId: record.shopId,
-        platform: record.platform,
+        platform,
         name: record.name,
         status: record.status,
         collectedCount: record.collectedCount,
@@ -347,12 +352,13 @@ export function CollectionManagementSimplePanel() {
   };
 
   const openPublishProgressModal = (record: CollectBatchRecord) => {
+    const platform = resolveCollectBatchPlatform(record);
     void getPublishWindowApi().openPublishWindow({
       batchId: record.id,
       batch: {
         id: record.id,
         shopId: record.shopId,
-        platform: record.platform,
+        platform,
         name: record.name,
         status: record.status,
         collectedCount: record.collectedCount,
