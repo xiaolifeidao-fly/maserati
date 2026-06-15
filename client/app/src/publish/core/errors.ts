@@ -75,8 +75,8 @@ export function isCaptchaError(err: unknown): err is CaptchaRequiredError {
 export class LoginRequiredError extends PublishError {
   readonly shopId: number;
 
-  constructor(stepCode: StepCode, shopId: number) {
-    super(stepCode, '未登录', true);
+  constructor(stepCode: StepCode, shopId: number, details?: Record<string, unknown>) {
+    super(stepCode, '未登录', true, details);
     this.name = 'LoginRequiredError';
     this.shopId = shopId;
   }

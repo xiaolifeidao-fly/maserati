@@ -31,15 +31,97 @@ const browserMap = new Map<string, Browser>();
 
 const contextMap = new Map<string, BrowserContext>();
 
+type BrowserPluginInfo = {
+    name: string;
+    description: string;
+    filename: string;
+};
+
+type BrowserMimeTypeInfo = {
+    type: string;
+    suffixes: string;
+    description: string;
+};
+
+type BrowserDeviceProfile = {
+    userAgent: string;
+    uaPlatform: string;
+    locale: string;
+    timezoneId: string;
+    platform?: string;
+    language?: string;
+    languages?: string[];
+    hardwareConcurrency?: number;
+    deviceMemory?: number;
+    deviceScaleFactor?: number;
+    webgl?: {
+        vendor?: string;
+        renderer?: string;
+    };
+    plugins?: BrowserPluginInfo[];
+    mimeTypes?: BrowserMimeTypeInfo[];
+};
+
 // ─── 从 Chrome 自身读取真实 UA，只修掉 HeadlessChrome 标识 ──────────────────
 const chromeUACache = new Map<string, string>();
+const deviceProfileCache = new Map<string, BrowserDeviceProfile>();
 
-async function getRealChromeUA(chromePath?: string): Promise<string> {
+function getSystemLocale(): string {
+    return app.getLocale() || Intl.DateTimeFormat().resolvedOptions().locale || 'zh-CN';
+}
+
+function getSystemTimezoneId(): string {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Shanghai';
+}
+
+function getCurrentDeviceScaleFactor(): number | undefined {
+    try {
+        const primaryDisplay = electronScreen.getPrimaryDisplay();
+        return primaryDisplay.scaleFactor || undefined;
+    } catch {
+        return undefined;
+    }
+}
+
+function getUaPlatformByOS(): string {
+    const p = os.platform();
+    return p === 'darwin' ? 'macOS' : p === 'win32' ? 'Windows' : 'Linux';
+}
+
+function normalizeUserAgent(userAgent: string, chromePath?: string): string {
+    const fixedUA = String(userAgent || '').replace('HeadlessChrome/', 'Chrome/');
+    if (fixedUA) return fixedUA;
+
+    let version = '136.0.0.0';
+    if (chromePath) {
+        try {
+            const out = execSync(`"${chromePath}" --version 2>/dev/null`, { timeout: 5000 }).toString().trim();
+            const m = out.match(/(\d+\.\d+\.\d+\.\d+)/);
+            if (m) version = m[1];
+        } catch { /* ignore */ }
+    }
+    const p = os.platform();
+    return p === 'darwin'
+        ? `Mozilla/5.0 (Macintosh; Intel Mac OS X ${String((process as any).getSystemVersion?.() || os.release() || '10.15.7').replace(/\./g, '_')}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${version} Safari/537.36`
+        : p === 'win32'
+        ? `Mozilla/5.0 (Windows NT ${os.release().split('.').slice(0, 2).join('.') || '10.0'}; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${version} Safari/537.36`
+        : `Mozilla/5.0 (X11; Linux ${os.arch() === 'x64' ? 'x86_64' : os.arch()}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${version} Safari/537.36`;
+}
+
+async function getBrowserDeviceProfile(chromePath?: string): Promise<BrowserDeviceProfile> {
     const cacheKey = chromePath ?? '__default__';
-    if (chromeUACache.has(cacheKey)) return chromeUACache.get(cacheKey)!;
+    if (deviceProfileCache.has(cacheKey)) return deviceProfileCache.get(cacheKey)!;
 
-    const tmpDir = path.join(os.tmpdir(), `cr-ua-probe-${Date.now()}`);
+    const tmpDir = path.join(os.tmpdir(), `cr-device-probe-${Date.now()}`);
     let tempCtx: any;
+    const fallbackProfile = (): BrowserDeviceProfile => ({
+        userAgent: normalizeUserAgent('', chromePath),
+        uaPlatform: getUaPlatformByOS(),
+        locale: getSystemLocale(),
+        timezoneId: getSystemTimezoneId(),
+        deviceScaleFactor: getCurrentDeviceScaleFactor(),
+    });
+
     try {
         tempCtx = await chromium.launchPersistentContext(tmpDir, {
             headless: true,
@@ -47,43 +129,100 @@ async function getRealChromeUA(chromePath?: string): Promise<string> {
             args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
         });
         const page = await tempCtx.newPage();
-        const rawUA: string = await page.evaluate(() => navigator.userAgent);
-        // 只修掉 HeadlessChrome → Chrome，其余（macOS版本、Chrome版本）全部保留真实值
-        const fixedUA = rawUA.replace('HeadlessChrome/', 'Chrome/');
-        chromeUACache.set(cacheKey, fixedUA);
-        log.info('[Engine] real Chrome UA:', fixedUA);
-        return fixedUA;
+        const rawProfile = await page.evaluate(() => {
+            const getWebglInfo = () => {
+                try {
+                    const canvas = document.createElement('canvas');
+                    const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+                    if (!gl) return {};
+                    const ext = gl.getExtension('WEBGL_debug_renderer_info');
+                    if (!ext) return {};
+                    return {
+                        vendor: gl.getParameter(ext.UNMASKED_VENDOR_WEBGL),
+                        renderer: gl.getParameter(ext.UNMASKED_RENDERER_WEBGL),
+                    };
+                } catch {
+                    return {};
+                }
+            };
+            return {
+                userAgent: navigator.userAgent,
+                platform: navigator.platform,
+                language: navigator.language,
+                languages: Array.from(navigator.languages || []),
+                hardwareConcurrency: navigator.hardwareConcurrency,
+                deviceMemory: (navigator as any).deviceMemory,
+                deviceScaleFactor: window.devicePixelRatio,
+                timezoneId: Intl.DateTimeFormat().resolvedOptions().timeZone,
+                locale: Intl.DateTimeFormat().resolvedOptions().locale,
+                webgl: getWebglInfo(),
+                plugins: Array.from(navigator.plugins || []).map((plugin: any) => ({
+                    name: String(plugin.name || ''),
+                    description: String(plugin.description || ''),
+                    filename: String(plugin.filename || ''),
+                })).filter((plugin) => plugin.name || plugin.description || plugin.filename),
+                mimeTypes: Array.from(navigator.mimeTypes || []).map((mime: any) => ({
+                    type: String(mime.type || ''),
+                    suffixes: String(mime.suffixes || ''),
+                    description: String(mime.description || ''),
+                })).filter((mime) => mime.type),
+            };
+        });
+        const profile: BrowserDeviceProfile = {
+            userAgent: normalizeUserAgent(rawProfile.userAgent, chromePath),
+            uaPlatform: getUaPlatformByOS(),
+            locale: rawProfile.locale || getSystemLocale(),
+            timezoneId: rawProfile.timezoneId || getSystemTimezoneId(),
+            platform: rawProfile.platform || undefined,
+            language: rawProfile.language || undefined,
+            languages: Array.isArray(rawProfile.languages) ? rawProfile.languages.filter(Boolean) : undefined,
+            hardwareConcurrency: Number(rawProfile.hardwareConcurrency) || undefined,
+            deviceMemory: Number(rawProfile.deviceMemory) || undefined,
+            deviceScaleFactor: Number(rawProfile.deviceScaleFactor) || getCurrentDeviceScaleFactor(),
+            webgl: rawProfile.webgl || undefined,
+            plugins: Array.isArray(rawProfile.plugins) ? rawProfile.plugins : undefined,
+            mimeTypes: Array.isArray(rawProfile.mimeTypes) ? rawProfile.mimeTypes : undefined,
+        };
+        deviceProfileCache.set(cacheKey, profile);
+        chromeUACache.set(cacheKey, profile.userAgent);
+        log.info('[Engine] browser device profile:', {
+            userAgent: profile.userAgent,
+            uaPlatform: profile.uaPlatform,
+            locale: profile.locale,
+            timezoneId: profile.timezoneId,
+            platform: profile.platform,
+            deviceScaleFactor: profile.deviceScaleFactor,
+            webgl: profile.webgl,
+            plugins: profile.plugins?.length || 0,
+            mimeTypes: profile.mimeTypes?.length || 0,
+        });
+        return profile;
     } catch (error) {
-        log.warn('[Engine] UA probe failed, using fallback:', error);
-        // fallback：用 chrome --version 拼一个
-        let version = '136.0.0.0';
-        if (chromePath) {
-            try {
-                const out = execSync(`"${chromePath}" --version 2>/dev/null`, { timeout: 5000 }).toString().trim();
-                const m = out.match(/(\d+\.\d+\.\d+\.\d+)/);
-                if (m) version = m[1];
-            } catch { /* ignore */ }
-        }
-        const p = os.platform();
-        const ua = p === 'darwin'
-            ? `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${version} Safari/537.36`
-            : p === 'win32'
-            ? `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${version} Safari/537.36`
-            : `Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${version} Safari/537.36`;
-        chromeUACache.set(cacheKey, ua);
-        return ua;
+        log.warn('[Engine] device profile probe failed, using system fallback:', error);
+        const profile = fallbackProfile();
+        deviceProfileCache.set(cacheKey, profile);
+        chromeUACache.set(cacheKey, profile.userAgent);
+        return profile;
     } finally {
         try { await tempCtx?.close(); } catch { }
         try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { }
     }
 }
 
+async function getRealChromeUA(chromePath?: string): Promise<string> {
+    const cacheKey = chromePath ?? '__default__';
+    if (chromeUACache.has(cacheKey)) return chromeUACache.get(cacheKey)!;
+    const profile = await getBrowserDeviceProfile(chromePath);
+    return profile.userAgent;
+}
+
 function buildSecChUaHeaders(userAgent: string, uaPlatform: string): Record<string, string> {
     const m = userAgent.match(/Chrome\/(\d+)/);
     const majorVersion = m ? m[1] : '136';
+    const isMobile = /Mobile|Android|iPhone|iPad|iPod/i.test(userAgent);
     return {
         'sec-ch-ua': `"Chromium";v="${majorVersion}", "Google Chrome";v="${majorVersion}", "Not A(Brand";v="24"`,
-        'sec-ch-ua-mobile': '?0',
+        'sec-ch-ua-mobile': isMobile ? '?1' : '?0',
         'sec-ch-ua-platform': `"${uaPlatform}"`,
     };
 }
@@ -526,15 +665,13 @@ export abstract class DoorEngine<T = any> {
         const userDataDir = this.getUserDataDir();
         clearChromeLockFiles(userDataDir);
 
-        const osPlatform = os.platform();
-        const uaPlatform = osPlatform === 'darwin' ? 'macOS' : osPlatform === 'win32' ? 'Windows' : 'Linux';
-        const userAgent = await getRealChromeUA(storeBrowserPath);
-        const secChUaHeaders = buildSecChUaHeaders(userAgent, uaPlatform);
+        const deviceProfile = await getBrowserDeviceProfile(storeBrowserPath);
+        const secChUaHeaders = buildSecChUaHeaders(deviceProfile.userAgent, deviceProfile.uaPlatform);
 
         const contextConfig: any = {
             headless: this.headless,
             executablePath: storeBrowserPath,
-            userAgent,
+            userAgent: deviceProfile.userAgent,
             viewport: this.getViewportConfig(),
             args: [
                 ...this.browserArgs,
@@ -548,14 +685,17 @@ export abstract class DoorEngine<T = any> {
             ],
             extraHTTPHeaders: secChUaHeaders,
             bypassCSP : true,
-            locale: 'zh-CN',
-            timezoneId: 'Asia/Shanghai',
+            locale: deviceProfile.locale,
+            timezoneId: deviceProfile.timezoneId,
         };
+        if (this.headless && deviceProfile.deviceScaleFactor) {
+            contextConfig.deviceScaleFactor = deviceProfile.deviceScaleFactor;
+        }
         try{
             const context = await chromium.launchPersistentContext(userDataDir, contextConfig);
             contextMap.set(key, context);
             try {
-                await this.addAntiDetectionScript(context, userAgent, uaPlatform);
+                await this.addAntiDetectionScript(context, deviceProfile);
             } catch (injectError) {
                 log.warn('[Engine] failed to inject anti-detection script (persistent)', injectError);
             }
@@ -1248,16 +1388,14 @@ export abstract class DoorEngine<T = any> {
         }
         
         const storeBrowserPath = await this.getRealChromePath();
-        const osPlatformCtx = os.platform();
-        const uaPlatformCtx = osPlatformCtx === 'darwin' ? 'macOS' : osPlatformCtx === 'win32' ? 'Windows' : 'Linux';
-        const userAgentCtx = await getRealChromeUA(storeBrowserPath);
-        const secChUaHeadersCtx = buildSecChUaHeaders(userAgentCtx, uaPlatformCtx);
+        const deviceProfile = await getBrowserDeviceProfile(storeBrowserPath);
+        const secChUaHeadersCtx = buildSecChUaHeaders(deviceProfile.userAgent, deviceProfile.uaPlatform);
         // let context;
         const contextConfig : any = {
             bypassCSP : true,
-            locale: 'zh-CN',
-            timezoneId: 'Asia/Shanghai',
-            userAgent: userAgentCtx,
+            locale: deviceProfile.locale,
+            timezoneId: deviceProfile.timezoneId,
+            userAgent: deviceProfile.userAgent,
             viewport: this.getViewportConfig(),
             extraHTTPHeaders: secChUaHeadersCtx,
             args: [
@@ -1271,6 +1409,9 @@ export abstract class DoorEngine<T = any> {
                 '--mute-audio',
             ],
         }
+        if (this.headless && deviceProfile.deviceScaleFactor) {
+            contextConfig.deviceScaleFactor = deviceProfile.deviceScaleFactor;
+        }
         if(storeBrowserPath){
             contextConfig.executablePath = storeBrowserPath;
         }
@@ -1281,7 +1422,7 @@ export abstract class DoorEngine<T = any> {
         const context = await this.browser?.newContext(contextConfig);
         if(context){
             try {
-                await this.addAntiDetectionScript(context, userAgentCtx, uaPlatformCtx);
+                await this.addAntiDetectionScript(context, deviceProfile);
             } catch (injectError) {
                 log.warn('[Engine] failed to inject anti-detection script (non-persistent)', injectError);
             }
@@ -1449,19 +1590,34 @@ export abstract class DoorEngine<T = any> {
 
 
     // 添加新方法：注入反检测脚本
-    async addAntiDetectionScript(context: BrowserContext, userAgent?: string, uaPlatform?: string) {
-        const osPlatform = os.platform();
-        const resolvedUaPlatform = uaPlatform ?? (osPlatform === 'darwin' ? 'macOS' : osPlatform === 'win32' ? 'Windows' : 'Linux');
+    async addAntiDetectionScript(context: BrowserContext, deviceProfile: BrowserDeviceProfile) {
         const antiArgs = {
-            userAgent: userAgent ?? '',
-            uaPlatform: resolvedUaPlatform,
+            userAgent: deviceProfile.userAgent || '',
+            uaPlatform: deviceProfile.uaPlatform || getUaPlatformByOS(),
+            platform: deviceProfile.platform || '',
+            language: deviceProfile.language || '',
+            languages: deviceProfile.languages || [],
+            hardwareConcurrency: deviceProfile.hardwareConcurrency,
+            deviceMemory: deviceProfile.deviceMemory,
+            webgl: deviceProfile.webgl || {},
+            plugins: deviceProfile.plugins || [],
+            mimeTypes: deviceProfile.mimeTypes || [],
         };
         await context.addInitScript((args: any) => {
             // =================== 关键浏览器指纹伪装 ===================
-            const __antiArgs: { userAgent?: string; uaPlatform?: string } = args || {};
+            const __antiArgs: {
+                userAgent?: string;
+                uaPlatform?: string;
+                platform?: string;
+                language?: string;
+                languages?: string[];
+                hardwareConcurrency?: number;
+                deviceMemory?: number;
+                webgl?: { vendor?: string; renderer?: string };
+                plugins?: Array<{ name: string; description: string; filename: string }>;
+                mimeTypes?: Array<{ type: string; suffixes: string; description: string }>;
+            } = args || {};
             const __uaPlatform: string = (__antiArgs.uaPlatform || '').toString();
-            const __isMac = __uaPlatform === 'macOS';
-            const __isWin = __uaPlatform === 'Windows';
 
             // ---------- Function.prototype.toString 隐身 ----------
             // 所有我们手动替换/包装过的函数都通过 __markNative 注册到 WeakSet 里；
@@ -1516,6 +1672,22 @@ export abstract class DoorEngine<T = any> {
                     // webdriver：清掉实例 own，再到 prototype 上挂 getter
                     try { delete (navigator as any).webdriver; } catch (e) {}
                     __defProtoGetter(NavProto, 'webdriver', () => false);
+                    if (__antiArgs.platform) {
+                        __defProtoGetter(NavProto, 'platform', () => __antiArgs.platform);
+                    }
+                    if (__antiArgs.language) {
+                        __defProtoGetter(NavProto, 'language', () => __antiArgs.language);
+                    }
+                    if (Array.isArray(__antiArgs.languages) && __antiArgs.languages.length > 0) {
+                        const languages = __antiArgs.languages.slice();
+                        __defProtoGetter(NavProto, 'languages', () => languages.slice());
+                    }
+                    if (typeof __antiArgs.hardwareConcurrency === 'number' && __antiArgs.hardwareConcurrency > 0) {
+                        __defProtoGetter(NavProto, 'hardwareConcurrency', () => __antiArgs.hardwareConcurrency);
+                    }
+                    if (typeof __antiArgs.deviceMemory === 'number' && __antiArgs.deviceMemory > 0) {
+                        __defProtoGetter(NavProto, 'deviceMemory', () => __antiArgs.deviceMemory);
+                    }
                 } catch (e) {}
 
                 // permissions.query：仅对 notifications 做一致性兜底，其余查询透传原函数。
@@ -1545,22 +1717,16 @@ export abstract class DoorEngine<T = any> {
             
             // 2. 覆盖 WebGL/WebGL2 的 vendor/renderer —— 必须与 UA 平台一致，避免「macOS UA + Linux Mesa GPU」这种强 bot 信号
             const overrideWebGL = () => {
-                let vendor = 'Google Inc. (Intel)';
-                let renderer = 'ANGLE (Intel, Mesa Intel(R) UHD Graphics 630 (KBL GT2), OpenGL 4.6)';
-                if (__isMac) {
-                    vendor = 'Google Inc. (Apple)';
-                    renderer = 'ANGLE (Apple, ANGLE Metal Renderer: Apple M1 Pro, Unspecified Version)';
-                } else if (__isWin) {
-                    vendor = 'Google Inc. (Intel)';
-                    renderer = 'ANGLE (Intel, Intel(R) UHD Graphics 630 Direct3D11 vs_5_0 ps_5_0, D3D11)';
-                }
+                const vendor = __antiArgs.webgl && __antiArgs.webgl.vendor;
+                const renderer = __antiArgs.webgl && __antiArgs.webgl.renderer;
+                if (!vendor && !renderer) return;
                 const patch = (Ctor: any) => {
                     if (!Ctor || !Ctor.prototype || !Ctor.prototype.getParameter) return;
                     const original = Ctor.prototype.getParameter;
                     const patched: any = function(this: any, parameter: number) {
                         // UNMASKED_VENDOR_WEBGL = 37445, UNMASKED_RENDERER_WEBGL = 37446
-                        if (parameter === 37445) return vendor;
-                        if (parameter === 37446) return renderer;
+                        if (parameter === 37445 && vendor) return vendor;
+                        if (parameter === 37446 && renderer) return renderer;
                         return original.apply(this, arguments as any);
                     };
                     __markNative(patched, 'getParameter');
@@ -1625,12 +1791,8 @@ export abstract class DoorEngine<T = any> {
                     const PluginCtor: any = (window as any).Plugin;
                     // @ts-ignore
                     const NavigatorCtor: any = (window as any).Navigator;
-                    if (navigator.plugins.length === 0 && PluginArrayCtor && PluginCtor && NavigatorCtor) {
-                        const pluginData = [
-                            { name: 'PDF Viewer', description: 'Portable Document Format', filename: 'internal-pdf-viewer' },
-                            { name: 'Chrome PDF Viewer', description: 'Portable Document Format', filename: 'internal-pdf-viewer' },
-                            { name: 'Chromium PDF Viewer', description: 'Portable Document Format', filename: 'internal-pdf-viewer' },
-                        ];
+                    const pluginData = Array.isArray(__antiArgs.plugins) ? __antiArgs.plugins.filter((item: any) => item && (item.name || item.description || item.filename)) : [];
+                    if (navigator.plugins.length === 0 && pluginData.length > 0 && PluginArrayCtor && PluginCtor && NavigatorCtor) {
                         const makePlugin = (data: any) => {
                             const p: any = Object.create(PluginCtor.prototype);
                             Object.defineProperty(p, 'name', { value: data.name, enumerable: true, configurable: true });
@@ -1687,11 +1849,8 @@ export abstract class DoorEngine<T = any> {
                     const MimeTypeCtor: any = (window as any).MimeType;
                     // @ts-ignore
                     const NavigatorCtor: any = (window as any).Navigator;
-                    if (navigator.mimeTypes.length === 0 && MimeTypeArrayCtor && MimeTypeCtor && NavigatorCtor) {
-                        const mimeData = [
-                            { type: 'application/pdf', suffixes: 'pdf', description: 'Portable Document Format' },
-                            { type: 'text/pdf', suffixes: 'pdf', description: 'Portable Document Format' },
-                        ];
+                    const mimeData = Array.isArray(__antiArgs.mimeTypes) ? __antiArgs.mimeTypes.filter((item: any) => item && item.type) : [];
+                    if (navigator.mimeTypes.length === 0 && mimeData.length > 0 && MimeTypeArrayCtor && MimeTypeCtor && NavigatorCtor) {
                         const mimes = mimeData.map((d: any) => {
                             const m: any = Object.create(MimeTypeCtor.prototype);
                             Object.defineProperty(m, 'type', { value: d.type, enumerable: true, configurable: true });

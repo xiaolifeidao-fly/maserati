@@ -136,6 +136,7 @@ export class StepChain {
           });
           publishStepLog(ctx.taskId, step.stepCode, 'login-required', {
             shopId: err.shopId,
+            details: summarizeForLog(err.details),
             ...this.buildProductMeta(ctx),
           });
           // 向上透传，由 PublishRunner 暂停任务

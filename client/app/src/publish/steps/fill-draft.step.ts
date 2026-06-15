@@ -151,7 +151,7 @@ export async function fetchPlatformShopId(shopId: number): Promise<string> {
 /** 通过类别 ID 打开新建草稿的发布页面 */
 const TB_PUBLISH_PAGE_URL = 'https://item.upload.taobao.com/sell/v2/publish.htm';
 /** 通过草稿 ID 打开已有草稿的编辑页面 */
-const TB_DRAFT_PAGE_URL = 'https://item.upload.taobao.com/sell/v2/draft.htm';
+export const TB_DRAFT_PAGE_URL = 'https://item.upload.taobao.com/sell/v2/draft.htm';
 /** 保存草稿按钮选择器 */
 const TB_SAVE_DRAFT_SELECTOR = '.container-SRWH5Z button';
 /** 保存草稿按钮文本 */
@@ -191,19 +191,17 @@ async function clickTbSaveDraftButton(page: Page): Promise<void> {
 
 export async function detectTbSaleSpecUiState(page: Page): Promise<TbSaleSpecUiState> {
   const text = await page.evaluate(() => {
-    const doc = (globalThis as { document?: { body?: { innerText?: string } } }).document;
-    return doc?.body?.innerText?.slice(0, 4000) || '';
+    const doc = (globalThis as { document?: { getElementById?: (id: string) => { textContent?: string | null } | null } })
+      .document;
+    return doc?.getElementById?.('struct-sku')?.textContent || '';
   });
-
-  if (text.includes('+ 创建规格') || text.includes('创建规格') || text.includes('编辑规格')) {
-    return { mode: 'custom-spec', text };
-  }
 
   if (text.includes('添加销售属性')) {
     return { mode: 'add-sale-prop', text };
   }
 
-  return { mode: 'unknown', text };
+  // 含创建/编辑规格关键字，或无法判断（unknown）时，统一走 custom-spec 逻辑
+  return { mode: 'custom-spec', text };
 }
 
 /**

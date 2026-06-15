@@ -516,27 +516,27 @@ function createUtilityView(backgroundColor: string) {
   return view;
 }
 
-function getCenterViewBrowserEnv() {
-  const chrome = process.versions.chrome || "136.0.0.0";
-  const major = chrome.split(".")[0];
+function getCenterViewBrowserEnv(center: BrowserView) {
+  const defaultUa = center.webContents.getUserAgent();
+  const ua = defaultUa
+    ? defaultUa.replace(/\sElectron\/[\d.]+/g, "")
+    : `Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${process.versions.chrome || "136.0.0.0"} Safari/537.36`;
+  const chromeMatch = ua.match(/(?:Chrome|Chromium)\/(\d+)/);
+  const major = chromeMatch ? chromeMatch[1] : (process.versions.chrome || "136").split(".")[0];
   const platform = process.platform;
   const secChUaPlatform = platform === "win32" ? "Windows" : platform === "darwin" ? "macOS" : "Linux";
-  const uaPlatform =
-    platform === "win32"
-      ? "Windows NT 10.0; Win64; x64"
-      : platform === "darwin"
-        ? "Macintosh; Intel Mac OS X 10_15_7"
-        : "X11; Linux x86_64";
+  const secChUaMobile = /Mobile|Android|iPhone|iPad|iPod/i.test(ua) ? "?1" : "?0";
 
   return {
-    ua: `Mozilla/5.0 (${uaPlatform}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chrome} Safari/537.36`,
+    ua,
     secChUa: `"Chromium";v="${major}", "Not.A/Brand";v="24", "Google Chrome";v="${major}"`,
+    secChUaMobile,
     secChUaPlatform,
   };
 }
 
 function setupCenterViewBrowserEnvironment(center: BrowserView) {
-  const { ua, secChUa, secChUaPlatform } = getCenterViewBrowserEnv();
+  const { ua, secChUa, secChUaMobile, secChUaPlatform } = getCenterViewBrowserEnv(center);
 
   center.webContents.setUserAgent(ua);
 
@@ -556,7 +556,7 @@ function setupCenterViewBrowserEnvironment(center: BrowserView) {
     (details, callback) => {
       const headers = { ...details.requestHeaders };
       headers["sec-ch-ua"] = secChUa;
-      headers["sec-ch-ua-mobile"] = "?0";
+      headers["sec-ch-ua-mobile"] = secChUaMobile;
       headers["sec-ch-ua-platform"] = `"${secChUaPlatform}"`;
       headers["User-Agent"] = ua;
       callback({ requestHeaders: headers });

@@ -26,6 +26,12 @@ import {
  *  3. 匹配到后，调用 getPropValueByUiType() 按 uiType 格式化
  *  4. 未匹配时，调用 mockAiFillCatProp() 兜底（后续接入 AI）
  *  5. AI 无结果时，由 getPropValueByUiType(rawValue=null) 按 required 决定是否给默认值
+ *
+ * 执行顺序：
+ *  1. 先按上述逻辑填充全部 catProps（含 p-20000/p-1930001）
+ *  2. 再检查 p-20000（品牌）/p-1930001（产地）是否需要走特殊处理，
+ *     满足条件时由 ProductSpecialProcessor 在 filledProps 上覆盖/补充这两个属性
+ *     及其异步子属性
  */
 export class PropsFiller implements IFiller {
   readonly fillerName = 'PropsFiller';
@@ -34,13 +40,6 @@ export class PropsFiller implements IFiller {
 
   async fill(ctx: FillerContext): Promise<void> {
     const { product, tbWindowJson, draftPayload, taskId } = ctx;
-
-    const activePropKeys = this.specialProcessor.getActivePropKeys(tbWindowJson);
-    if (activePropKeys.length > 0) {
-      publishInfo(`[task:${taskId}] [PROPS] activate ProductSpecialProcessor`, { taskId, activePropKeys });
-      await this.specialProcessor.process(ctx, activePropKeys);
-      return;
-    }
 
     const catProps = tbWindowJson?.catProps ?? [];
     if (!catProps.length) {
@@ -76,6 +75,12 @@ export class PropsFiller implements IFiller {
           { taskId, key },
         );
       }
+    }
+
+    const activePropKeys = this.specialProcessor.getActivePropKeys(tbWindowJson);
+    if (activePropKeys.length > 0) {
+      publishInfo(`[task:${taskId}] [PROPS] activate ProductSpecialProcessor`, { taskId, activePropKeys });
+      await this.specialProcessor.process(ctx, activePropKeys, filledProps);
     }
 
     if (Object.keys(filledProps).length > 0) {

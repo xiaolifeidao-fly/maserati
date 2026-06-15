@@ -12,6 +12,7 @@
 import log from 'electron-log';
 import axios from 'axios';
 import { createHash } from 'crypto';
+import os from 'os';
 import type { Page, Response } from 'playwright';
 import { CollectBatchRecord } from '@eleapi/collect/collect.api';
 import { TbEngine } from '@src/browser/tb.engine';
@@ -44,7 +45,20 @@ const HUMAN_SCROLL_MAX_GESTURES = 10;
 const SKU_ADJUST_REQUEST_MIN_MS = 1000;
 const SKU_ADJUST_REQUEST_MAX_MS = 3000;
 const DELAYED_PAGE_HTML_READ_DELAY_MS = 2000;
-const DEFAULT_TAOBAO_USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36';
+
+function getRuntimeChromeUserAgent(): string {
+  const chrome = process.versions.chrome || '136.0.0.0';
+  if (process.platform === 'darwin') {
+    const systemVersion = String((process as any).getSystemVersion?.() || os.release() || '10.15.7').replace(/\./g, '_');
+    return `Mozilla/5.0 (Macintosh; Intel Mac OS X ${systemVersion}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chrome} Safari/537.36`;
+  }
+  if (process.platform === 'win32') {
+    const release = os.release().split('.').slice(0, 2).join('.') || '10.0';
+    return `Mozilla/5.0 (Windows NT ${release}; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chrome} Safari/537.36`;
+  }
+  const arch = os.arch() === 'x64' ? 'x86_64' : os.arch();
+  return `Mozilla/5.0 (X11; Linux ${arch}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chrome} Safari/537.36`;
+}
 
 export interface AiAutoCollectContext {
   batch: CollectBatchRecord;
@@ -544,7 +558,7 @@ function buildTaobaoItemHtmlHeaders(context: TbMtopDetailContext): Record<string
     'sec-fetch-site': 'same-origin',
     'sec-fetch-user': '?1',
     'upgrade-insecure-requests': '1',
-    'user-agent': context.userAgent || DEFAULT_TAOBAO_USER_AGENT,
+    'user-agent': context.userAgent || getRuntimeChromeUserAgent(),
   };
 }
 
@@ -557,7 +571,7 @@ function buildTaobaoMtopScriptHeaders(context: TbMtopDetailContext, referer: str
     'sec-fetch-dest': 'script',
     'sec-fetch-mode': 'no-cors',
     'sec-fetch-site': 'same-site',
-    'user-agent': context.userAgent || DEFAULT_TAOBAO_USER_AGENT,
+    'user-agent': context.userAgent || getRuntimeChromeUserAgent(),
   };
 }
 
@@ -868,7 +882,7 @@ async function fetchSkuAdjustPricesForAllSkus(
           'sec-fetch-dest': 'script',
           'sec-fetch-mode': 'no-cors',
           'sec-fetch-site': 'same-site',
-          'user-agent': resolvedContext.userAgent || (page ? await getPageUserAgent(page) : DEFAULT_TAOBAO_USER_AGENT),
+          'user-agent': resolvedContext.userAgent || (page ? await getPageUserAgent(page) : getRuntimeChromeUserAgent()),
         },
       });
       const parsed = parseSkuAdjustResponse(String(response.data || ''));

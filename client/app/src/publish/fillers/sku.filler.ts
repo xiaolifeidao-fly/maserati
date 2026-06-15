@@ -1,6 +1,7 @@
 import type { IFiller, FillerContext } from './filler.interface';
 import type { NormalizedSku } from '../types/source-data';
 import type { TbSaleSpecUiMode } from '../types/draft';
+import type { TbWindowJsonSkuAttribute } from '../types/tb-window-json';
 import type { ImageCropMeta } from '../core/publish-image-meta-store';
 import { findLowestPositivePriceInStock, formatPrice, parsePriceNumber } from './price.utils';
 import { PublishError } from '../core/errors';
@@ -8,6 +9,7 @@ import { StepCode } from '../types/publish-task';
 import { selectRegulatedSaleProps } from './sku-regulated/selector';
 import { mapDimensionsToAttrs } from './sku-regulated/dim-mapper';
 import { buildRegulatedSalePropPayload } from './sku-regulated/payload';
+import { buildRequiredSkuCustomParams } from './sku-custom-param-resolver';
 
 // ──────────────────────────────────────────────────────────────────────────────
 // 自定义路径接口与工具（仅自定义路径使用）
@@ -270,8 +272,10 @@ export class SkuFiller implements IFiller {
     };
 
     if (regulated.sku.length > 0) {
+      const requiredSkuParams = buildRequiredSkuCustomParams(ctx.tbWindowJson?.skuAttributes ?? []);
       draftPayload['sku'] = regulated.sku.map((item, index) => ({
         ...item,
+        ...requiredSkuParams,
         skuPrice: formatPrice(
           parsePriceNumber(item['skuPrice'] ?? skuList[index]?.price ?? '0'),
           ctx.publishConfig?.priceSettings,
@@ -298,6 +302,7 @@ export class SkuFiller implements IFiller {
       ctx.uploadedSkuImageMap ?? {},
       ctx.draftContext.saleSpecUiMode ?? 'unknown',
       ctx.uploadedImageMetaMap ?? new Map(),
+      ctx.tbWindowJson?.skuAttributes ?? [],
     );
     const dimensions = generated.customSaleProp;
     const skuInfoList = generated.sku;
@@ -370,6 +375,7 @@ export function buildCustomSalePropPayload(
   skuImageUrlMap: Record<string, string> = {},
   saleSpecUiMode: TbSaleSpecUiMode = 'unknown',
   uploadedImageMetaMap: ReadonlyMap<string, ImageCropMeta> = new Map(),
+  skuAttributes: TbWindowJsonSkuAttribute[] = [],
 ): GeneratedSkuPayload {
   const existingGroups = Array.isArray(existingValue)
     ? (existingValue as ExistingCustomSalePropGroup[])
@@ -424,8 +430,12 @@ export function buildCustomSalePropPayload(
       ? flattenDimensionsForCustomSpec(skuList, existingGroups, multiDimensionGroups, skuImageUrlMap, uploadedImageMetaMap)
       : multiDimensionGroups;
 
+  const requiredSkuParams = buildRequiredSkuCustomParams(skuAttributes);
+
   const skuInfoList = skuList
-    .map((sku, index) => buildCustomSkuEntry(sku, index, dimensions, skuImageUrlMap, uploadedImageMetaMap))
+    .map((sku, index) =>
+      buildCustomSkuEntry(sku, index, dimensions, skuImageUrlMap, uploadedImageMetaMap, requiredSkuParams),
+    )
     .filter((item): item is Record<string, unknown> => Boolean(item));
 
   return {
@@ -440,6 +450,7 @@ function buildCustomSkuEntry(
   dimensions: SkuDimension[],
   skuImageUrlMap: Record<string, string> = {},
   uploadedImageMetaMap: ReadonlyMap<string, ImageCropMeta> = new Map(),
+  requiredSkuParams: Record<string, unknown> = {},
 ): Record<string, unknown> | null {
   const props = dimensions.map(dimension =>
     resolveSkuPropForDimension(sku, dimension, skuImageUrlMap),
@@ -462,6 +473,7 @@ function buildCustomSkuEntry(
     skuCustomize: { text: '否', value: 0 },
     disabled: null,
     skuPicture,
+    ...requiredSkuParams,
     props: resolvedProps,
     salePropKey: resolvedProps.map(prop => `${prop.name}-${prop.value}`).join('_'),
     errorInfo: {},

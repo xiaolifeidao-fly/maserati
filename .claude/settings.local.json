@@ -75,7 +75,14 @@
       "Bash(xargs ls -la)",
       "Skill(electron-development)",
       "Skill(electron-development:*)",
-      "Bash(npx --yes tsc --noEmit)"
+      "Bash(npx --yes tsc --noEmit)",
+      "Bash(node -e ' *)",
+      "Bash(npx tsx -e ' *)",
+      "Bash(python3 -)",
+      "Bash(sed -i '' \"s#'./src/publish/fillers/prop-ui-type-resolver'#'./src/publish/fillers/prop-ui-type-resolver'#\" /tmp/test-tao.ts)",
+      "Bash(cp /tmp/test-tao.ts ./test-tao.ts)",
+      "Bash(sed -i '' \"s#'./src/#'./src/#\" test-tao.ts)",
+      "Bash(npx tsx *)"
     ]
   }
 }

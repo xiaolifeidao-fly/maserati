@@ -3,7 +3,7 @@ import type { TbWindowJsonDraftData, TbWindowJsonCatProp } from '../types/tb-win
 import type { AsyncOptCatPropItem } from '../utils/tb-publish-api';
 import { fetchTbCatPropAsyncOpt } from '../utils/tb-publish-api';
 import { publishInfo, publishWarn } from '../utils/publish-logger';
-import { getPropValueByUiType } from './prop-ui-type-resolver';
+import { getPropValueByUiType, type CatPropFilledValue } from './prop-ui-type-resolver';
 
 /** 当前已注册的特殊属性 key 列表，后续可按需追加 */
 const SPECIAL_PROP_KEYS = ['p-1930001', 'p-20000'] as const;
@@ -13,8 +13,9 @@ type SpecialPropKey = (typeof SPECIAL_PROP_KEYS)[number];
 /**
  * ProductSpecialProcessor — 商品属性特殊填充处理器
  *
- * 当 window.Json catProps 中存在特定的必填属性 key 时激活，
- * 接管这些属性的填充逻辑，执行与普通 PropsFiller 不同的特殊处理。
+ * 在 PropsFiller 完成通用 catProp 填充后调用。
+ * 当 window.Json catProps 中存在特定的必填属性 key（p-20000/p-1930001）时激活，
+ * 仅对这两个属性及其异步子属性做特殊覆盖/补充，不影响其他属性的通用填充结果。
  */
 export class ProductSpecialProcessor {
   /**
@@ -36,10 +37,16 @@ export class ProductSpecialProcessor {
   }
 
   /**
-   * 执行特殊填充逻辑，将结果写入 ctx.draftPayload.catProp。
+   * 执行特殊填充逻辑，在 PropsFiller 通用填充完成后调用，
+   * 直接在 filledProps（即将写入 draftPayload.catProp 的对象）上覆盖/补充
+   * p-20000（品牌）/p-1930001（产地）及其异步子属性。
    * 仅在 getActivePropKeys() 返回非空时调用。
    */
-  async process(ctx: FillerContext, activePropKeys: string[]): Promise<void> {
+  async process(
+    ctx: FillerContext,
+    activePropKeys: string[],
+    filledProps: Record<string, CatPropFilledValue>,
+  ): Promise<void> {
     const { taskId } = ctx;
 
     publishInfo(`[task:${taskId}] [PROPS] [special] start ProductSpecialProcessor`, {
@@ -47,21 +54,17 @@ export class ProductSpecialProcessor {
       activePropKeys,
     });
 
-    const catProp = (ctx.draftPayload['catProp'] ?? {}) as Record<string, unknown>;
-
     for (const propKey of activePropKeys) {
       const catPropEntry = ctx.tbWindowJson?.catProps?.find(p => p.name === propKey) ?? null;
-      await this.handleSpecialProp(propKey as SpecialPropKey, ctx, catPropEntry, catProp);
+      await this.handleSpecialProp(propKey as SpecialPropKey, ctx, catPropEntry, filledProps);
     }
-
-    ctx.draftPayload['catProp'] = catProp;
   }
 
   private async handleSpecialProp(
     propKey: SpecialPropKey,
     ctx: FillerContext,
     catPropEntry: TbWindowJsonCatProp | null,
-    catProp: Record<string, unknown>,
+    catProp: Record<string, CatPropFilledValue>,
   ): Promise<void> {
     switch (propKey) {
       case 'p-1930001':
@@ -87,7 +90,7 @@ export class ProductSpecialProcessor {
   private async handleP1930001(
     ctx: FillerContext,
     _catPropEntry: TbWindowJsonCatProp | null,
-    catProp: Record<string, unknown>,
+    catProp: Record<string, CatPropFilledValue>,
   ): Promise<void> {
     const { taskId } = ctx;
 
@@ -156,7 +159,7 @@ export class ProductSpecialProcessor {
    */
   private async handleP20000(
     ctx: FillerContext,
-    catProp: Record<string, unknown>,
+    catProp: Record<string, CatPropFilledValue>,
   ): Promise<void> {
     const { taskId, publishConfig } = ctx;
     const brandMode = publishConfig?.brandMode;

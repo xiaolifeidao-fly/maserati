@@ -118,11 +118,11 @@ export class PublishApi extends ElectronApi {
   }
 
   /**
-   * 验证码通过后继续执行
+   * 验证码通过后继续执行；传入 { restart: true } 时强制从第一步重新开始
    */
   @InvokeType(Protocols.INVOKE)
-  async resumePublish(taskId: number): Promise<{ resumed: boolean }> {
-    return this.invokeApi('resumePublish', taskId);
+  async resumePublish(taskId: number, options?: { restart?: boolean }): Promise<{ resumed: boolean }> {
+    return this.invokeApi('resumePublish', taskId, options);
   }
 
   /**

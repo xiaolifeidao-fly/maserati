@@ -55,6 +55,27 @@ export interface TbWindowJsonMeasurement {
   unit?: string;
 }
 
+/** sku.attributes.<skuParam_p-*>.structItems 中的子项（skuMeasurement 专用） */
+export interface TbWindowJsonSkuStructItem {
+  name?: string;
+  uiType?: string;
+  required?: boolean;
+  value?: string;
+  dataSource?: TbWindowJsonOption[];
+}
+
+/** components.sku.props.attributes 中的动态销售属性（skuParam_p-* ） */
+export interface TbWindowJsonSkuAttribute {
+  name: string;
+  label?: string;
+  uiType?: string;
+  required?: boolean;
+  multiple?: boolean;
+  dataSource?: TbWindowJsonOption[];
+  structItems?: TbWindowJsonSkuStructItem[];
+  units?: TbWindowJsonUnit[];
+}
+
 export interface TbWindowJsonComponentProp {
   name?: string;
   label?: string;
@@ -126,6 +147,8 @@ export interface TbWindowJsonDraftData {
   fieldCodes: string[];
   components: Record<string, TbWindowJsonComponent>;
   catProps: TbWindowJsonCatProp[];
+  /** components.sku.props.attributes 中 required=true 的动态销售属性（skuParam_p-*），custom-spec 路径填充用 */
+  skuAttributes: TbWindowJsonSkuAttribute[];
   salePropSubItems: Record<string, TbWindowJsonSalePropSubItem>;
   logisticsSubItems: TbWindowJsonLogisticsSubItem[];
   foodComponents: Partial<Record<TbFoodComponentKey, TbWindowJsonFoodComponent>>;

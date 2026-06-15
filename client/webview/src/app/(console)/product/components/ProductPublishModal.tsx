@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   AppstoreOutlined,
   ArrowLeftOutlined,
@@ -10,6 +10,7 @@ import {
   CloseOutlined,
   DownloadOutlined,
   EditOutlined,
+  FileSearchOutlined,
   FolderOpenOutlined,
   PlayCircleOutlined,
   ReloadOutlined,
@@ -21,6 +22,7 @@ import {
   Alert,
   Button,
   Descriptions,
+  Drawer,
   Input,
   Modal,
   Popover,
@@ -362,6 +364,13 @@ export function ProductPublishModal({
   const [captchaPanelActuallyVisible, setCaptchaPanelActuallyVisible] = useState(false);
   const [loginRequiredModal, setLoginRequiredModal] = useState<{ taskId: number; shopId: number } | null>(null);
   const [handlingLogin, setHandlingLogin] = useState(false);
+  const [logDrawerItem, setLogDrawerItem] = useState<PublishQueueItem | null>(null);
+  const [logContent, setLogContent] = useState<string>("");
+  const [logFileName, setLogFileName] = useState<string>("");
+  const [logTruncated, setLogTruncated] = useState(false);
+  const [logLoading, setLogLoading] = useState(false);
+  const [logError, setLogError] = useState<string | undefined>(undefined);
+  const [logSearch, setLogSearch] = useState("");
   const [batchStatsMap, setBatchStatsMap] = useState<Record<number, CollectBatchStats | null>>({});
   const [batchStatsLoading, setBatchStatsLoading] = useState(false);
   const runningTableWrapRef = useRef<HTMLDivElement | null>(null);
@@ -1097,15 +1106,7 @@ export function ProductPublishModal({
       return;
     }
 
-    let sourceShop: ShopRecord | null = null;
-    try {
-      sourceShop = await fetchShop(selectedBatch.shopId);
-    } catch (error) {
-      message.error(error instanceof Error ? error.message : "加载选品店铺失败");
-      return;
-    }
-
-    const sourceType = collectSourceTypeToPublishSourceType(normalizeCollectSourceType(sourceShop?.platform));
+    const sourceType = collectSourceTypeToPublishSourceType(normalizeCollectSourceType(selectedBatch.platform));
     if (!sourceType) {
       message.error("当前选品批次来源平台暂不支持发布");
       return;
@@ -1301,7 +1302,7 @@ export function ProductPublishModal({
     );
 
     try {
-      await publishApi.resumePublish(taskId);
+      await publishApi.resumePublish(taskId, { restart: true });
       await hideCaptchaPanelSafely();
     } catch (error) {
       if (isUnauthenticatedPublishMessage(error instanceof Error ? error.message : error)) {
@@ -1505,6 +1506,75 @@ export function ProductPublishModal({
     );
   };
 
+  const handleOpenLogDrawer = async (item: PublishQueueItem) => {
+    const sourceProductId = item.sourceProductId?.trim();
+    if (!sourceProductId) {
+      message.warning("当前商品缺少原商品ID，无法查看日志");
+      return;
+    }
+    setLogDrawerItem(item);
+    setLogSearch("");
+    setLogContent("");
+    setLogFileName("");
+    setLogTruncated(false);
+    setLogError(undefined);
+    setLogLoading(true);
+    try {
+      const result = await getPublishApi().getPublishLogPreview(sourceProductId);
+      setLogContent(result.content || "");
+      setLogFileName(result.fileName || "");
+      setLogTruncated(Boolean(result.truncated));
+    } catch (error) {
+      setLogError(error instanceof Error ? error.message : "加载发布日志失败");
+    } finally {
+      setLogLoading(false);
+    }
+  };
+
+  const logMatchCount = useMemo(() => {
+    const q = logSearch.trim();
+    if (!q || !logContent) return 0;
+    const lower = logContent.toLowerCase();
+    const needle = q.toLowerCase();
+    let count = 0;
+    let from = 0;
+    while (true) {
+      const idx = lower.indexOf(needle, from);
+      if (idx === -1) break;
+      count += 1;
+      from = idx + needle.length;
+    }
+    return count;
+  }, [logContent, logSearch]);
+
+  const renderHighlightedLog = (content: string, query: string): ReactNode => {
+    const q = query.trim();
+    if (!q) return content;
+    const lower = content.toLowerCase();
+    const needle = q.toLowerCase();
+    const parts: ReactNode[] = [];
+    let from = 0;
+    let key = 0;
+    while (from < content.length) {
+      const idx = lower.indexOf(needle, from);
+      if (idx === -1) {
+        parts.push(content.slice(from));
+        break;
+      }
+      if (idx > from) parts.push(content.slice(from, idx));
+      parts.push(
+        <mark
+          key={`m-${key++}`}
+          style={{ background: "#fff066", color: "inherit", padding: "0 1px", borderRadius: 2 }}
+        >
+          {content.slice(idx, idx + q.length)}
+        </mark>,
+      );
+      from = idx + q.length;
+    }
+    return parts;
+  };
+
   // 发布队列表格列
   const queueColumns: ColumnsType<PublishQueueItem> = [
     {
@@ -1610,6 +1680,15 @@ export function ProductPublishModal({
                 tooltip="导出错误发布日志"
                 loading={exportingLogProductIds.includes(record.sourceProductId)}
                 onClick={() => void handleExportProductErrorLog(record.sourceProductId)}
+              />
+            ) : null}
+            {record.sourceProductId ? (
+              <IconOnlyButton
+                size="small"
+                shape="default"
+                icon={<FileSearchOutlined />}
+                tooltip="查看发布日志"
+                onClick={() => void handleOpenLogDrawer(record)}
               />
             ) : null}
           </div>
@@ -1763,7 +1842,8 @@ export function ProductPublishModal({
         maskClosable={false}
         keyboard={false}
         footer={null}
-        width={1080}
+        width={1000}
+        styles={{ body: { height: 720, overflowY: "auto" } }}
         destroyOnClose={false}
       >
         <div className="publish-workbench">
@@ -2361,6 +2441,59 @@ export function ProductPublishModal({
           <span>点击「点击处理」将打开淘宝登录窗口，完成登录后任务将自动从断点继续发布。</span>
         </Space>
       </Modal>
+
+      <Drawer
+        title={logDrawerItem ? `发布日志 · ${logDrawerItem.title}` : "发布日志"}
+        open={Boolean(logDrawerItem)}
+        onClose={() => setLogDrawerItem(null)}
+        width={720}
+        destroyOnClose
+      >
+        <Space direction="vertical" size={12} style={{ width: "100%" }}>
+          <Input.Search
+            value={logSearch}
+            onChange={(event) => setLogSearch(event.target.value)}
+            placeholder="搜索日志关键字，可高亮匹配项"
+            allowClear
+          />
+          <div style={{ fontSize: 12, color: "var(--manager-text-faint)", display: "flex", justifyContent: "space-between", gap: 12 }}>
+            <span>
+              {logFileName ? `文件：${logFileName}` : ""}
+              {logTruncated ? "（内容较大，已截断显示尾部）" : ""}
+            </span>
+            <span>
+              {logSearch.trim() ? `匹配 ${logMatchCount} 处` : ""}
+            </span>
+          </div>
+          {logLoading ? (
+            <div style={{ padding: "40px 0", textAlign: "center" }}>
+              <Spin tip="正在加载发布日志..." />
+            </div>
+          ) : logError ? (
+            <Alert type="error" showIcon message="加载发布日志失败" description={logError} />
+          ) : logContent ? (
+            <pre
+              style={{
+                background: "#0f172a",
+                color: "#e2e8f0",
+                padding: 12,
+                borderRadius: 6,
+                fontSize: 12,
+                lineHeight: 1.6,
+                maxHeight: "calc(100vh - 220px)",
+                overflow: "auto",
+                whiteSpace: "pre-wrap",
+                wordBreak: "break-all",
+                margin: 0,
+              }}
+            >
+              {renderHighlightedLog(logContent, logSearch)}
+            </pre>
+          ) : (
+            <Alert type="info" showIcon message="暂无日志内容" />
+          )}
+        </Space>
+      </Drawer>
 
       <style jsx global>{`
         /* Modal 尺寸控制 */

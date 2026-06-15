@@ -1,5 +1,6 @@
 import type { Page } from "playwright";
 import { requestBackend } from "@src/impl/shared/backend";
+import { TbEngine } from "@src/browser/tb.engine";
 import { LoginRequiredError } from "../core/errors";
 import type { StepCode } from "../types/publish-task";
 
@@ -49,13 +50,39 @@ export async function ensureTbShopLoggedIn(
     return;
   }
   if (isTaobaoLoginRequiredSnapshot(snapshot)) {
-    await handleTbLoginRequired(stepCode, shopId);
+    await handleTbLoginRequired(stepCode, shopId, { pageSnapshot: snapshot });
   }
 }
 
-export async function handleTbLoginRequired(stepCode: StepCode, shopId: number): Promise<never> {
+export async function handleTbLoginRequired(
+  stepCode: StepCode,
+  shopId: number,
+  details?: Record<string, unknown>,
+): Promise<never> {
   await markShopAsLoggedOut(shopId);
-  throw new LoginRequiredError(stepCode, shopId);
+  clearCachedUploadHeaders(shopId);
+  throw new LoginRequiredError(stepCode, shopId, details);
+}
+
+/**
+ * 清除上传图片步骤缓存的浏览器 headers（含 Cookie）。
+ *
+ * 背景：图片上传命中缓存 headers 时不会重新提取 Cookie（见 upload-images.step.ts
+ * getHeadersForUpload）。若缓存的 headers 是登录失效前抓取的旧 Cookie，
+ * 用户重新登录后再次发布仍会复用这份旧 Cookie 而被判定为未登录，陷入循环踢出。
+ * 因此一旦检测到需要重新登录，立即清空缓存，下次发布时回退为从最新会话提取 Cookie。
+ */
+function clearCachedUploadHeaders(shopId: number): void {
+  if (!Number.isFinite(shopId) || shopId <= 0) {
+    return;
+  }
+  try {
+    const engine = new TbEngine(String(shopId), false);
+    engine.clearHeader();
+    engine.setValidateAutoTag(true);
+  } catch {
+    // Ignore cache cleanup failures.
+  }
 }
 
 export async function handleTbMaybeLoginRequired(
@@ -64,7 +91,7 @@ export async function handleTbMaybeLoginRequired(
   payload: unknown,
 ): Promise<void> {
   if (isTaobaoLoginRequiredPayload(payload)) {
-    await handleTbLoginRequired(stepCode, shopId);
+    await handleTbLoginRequired(stepCode, shopId, { response: payload });
   }
 }
 

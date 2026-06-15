@@ -5,10 +5,11 @@ import { PublishStep } from '../core/publish-step';
 import type { StepContext } from '../core/step-context';
 import { PublishError } from '../core/errors';
 import { CaptchaChecker } from './captcha.step';
-import { ensurePublishPageForDraft, fetchPlatformShopId, detectTbSaleSpecUiState } from './fill-draft.step';
+import { ensurePublishPageForDraft, fetchPlatformShopId, detectTbSaleSpecUiState, TB_DRAFT_PAGE_URL } from './fill-draft.step';
 import { parseTbWindowJsonForDraft } from '../parsers/tb-window-json.parser';
 import { ComponentDefaultsFiller } from '../fillers/component-defaults.filler';
 import { PropsFiller } from '../fillers/props.filler';
+import { getPropValueByUiType } from '../fillers/prop-ui-type-resolver';
 import { SkuFiller } from '../fillers/sku.filler';
 import { DetailImagesFiller } from '../fillers/detail-images.filler';
 import type { FillerContext } from '../fillers/filler.interface';
@@ -16,6 +17,7 @@ import type { TbWindowJsonCatProp, TbWindowJsonDraftData } from '../types/tb-win
 import { publishInfo, publishWarn, summarizeForLog } from '../utils/publish-logger';
 import { assertTbDraftSubmitSuccess, buildDraftJsonBody, submitDraftToTaobao } from '../utils/tb-publish-api';
 import { getTaskWindowJson, interceptWindowJson } from '../utils/window-json.memory';
+import { ensureTbShopLoggedIn } from '../utils/tb-login-state';
 
 const TB_WINDOW_JSON_TIMEOUT = 20_000;
 /** 校验时跳过的组件 key（参考旧代码 filterKey） */
@@ -57,14 +59,23 @@ export class EditDraftStep extends PublishStep {
       throw new PublishError(this.stepCode, '产品或类目数据为空');
     }
 
-    // ── Step 1: 重新加载草稿页面，获取最新 window.Json ────────────────────────
-    const pageEntry = await ensurePublishPageForDraft(ctx.taskId, ctx.shopId, draftCtx.draftId ?? '', this.stepCode);
+    if (!draftCtx.draftId) {
+      throw new PublishError(this.stepCode, '草稿 draftId 为空，无法刷新草稿编辑页');
+    }
+
+    // ── Step 1: 导航到草稿编辑页，获取最新 window.Json ────────────────────────
+    const pageEntry = await ensurePublishPageForDraft(ctx.taskId, ctx.shopId, draftCtx.draftId, this.stepCode);
     const { page } = pageEntry;
     pageEntry.engine.bindPublishTask(ctx.taskId);
 
-    // 先注册响应拦截，再 reload，确保捕获 HTML 中的 window.Json
+    // Step4 的 page 始终停留在"新建草稿"模板页（publish.htm?catId=...），
+    // 对它 reload 拿到的仍是该类目的静态属性 schema，不会包含品牌/SKU/价格等
+    // 已保存信息后淘宝动态追加的属性（如型号 p-20000-xxx）。
+    // 这里改为导航到草稿编辑页（draft.htm?dbDraftId=...），才能拿到这些动态属性。
+    const draftEditUrl = `${TB_DRAFT_PAGE_URL}?dbDraftId=${draftCtx.draftId}`;
     const capturePromise = interceptWindowJson(page, ctx.taskId, TB_WINDOW_JSON_TIMEOUT);
-    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.goto(draftEditUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await ensureTbShopLoggedIn(page, this.stepCode, ctx.shopId);
     await capturePromise;
 
     const rawWindowJson = getTaskWindowJson(ctx.taskId);
@@ -73,6 +84,28 @@ export class EditDraftStep extends PublishStep {
     }
     const tbWindowJson = parseTbWindowJsonForDraft(rawWindowJson);
     const saleSpecUiState = await detectTbSaleSpecUiState(page);
+
+    // [EDIT-DRAFT-DEBUG] 打印刷新后的 window.Json 关键数据（catProps/components），
+    // 用于核对第一次填充后联动新增的属性是否已出现在最新数据中
+    const previousCatPropKeys = Object.keys(
+      (draftCtx.submitPayload?.['catProp'] as Record<string, unknown> | undefined) ?? {},
+    );
+    publishInfo(`[task:${ctx.taskId}] [TB] [draft-update] window.Json refreshed`, {
+      taskId: ctx.taskId,
+      draftId: draftCtx.draftId,
+      output: {
+        meta: summarizeForLog(tbWindowJson.meta),
+        catProps: tbWindowJson.catProps.map(p => ({
+          name: p.name,
+          label: p.label,
+          required: p.required,
+          uiType: p.uiType,
+        })),
+        previousCatPropKeys,
+        componentKeys: Object.keys(tbWindowJson.components),
+        saleSpecUiMode: saleSpecUiState.mode,
+      },
+    });
 
     // 更新 draftContext 中的 pageJsonData 与 catId（平台可能调整类目）
     draftCtx.pageJsonData = rawWindowJson as Record<string, unknown>;
@@ -182,7 +215,10 @@ export class EditDraftStep extends PublishStep {
   }
 
   /**
-   * 补全必填 catProp 的缺省值
+   * 提交前校验/补全 catProp：
+   *  1. required=false 的属性不提交，从 payload 中移除
+   *  2. required=true 且 uiType 为 taoSirProp 的属性，按单位限定规则（小时<=23，分钟/秒<=60）校验/补全
+   *  3. required=true 的其它属性，缺省值按 净含量 / dataSource / uiType 通用规则补全
    * 参考旧代码 UpdateDraftStep.fillRequiredData
    */
   private fillRequiredCatProps(
@@ -192,30 +228,32 @@ export class EditDraftStep extends PublishStep {
     const catPropData = (payload['catProp'] as Record<string, unknown> | undefined) ?? {};
 
     for (const prop of catProps) {
-      if (!prop.required) continue;
+      // 非必填属性：不提交，移除已填充的值
+      if (!prop.required) {
+        delete catPropData[prop.name];
+        continue;
+      }
 
       const existing = catPropData[prop.name];
-      if (existing != null) {
-        if (Array.isArray(existing) && existing.length > 0) continue;
-        if (String(existing).length > 0) continue;
+      const hasValue =
+        existing != null &&
+        (!Array.isArray(existing) || existing.length > 0) &&
+        String(existing).length > 0;
+
+      // taoSirProp：必填项需按单位限定规则校验/补全（小时<=23，分钟/秒<=60）
+      if (prop.uiType === 'taoSirProp') {
+        const resolved = getPropValueByUiType('taoSirProp', prop, hasValue ? String(existing) : null);
+        if (resolved !== null) {
+          catPropData[prop.name] = resolved;
+        }
+        continue;
       }
+
+      if (hasValue) continue;
 
       // 净含量：默认填 "1g"
       if (String(prop.label ?? '').includes('净含量')) {
         catPropData[prop.name] = '1g';
-        continue;
-      }
-
-      // taoSirProp：按 expression 结构拼默认值（input槽填"1"，operator取text），末尾加单位
-      if (prop.uiType === 'taoSirProp') {
-        const expression = prop.expression ?? [];
-        const unit = prop.units?.[0]?.text ?? '';
-        const parts: string[] = [];
-        for (const seg of expression) {
-          if (seg.type === 'input') parts.push('1');
-          else if (seg.type === 'operator') parts.push(seg.text ?? '');
-        }
-        catPropData[prop.name] = (parts.length > 0 ? parts.join('') : '1') + unit;
         continue;
       }
 
@@ -225,6 +263,13 @@ export class EditDraftStep extends PublishStep {
         : undefined;
       if (dataSource?.length) {
         catPropData[prop.name] = prop.uiType === 'checkbox' ? [dataSource[0]] : dataSource[0];
+        continue;
+      }
+
+      // 兜底：按 uiType 通用规则填充
+      const fallback = getPropValueByUiType(prop.uiType ?? '', prop, null);
+      if (fallback !== null) {
+        catPropData[prop.name] = fallback;
       }
     }
 

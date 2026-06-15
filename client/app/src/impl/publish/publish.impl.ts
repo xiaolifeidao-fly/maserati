@@ -11,6 +11,7 @@ import type { ShopLoginPayload, ShopRecord } from '@eleapi/commerce/commerce.api
 import { PublishRunner } from '@src/publish/core/publish-runner';
 import { HttpPublishPersister } from '@src/publish/core/http-publish-persister';
 import { showCaptchaPanel, showScreenshotCaptchaPanel, getCaptchaBrowserCookies } from '@src/publish/publish-window';
+import { closePublishPage } from '@src/publish/steps/fill-draft.step';
 import { injectCookiesIntoTbContext } from '@src/browser/engine';
 import type {
   PublishCenterState,
@@ -302,9 +303,20 @@ export class PublishImpl extends PublishApi {
     return { started: true };
   }
 
-  async resumePublish(taskId: number): Promise<{ resumed: boolean }> {
+  async resumePublish(taskId: number, options?: { restart?: boolean }): Promise<{ resumed: boolean }> {
     // 先清除旧 Runner（若存在），再重新启动
     PublishImpl.runnerMap.delete(taskId);
+    if (options?.restart) {
+      // 用户手动点击「继续发布」：重置断点，强制从第一步（解析源商品）重新开始
+      await requestBackend('PUT', `/publish-tasks/${taskId}`, {
+        data: { currentStepCode: '', errorMessage: '' },
+        publishLog: { taskId, label: 'restart publish task from first step' },
+      });
+      // 清除本地缓存的步骤输出（草稿上下文、上传图片等），避免 FillDraftStep 误判为断点重试而跳过
+      // 重新建草稿 / 重新捕获 x-xsrf-token，导致后续步骤拿不到内存缓存的 token
+      clearPublishStepPayloads(taskId);
+      await closePublishPage(taskId);
+    }
     const result = await this.startPublish(taskId);
     return { resumed: result.started };
   }

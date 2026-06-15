@@ -14,6 +14,7 @@ import crypto from 'crypto';
 import axios from 'axios';
 import fs from 'fs';
 import path from 'path';
+import os from 'os';
 import FormData from 'form-data';
 import { app } from 'electron';
 import {
@@ -67,8 +68,6 @@ export function cleanupPublishImages(sourceProductId: string): void {
 
 const TB_UPLOAD_URL =
   'https://stream-upload.taobao.com/api/upload.api?_input_charset=utf-8&appkey=tu&folderId=0&picCompress=true&watermark=false';
-const DOWNLOAD_UA =
-  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 const MAX_RETRIES = 3;
 const RETRY_DELAY_MS = 2000;
 const DEFAULT_IMAGE_EXTENSION = '.jpg';
@@ -76,6 +75,20 @@ const PNG_IMAGE_EXTENSION = '.png';
 const SQUARE_IMAGE_SIZE = 800;
 
 type ImageProcessProfile = 'square800' | 'detail';
+
+function getRuntimeChromeUserAgent(): string {
+  const chrome = process.versions.chrome || '136.0.0.0';
+  if (process.platform === 'darwin') {
+    const systemVersion = String((process as any).getSystemVersion?.() || os.release() || '10.15.7').replace(/\./g, '_');
+    return `Mozilla/5.0 (Macintosh; Intel Mac OS X ${systemVersion}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chrome} Safari/537.36`;
+  }
+  if (process.platform === 'win32') {
+    const release = os.release().split('.').slice(0, 2).join('.') || '10.0';
+    return `Mozilla/5.0 (Windows NT ${release}; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chrome} Safari/537.36`;
+  }
+  const arch = os.arch() === 'x64' ? 'x86_64' : os.arch();
+  return `Mozilla/5.0 (X11; Linux ${arch}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chrome} Safari/537.36`;
+}
 
 interface ProcessedImageResult {
   localPath: string;
@@ -595,7 +608,7 @@ export class UploadImagesStep extends PublishStep {
         const response = await axios.get<ArrayBuffer>(url, {
           responseType: 'arraybuffer',
           timeout: 30000,
-          headers: { 'User-Agent': DOWNLOAD_UA },
+          headers: { 'User-Agent': getRuntimeChromeUserAgent() },
         });
 
         const buffer = Buffer.from(response.data);
@@ -686,7 +699,7 @@ export class UploadImagesStep extends PublishStep {
           ...normalizedBase,
           // 以下为上传接口必须的 headers，显式设置覆盖 baseHeaders 中可能存在的同名字段
           'Cookie': normalizedBase['cookie'] ?? '',
-          'User-Agent': normalizedBase['user-agent'] ?? DOWNLOAD_UA,
+          'User-Agent': normalizedBase['user-agent'] ?? getRuntimeChromeUserAgent(),
           'Accept': 'application/json, text/plain, */*',
           'Accept-Language': 'zh-CN,zh;q=0.9',
           'Cache-Control': 'no-cache',

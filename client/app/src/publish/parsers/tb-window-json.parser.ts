@@ -17,6 +17,8 @@ import {
   type TbWindowJsonSalePropSubItem,
   type TbWindowJsonSalePropValueGroup,
   type TbWindowJsonSalePropValueOption,
+  type TbWindowJsonSkuAttribute,
+  type TbWindowJsonSkuStructItem,
   type TbWindowJsonUnit,
 } from '../types/tb-window-json';
 import type { TbCategoryInfo, TbCategoryProp, TbPropValue, TbSaleProp, TbSalePropValue } from '../types/draft';
@@ -169,6 +171,52 @@ function parseCatProp(value: unknown): TbWindowJsonCatProp | undefined {
     ...prop,
     name: prop.name,
   };
+}
+
+function parseSkuStructItem(value: unknown): TbWindowJsonSkuStructItem | undefined {
+  const record = asRecord(value);
+  if (!record) return undefined;
+  return {
+    name: typeof record.name === 'string' ? record.name : undefined,
+    uiType: typeof record.uiType === 'string' ? record.uiType : undefined,
+    required: typeof record.required === 'boolean' ? record.required : undefined,
+    value: typeof record.value === 'string' ? record.value : undefined,
+    dataSource: asArray(record.dataSource)
+      .map(parseOption)
+      .filter((item): item is TbWindowJsonOption => Boolean(item)),
+  };
+}
+
+function parseSkuAttribute(name: string, value: unknown): TbWindowJsonSkuAttribute | undefined {
+  const record = asRecord(value);
+  if (!record) return undefined;
+  return {
+    name,
+    label: typeof record.label === 'string' ? record.label : undefined,
+    uiType: typeof record.uiType === 'string' ? record.uiType : undefined,
+    required: typeof record.required === 'boolean' ? record.required : undefined,
+    multiple: typeof record.multiple === 'boolean' ? record.multiple : undefined,
+    dataSource: asArray(record.dataSource)
+      .map(parseOption)
+      .filter((item): item is TbWindowJsonOption => Boolean(item)),
+    structItems: asArray(record.structItems)
+      .map(parseSkuStructItem)
+      .filter((item): item is TbWindowJsonSkuStructItem => Boolean(item)),
+    units: parseUnitList(record.units),
+  };
+}
+
+/** 提取 components.sku.props.attributes 中 required=true 的动态销售属性（skuParam_p-* ） */
+function parseSkuAttributes(raw: Record<string, unknown>): TbWindowJsonSkuAttribute[] {
+  const components = asRecord(raw.components) ?? {};
+  const skuProps = asRecord(asRecord(components.sku)?.props);
+  const attributes = asRecord(skuProps?.attributes) ?? {};
+
+  return Object.entries(attributes)
+    .filter(([name]) => name.startsWith('skuParam_p'))
+    .map(([name, value]) => parseSkuAttribute(name, value))
+    .filter((item): item is TbWindowJsonSkuAttribute => Boolean(item))
+    .filter(item => item.required === true);
 }
 
 function parseSalePropValueOption(value: unknown): TbWindowJsonSalePropValueOption | undefined {
@@ -351,6 +399,7 @@ export function parseTbWindowJsonForDraft(raw: unknown): TbWindowJsonDraftData {
     fieldCodes,
     components: draftComponents,
     catProps,
+    skuAttributes: parseSkuAttributes(root),
     salePropSubItems,
     logisticsSubItems: tbExtractWaySubItems,
     foodComponents,

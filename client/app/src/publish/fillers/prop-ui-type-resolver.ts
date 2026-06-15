@@ -67,6 +67,27 @@ function pickRandom<T>(arr: T[]): T | null {
   return arr[Math.floor(Math.random() * arr.length)] ?? null;
 }
 
+/** taoSirProp 按单位限定的最大值（如"小时"最多 23，"分钟"/"秒"最多 60） */
+const TAO_SIR_UNIT_MAX_VALUES: Record<string, number> = {
+  '小时': 23,
+  '分钟': 60,
+  '秒': 60,
+};
+
+/** taoSirProp 默认填充值：有单位限制时在 [1, max] 内随机取值，否则填 "1" */
+export function getTaoSirInputDefaultValue(unitText: string): string {
+  const max = TAO_SIR_UNIT_MAX_VALUES[unitText];
+  if (max == null) return '1';
+  return String(Math.floor(Math.random() * max) + 1);
+}
+
+/** 从 units 中选取有效单位（跳过 value:-1 / "请选单位" 占位项），找不到时回退第一项 */
+function pickTaoSirUnit(units: TbWindowJsonUnit[] | undefined): string {
+  if (!units?.length) return '';
+  const valid = units.find(u => u.value != null && u.value >= 0 && !!u.text && u.text !== '请选单位');
+  return (valid ?? units[0])?.text ?? '';
+}
+
 // ─── per-uiType resolvers ────────────────────────────────────────────────────
 
 function resolveSelect(propDef: PropValueDef, rawValue: string | null): CatPropOptionValue | null {
@@ -111,7 +132,8 @@ function resolveDatepicker(propDef: PropValueDef, rawValue: string | null): stri
 
 function resolveTaoSirProp(propDef: PropValueDef, rawValue: string | null): string | null {
   const expression = propDef.expression ?? [];
-  const unit = propDef.units?.[0]?.text ?? '';
+  const unit = pickTaoSirUnit(propDef.units);
+  const maxValue = TAO_SIR_UNIT_MAX_VALUES[unit];
   const inputCount = expression.filter(e => e.type === 'input').length;
 
   if (rawValue !== null && inputCount > 0) {
@@ -120,8 +142,13 @@ function resolveTaoSirProp(propDef: PropValueDef, rawValue: string | null): stri
       let numIdx = 0;
       const parts: string[] = [];
       for (const seg of expression) {
-        if (seg.type === 'input') parts.push(String(numbers[numIdx++]));
-        else if (seg.type === 'operator') parts.push(seg.text ?? '');
+        if (seg.type === 'input') {
+          let n = numbers[numIdx++];
+          if (maxValue != null) n = Math.min(Math.max(n, 1), maxValue);
+          parts.push(String(n));
+        } else if (seg.type === 'operator') {
+          parts.push(seg.text ?? '');
+        }
       }
       return parts.join('') + unit;
     }
@@ -130,7 +157,7 @@ function resolveTaoSirProp(propDef: PropValueDef, rawValue: string | null): stri
   if (propDef.required && inputCount > 0) {
     const parts: string[] = [];
     for (const seg of expression) {
-      if (seg.type === 'input') parts.push('1');
+      if (seg.type === 'input') parts.push(getTaoSirInputDefaultValue(unit));
       else if (seg.type === 'operator') parts.push(seg.text ?? '');
     }
     return parts.join('') + unit;
