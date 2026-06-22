@@ -123,6 +123,27 @@ function findFirstUploadedImageForDimValue(
   return undefined;
 }
 
+/**
+ * SKU 名称（销售属性值）不允许包含特殊字符，统一替换：
+ *   *  →  x
+ *   ,  →  +
+ *
+ * 在 fill 入口对 skuList 的 spec / specs[].value 做归一化，
+ * 使后续所有路径（规格维度文本、sku props、salePropKey）保持一致。
+ */
+function sanitizeSkuName(text: string): string {
+  return text.replace(/\*/g, 'x').replace(/,/g, '+');
+}
+
+function sanitizeSkuSpecNames(skuList: NormalizedSku[]): void {
+  for (const sku of skuList) {
+    if (typeof sku.spec === 'string') sku.spec = sanitizeSkuName(sku.spec);
+    for (const spec of sku.specs ?? []) {
+      if (typeof spec.value === 'string') spec.value = sanitizeSkuName(spec.value);
+    }
+  }
+}
+
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -167,6 +188,9 @@ export class SkuFiller implements IFiller {
     const { skuList } = product;
 
     if (!skuList.length) return;
+
+    // SKU 名称（销售属性值）不允许包含特殊字符 *，统一替换为 x
+    sanitizeSkuSpecNames(skuList);
 
     const sourceId = String(product.sourceId ?? '').trim();
     const cacheKey = buildSellComponentCacheKey(sourceId);
@@ -276,6 +300,7 @@ export class SkuFiller implements IFiller {
       draftPayload['sku'] = regulated.sku.map((item, index) => ({
         ...item,
         ...requiredSkuParams,
+        ...buildSellPointCollection(index),
         skuPrice: formatPrice(
           parsePriceNumber(item['skuPrice'] ?? skuList[index]?.price ?? '0'),
           ctx.publishConfig?.priceSettings,
@@ -329,6 +354,7 @@ export class SkuFiller implements IFiller {
     };
     draftPayload['sku'] = skuInfoList.map((item, index) => ({
       ...item,
+      ...buildSellPointCollection(index),
       skuPrice: formatPrice(
         parsePriceNumber(item['skuPrice'] ?? skuList[index]?.price ?? '0'),
         ctx.publishConfig?.priceSettings,
@@ -343,6 +369,16 @@ export class SkuFiller implements IFiller {
 // ──────────────────────────────────────────────────────────────────────────────
 // 公共工具（供外部调用）
 // ──────────────────────────────────────────────────────────────────────────────
+
+/**
+ * 仅第一条 SKU 设置“店长主推”卖点（sellPointCollection），其余 SKU 不设置。
+ * @param index 当前 SKU 在最终 sku 数组中的位置索引
+ */
+function buildSellPointCollection(index: number): Record<string, unknown> {
+  return index === 0
+    ? { sellPointCollection: { text: '店长主推', value: 100 } }
+    : {};
+}
 
 export function buildDefaultSkuCombineContent(): SkuCombineContentPayload {
   return {

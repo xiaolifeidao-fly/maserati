@@ -1,6 +1,6 @@
 {
   "name": "maserati",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "description": "maserati Client Application",
   "main": "dist/main.js",
   "scripts": {
@@ -77,7 +77,7 @@
       }
     ],
     "releaseInfo": {
-      "releaseNotes": "1.发布成功率修复"
+      "releaseNotes": "1.百货商品发布成功率优化  2.发布流程优化"
     },
     "nsis": {
       "oneClick": false,

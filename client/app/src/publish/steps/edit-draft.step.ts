@@ -26,6 +26,22 @@ const TB_WINDOW_JSON_TIMEOUT = 20_000;
 /** 校验时跳过的组件 key（参考旧代码 filterKey） */
 const SKIP_VALIDATE_KEYS = new Set(['descType', 'category']);
 
+/**
+ * 最终发布前必须从 catProp 中剔除、绝不提交的属性 key。
+ * p-21299-122450261-11721149 为「产地=其他」联动追加的更深一级属性，
+ * 不论平台是否将其追加为必填，都不填充其数据，提交前直接剔除。
+ */
+const FINAL_STRIP_CATPROP_KEYS = ['p-21299-122450261-11721149'] as const;
+
+/**
+ * 最终发布前必须写死的 catProp 值。
+ * p-21299-122450261（产地具体项）固定为「其他」(value 20213)，
+ * 与 ProductSpecialProcessor.FORCED_CHILD_VALUES 保持一致，作为提交前的最终兜底。
+ */
+const FINAL_FORCED_CATPROP_VALUES: Record<string, { value: number; text: string }> = {
+  'p-21299-122450261': { value: 20213, text: '其他' },
+};
+
 function buildPublishStartTime(strategy?: PublishStrategy): { type: 0 | 2; shelfTime: null } {
   return {
     type: strategy === 'immediate' ? 0 : 2,
@@ -209,6 +225,11 @@ export class EditDraftStep extends PublishStep {
     // ── Step 3: 补全必填 catProp 缺省值 ──────────────────────────────────────
     this.fillRequiredCatProps(tbWindowJson.catProps, correctionPayload);
 
+    // ── Step 3.5: 最终发布前属性填充检测（剔除/写死特定 catProp） ─────────────
+    // 必须在 fillRequiredCatProps 之后执行，确保即使平台将待剔除属性追加为必填、
+    // 被自动填充，也会在提交前被最终剔除。
+    this.enforceFinalCatPropOverrides(ctx.taskId, tbWindowJson, correctionPayload);
+
     // ── Step 4: 校验必填字段（记录缺失，由平台接口最终拦截） ────────────────
     const missing = this.validateRequiredComponents(tbWindowJson, correctionPayload);
     if (missing.length > 0) {
@@ -340,6 +361,47 @@ export class EditDraftStep extends PublishStep {
       if (fallback !== null) {
         catPropData[prop.name] = fallback;
       }
+    }
+
+    payload['catProp'] = catPropData;
+  }
+
+  /**
+   * 最终发布前的属性填充检测：
+   *  1. 剔除 FINAL_STRIP_CATPROP_KEYS 中的属性（如 p-21299-122450261-11721149），
+   *     不论平台是否将其追加为必填、是否已被自动填充，都不提交。
+   *  2. 将 FINAL_FORCED_CATPROP_VALUES 中的属性写死为指定值
+   *     （如 p-21299-122450261 = 其他/20213）。
+   *
+   * 仅当本属性组出现在当前草稿（catProp 或刷新后的 window.Json catProps）时才介入，
+   * 避免对不含这些属性的类目产生影响。
+   */
+  private enforceFinalCatPropOverrides(
+    taskId: number,
+    tbWindowJson: TbWindowJsonDraftData,
+    payload: Record<string, unknown>,
+  ): void {
+    const catPropData = payload['catProp'] as Record<string, unknown> | undefined;
+    if (!catPropData) return;
+
+    const targetKeys = [
+      ...FINAL_STRIP_CATPROP_KEYS,
+      ...Object.keys(FINAL_FORCED_CATPROP_VALUES),
+    ];
+    const inSchema = tbWindowJson.catProps.some(p => targetKeys.includes(p.name));
+    const inPayload = targetKeys.some(k => k in catPropData);
+    if (!inSchema && !inPayload) return;
+
+    for (const key of FINAL_STRIP_CATPROP_KEYS) {
+      if (key in catPropData) {
+        delete catPropData[key];
+        publishWarn(`[task:${taskId}] [TB] [draft-update] 最终发布前剔除属性 ${key}`, { taskId, key });
+      }
+    }
+
+    for (const [key, value] of Object.entries(FINAL_FORCED_CATPROP_VALUES)) {
+      catPropData[key] = value;
+      publishInfo(`[task:${taskId}] [TB] [draft-update] 最终发布前写死属性 ${key}`, { taskId, key, value });
     }
 
     payload['catProp'] = catPropData;

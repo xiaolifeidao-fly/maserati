@@ -90,7 +90,10 @@
       "Bash(grep -n \"^import\\\\|notification\\\\|import { message\\\\|const { message\\\\| message,\" client/webview/src/app/\\\\\\(console\\\\\\)/product/components/ProductPublishModal.tsx)",
       "Bash(echo \"=== client/app tsc exit: $? ===\")",
       "Bash(./node_modules/.bin/tsc --noEmit -p tsconfig.json)",
-      "Bash(echo \"app exit=$?\")"
+      "Bash(echo \"app exit=$?\")",
+      "Read(//Users/fly/.claude/projects/-Users-fly-Documents-develop-project-private-taobao-maserati/memory/**)",
+      "Bash(cat MEMORY.md)",
+      "Bash(echo \"===exit $?===\")"
     ]
   }
 }

@@ -56,9 +56,21 @@ export class PropsFiller implements IFiller {
 
     const filledProps: Record<string, CatPropFilledValue> = {};
 
+    // 已在特殊属性里的 key 由 ProductSpecialProcessor 接管，正常属性填充跳过，避免重复填充
+    const activePropKeys = this.specialProcessor.getActivePropKeys(tbWindowJson);
+    const specialKeySet = new Set(activePropKeys);
+
     for (const prop of sorted) {
       const key = prop.name;
       if (!key) continue;
+
+      if (specialKeySet.has(key)) {
+        publishInfo(
+          `[task:${taskId}] [PROPS] skip "${prop.label ?? key}"，由 ProductSpecialProcessor 接管`,
+          { taskId, key },
+        );
+        continue;
+      }
 
       const filled = await this.resolvePropValue(prop, product, taskId);
       if (filled !== null) {
@@ -77,7 +89,6 @@ export class PropsFiller implements IFiller {
       }
     }
 
-    const activePropKeys = this.specialProcessor.getActivePropKeys(tbWindowJson);
     if (activePropKeys.length > 0) {
       publishInfo(`[task:${taskId}] [PROPS] activate ProductSpecialProcessor`, { taskId, activePropKeys });
       await this.specialProcessor.process(ctx, activePropKeys, filledProps);
