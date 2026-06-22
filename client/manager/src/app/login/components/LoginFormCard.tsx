@@ -53,10 +53,9 @@ export function LoginFormCard() {
       <div
         className="manager-shell-card manager-stagger-4 manager-form-skin manager-brand-frame"
         style={{
-          borderRadius: 24,
+          borderRadius: 10,
           padding: 32,
-          background:
-            "linear-gradient(180deg, rgba(255,255,255,0.99) 0%, rgba(246,249,253,0.98) 100%)",
+          background: "var(--manager-surface)",
         }}
       >
         <Title
@@ -118,7 +117,7 @@ export function LoginFormCard() {
             style={{
               height: 50,
               color: "#ffffff",
-              background: "linear-gradient(135deg, #7da8f8 0%, #93b7ff 100%)",
+              background: "var(--manager-primary)",
               border: "none",
               fontWeight: 800,
             }}

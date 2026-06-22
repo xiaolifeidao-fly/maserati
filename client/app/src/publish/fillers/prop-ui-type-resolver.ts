@@ -98,6 +98,23 @@ function resolveSelect(propDef: PropValueDef, rawValue: string | null): CatPropO
   return pickRandom(getValidOptions(propDef));
 }
 
+function resolveCombobox(
+  propDef: PropValueDef,
+  rawValue: string | null,
+): CatPropOptionValue | null {
+  // dataSource 为空时，combobox 视为可自定义输入：固定写入自定义值 value=-1。
+  // 有源值则用源值作为 text，否则必填兜底为 "1"，非必填不填。
+  if (!hasDataSourceOptions(propDef)) {
+    const text = rawValue?.trim();
+    if (propDef.required || text) {
+      return { value: -1, text: text || '1' };
+    }
+    return null;
+  }
+  // 有候选项时与 select 行为一致：优先源值匹配，否则随机取值。
+  return resolveSelect(propDef, rawValue);
+}
+
 function resolveCheckbox(
   propDef: PropValueDef,
   rawValue: string | null,
@@ -191,8 +208,10 @@ export function getPropValueByUiType(
 ): CatPropFilledValue | null {
   switch (uiType.toLowerCase()) {
     case 'select':
-    case 'combobox':
       return resolveSelect(propDef, rawValue);
+
+    case 'combobox':
+      return resolveCombobox(propDef, rawValue);
 
     case 'checkbox':
       return resolveCheckbox(propDef, rawValue);

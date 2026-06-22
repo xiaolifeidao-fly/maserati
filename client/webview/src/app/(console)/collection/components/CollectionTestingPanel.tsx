@@ -340,13 +340,13 @@ export function CollectionWorkspaceLeftPanel({
   const handleToggleFavorite = async (record: CollectRecordPreview, event: React.MouseEvent) => {
     event.stopPropagation();
     if (record.isLoading || togglingIds.has(record.id)) return;
-    if (propOnToggleFavorite) {
-      await propOnToggleFavorite(record);
-      return;
-    }
     setTogglingIds((prev) => new Set(prev).add(record.id));
     try {
-      await updateWorkspaceRecord(record.id, { isFavorite: !record.isFavorite });
+      if (propOnToggleFavorite) {
+        await propOnToggleFavorite(record);
+      } else {
+        await updateWorkspaceRecord(record.id, { isFavorite: !record.isFavorite });
+      }
     } catch (error) {
       message.error(error instanceof Error ? error.message : "收藏状态更新失败");
     } finally {
@@ -813,13 +813,13 @@ export function CollectionWorkspaceRightPanel({
 
   const handleToggleFavorite = async () => {
     if (!selectedRecord || selectedRecord.isLoading || togglingFavorite) return;
-    if (propOnToggleFavorite) {
-      await propOnToggleFavorite(selectedRecord);
-      return;
-    }
     setTogglingFavorite(true);
     try {
-      await updateWorkspaceRecord(selectedRecord.id, { isFavorite: !selectedRecord.isFavorite });
+      if (propOnToggleFavorite) {
+        await propOnToggleFavorite(selectedRecord);
+      } else {
+        await updateWorkspaceRecord(selectedRecord.id, { isFavorite: !selectedRecord.isFavorite });
+      }
     } catch (error) {
       message.error(error instanceof Error ? error.message : "收藏状态更新失败");
     } finally {

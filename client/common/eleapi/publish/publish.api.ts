@@ -210,4 +210,16 @@ export class PublishApi extends ElectronApi {
   async onLoginRequired(callback: (payload: { taskId: number; shopId: number }) => void): Promise<void> {
     return this.onMessage('onLoginRequired', callback);
   }
+
+  /**
+   * 订阅「发布过程中出现验证码」事件。
+   * 验证码面板会自动弹出，此事件用于在前端额外给出更醒目的提示
+   * （验证完成后请在面板中完成验证，若进度未自动恢复可点击面板内的「继续发布」按钮）。
+   */
+  @InvokeType(Protocols.TRRIGER)
+  async onCaptchaRequired(
+    callback: (payload: { taskId: number; shopId: number; captchaMode?: string }) => void,
+  ): Promise<void> {
+    return this.onMessage('onCaptchaRequired', callback);
+  }
 }

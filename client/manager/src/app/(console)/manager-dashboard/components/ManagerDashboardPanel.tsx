@@ -165,12 +165,40 @@ export function ManagerDashboardPanel() {
     ],
     [overview],
   );
+  const actionItems = useMemo(
+    () => [
+      {
+        title: "发布任务巡检",
+        detail: `${formatInteger(overview.todayPublishedProductCount)} 个商品今日完成发布`,
+        tag: "商品",
+        color: "#176b87",
+      },
+      {
+        title: "激活码转化跟进",
+        detail: `${formatInteger(overview.todayActivatedActivationCodes)} / ${formatInteger(overview.todayGeneratedActivationCodes)} 个已激活`,
+        tag: "激活码",
+        color: "#17815f",
+      },
+      {
+        title: "店铺结构复盘",
+        detail: `${formatInteger(overview.todayNewShopCount)} 家店铺今日新增`,
+        tag: "店铺",
+        color: "#b7791f",
+      },
+    ],
+    [overview],
+  );
 
   return (
     <>
       {contextHolder}
       <div className="manager-dashboard manager-page-stack">
         <section className="manager-dashboard-toolbar manager-stagger-1">
+          <div className="manager-dashboard-toolbar__copy">
+            <div className="manager-section-label">Operations Command</div>
+            <h1>工作台</h1>
+            <Text>聚合用户、店铺、商品发布与激活码消耗，帮助运营团队快速判断今日状态。</Text>
+          </div>
           <Space size={12} wrap>
             <Tag className="manager-dashboard-tag">
               <ClockCircleOutlined /> {formatUpdatedAt(overview.generatedAt)}
@@ -245,29 +273,47 @@ export function ManagerDashboardPanel() {
                 )}
               </div>
 
-              <CategoryPanel
-                title="今日新选品"
-                subtitle="按店铺分类"
-                total={overview.todayCollectedCount}
-                items={overview.todayCollectedByShopCategory}
-                icon={<BarChartOutlined />}
-              />
+              <aside className="manager-dashboard-insight-rail">
+                <div className="manager-dashboard-panel">
+                  <DashboardPanelHeader icon={<ClockCircleOutlined />} title="运营待办" subtitle="按今日关键指标自动整理优先级。" />
+                  <div className="manager-dashboard-action-list">
+                    {actionItems.map((item) => (
+                      <div key={item.title} className="manager-dashboard-action-row">
+                        <span className="manager-dashboard-action-dot" style={{ background: item.color }} />
+                        <span>
+                          <strong>{item.title}</strong>
+                          <span>{item.detail}</span>
+                        </span>
+                        <Tag className="manager-count-tag">{item.tag}</Tag>
+                      </div>
+                    ))}
+                  </div>
+                </div>
 
-              <CategoryPanel
-                title="今日新增店铺"
-                subtitle="按店铺分类"
-                total={overview.todayNewShopCount}
-                items={overview.todayNewShopByCategory}
-                icon={<ShopOutlined />}
-              />
+                <CategoryPanel
+                  title="今日新选品"
+                  subtitle="按店铺分类"
+                  total={overview.todayCollectedCount}
+                  items={overview.todayCollectedByShopCategory}
+                  icon={<BarChartOutlined />}
+                />
 
-              <CategoryPanel
-                title="总计店铺结构"
-                subtitle="存量店铺分类"
-                total={overview.totalShopCount}
-                items={overview.totalShopByCategory}
-                icon={<AppstoreAddOutlined />}
-              />
+                <CategoryPanel
+                  title="今日新增店铺"
+                  subtitle="按店铺分类"
+                  total={overview.todayNewShopCount}
+                  items={overview.todayNewShopByCategory}
+                  icon={<ShopOutlined />}
+                />
+
+                <CategoryPanel
+                  title="总计店铺结构"
+                  subtitle="存量店铺分类"
+                  total={overview.totalShopCount}
+                  items={overview.totalShopByCategory}
+                  icon={<AppstoreAddOutlined />}
+                />
+              </aside>
             </section>
           </>
         )}

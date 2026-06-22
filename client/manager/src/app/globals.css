@@ -1,30 +1,31 @@
 :root {
   color-scheme: light;
-  --manager-bg: #f0f3f8;
-  --manager-bg-soft: #e8edf5;
-  --manager-surface: #ffffff;
+  --manager-bg: #eef2f5;
+  --manager-bg-soft: #e4eaef;
+  --manager-surface: #fbfcfd;
   --manager-surface-raised: #ffffff;
-  --manager-panel: #f6f8fb;
-  --manager-panel-muted: #f0f3f8;
-  --manager-border: #dce1ea;
-  --manager-border-strong: #c4cdd8;
-  --manager-text: #111827;
-  --manager-text-soft: rgba(17, 24, 39, 0.64);
-  --manager-text-faint: rgba(17, 24, 39, 0.42);
-  --manager-primary: #1657c1;
-  --manager-primary-hover: #1248a0;
-  --manager-primary-light: rgba(22, 87, 193, 0.08);
-  --manager-primary-muted: rgba(22, 87, 193, 0.12);
-  --manager-success: #12a06d;
-  --manager-warning: #d97706;
-  --manager-danger: #dc2626;
-  --manager-sidebar-bg: #111827;
+  --manager-panel: #f5f8fa;
+  --manager-panel-muted: #edf3f5;
+  --manager-border: #d7dee6;
+  --manager-border-strong: #aebbc8;
+  --manager-text: #17202a;
+  --manager-text-soft: rgba(23, 32, 42, 0.66);
+  --manager-text-faint: rgba(23, 32, 42, 0.44);
+  --manager-primary: #176b87;
+  --manager-primary-hover: #12566e;
+  --manager-primary-light: rgba(23, 107, 135, 0.1);
+  --manager-primary-muted: rgba(23, 107, 135, 0.14);
+  --manager-success: #17815f;
+  --manager-warning: #b7791f;
+  --manager-danger: #c2413a;
+  --manager-sidebar-bg: #101820;
+  --manager-sidebar-bg-soft: #15232d;
   --manager-sidebar-border: rgba(255, 255, 255, 0.06);
   --manager-sidebar-text: rgba(255, 255, 255, 0.82);
   --manager-sidebar-text-muted: rgba(255, 255, 255, 0.44);
-  --manager-shadow-sm: 0 1px 4px rgba(10, 18, 40, 0.06);
-  --manager-shadow: 0 4px 16px rgba(10, 18, 40, 0.08), 0 1px 4px rgba(10, 18, 40, 0.04);
-  --manager-shadow-lg: 0 8px 32px rgba(10, 18, 40, 0.1), 0 2px 8px rgba(10, 18, 40, 0.05);
+  --manager-shadow-sm: 0 1px 3px rgba(15, 23, 42, 0.06);
+  --manager-shadow: 0 8px 24px rgba(15, 23, 42, 0.07), 0 1px 3px rgba(15, 23, 42, 0.05);
+  --manager-shadow-lg: 0 16px 42px rgba(15, 23, 42, 0.12), 0 4px 12px rgba(15, 23, 42, 0.07);
 }
 
 * {
@@ -78,9 +79,9 @@ select {
 /* ─── Sidebar ─── */
 
 .manager-sidebar-card {
-  background: var(--manager-sidebar-bg);
+  background: linear-gradient(180deg, var(--manager-sidebar-bg) 0%, var(--manager-sidebar-bg-soft) 100%);
   border-right: 1px solid rgba(255, 255, 255, 0.05);
-  box-shadow: 4px 0 24px rgba(0, 0, 0, 0.18);
+  box-shadow: 4px 0 24px rgba(10, 18, 28, 0.2);
 }
 
 .manager-brand-block {
@@ -91,7 +92,7 @@ select {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  color: rgba(255, 255, 255, 0.38);
+  color: rgba(255, 255, 255, 0.46);
   font-size: 10px;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -132,8 +133,8 @@ select {
   height: 38px;
   border-radius: 8px;
   position: relative;
-  background: linear-gradient(145deg, #2563eb, #1248a0);
-  box-shadow: 0 2px 12px rgba(22, 87, 193, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.18);
+  background: linear-gradient(145deg, #1f7f9d, #0f5369);
+  box-shadow: 0 2px 12px rgba(23, 107, 135, 0.38), inset 0 1px 0 rgba(255, 255, 255, 0.18);
 }
 
 .manager-crest::before {
@@ -193,9 +194,9 @@ select {
 
 .manager-shell-menu.ant-menu .ant-menu-item-selected,
 .manager-shell-menu.ant-menu .ant-menu-submenu-selected > .ant-menu-submenu-title {
-  background: rgba(22, 87, 193, 0.28) !important;
+  background: rgba(23, 107, 135, 0.3) !important;
   color: #ffffff !important;
-  box-shadow: inset 3px 0 0 #4b8eff;
+  box-shadow: inset 3px 0 0 #42c4d6;
 }
 
 .manager-shell-menu.ant-menu .ant-menu-item:hover,
@@ -223,6 +224,12 @@ select {
   background: var(--manager-surface);
   border: 1px solid var(--manager-border);
   box-shadow: var(--manager-shadow-sm);
+}
+
+.manager-command-bar {
+  position: sticky;
+  top: 0;
+  z-index: 9;
 }
 
 .manager-topbar-kicker {
@@ -277,8 +284,8 @@ select {
   padding-inline: 18px;
   border-radius: 6px;
   border: none;
-  background: linear-gradient(135deg, #1a62d9, #1248a0);
-  box-shadow: 0 2px 8px rgba(22, 87, 193, 0.28);
+  background: #176b87;
+  box-shadow: 0 4px 12px rgba(23, 107, 135, 0.24);
 }
 
 /* ─── Page Heading ─── */
@@ -295,7 +302,7 @@ select {
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 16px;
   align-items: center;
-  padding: 20px 24px;
+  padding: 18px 22px;
   border-radius: 8px;
   border: 1px solid var(--manager-border);
   background: var(--manager-surface);
@@ -330,7 +337,7 @@ select {
 }
 
 .manager-table .ant-table-thead > tr > th {
-  background: #f6f8fb !important;
+  background: #f5f8fa !important;
   color: var(--manager-text-soft) !important;
   border-bottom: 1px solid var(--manager-border) !important;
   font-size: 12px;
@@ -340,12 +347,12 @@ select {
 }
 
 .manager-table .ant-table-tbody > tr > td {
-  background: #ffffff !important;
+  background: #fbfcfd !important;
   border-bottom: 1px solid var(--manager-border) !important;
 }
 
 .manager-table .ant-table-tbody > tr:hover > td {
-  background: #f6f8fb !important;
+  background: #f3f8f9 !important;
 }
 
 .manager-table .ant-pagination {
@@ -355,7 +362,7 @@ select {
 /* ─── Forms & Filters ─── */
 
 .manager-filter-card {
-  padding: 14px;
+  padding: 12px 14px;
 }
 
 .manager-filter-input.ant-input-affix-wrapper,
@@ -368,7 +375,7 @@ select {
 .manager-form-skin .ant-input-number,
 .manager-form-skin .ant-input-number-input,
 .manager-form-skin .ant-input-textarea textarea {
-  background: #ffffff !important;
+  background: #fbfcfd !important;
   border-color: var(--manager-border) !important;
   color: var(--manager-text) !important;
   box-shadow: none !important;
@@ -513,7 +520,7 @@ select {
 .manager-data-card {
   position: relative;
   border-radius: 8px;
-  padding: 20px;
+  padding: 18px;
   background: var(--manager-surface);
   border: 1px solid var(--manager-border);
   box-shadow: var(--manager-shadow-sm);
@@ -559,6 +566,27 @@ select {
   color: var(--manager-text-faint);
 }
 
+.manager-module-button.ant-btn-default {
+  background: var(--manager-panel);
+}
+
+.manager-command-search {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.manager-signal-strip {
+  min-height: 24px;
+}
+
+.manager-signal-tag.ant-tag {
+  margin-inline-end: 0;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
 /* ─── Metric & Dashboard ─── */
 
 .manager-metric-chip {
@@ -599,12 +627,15 @@ select {
   padding: 24px;
   display: flex;
   align-items: stretch;
-  background: var(--manager-bg);
+  background:
+    linear-gradient(135deg, rgba(23, 107, 135, 0.1), transparent 32%),
+    linear-gradient(315deg, rgba(16, 24, 32, 0.12), transparent 34%),
+    var(--manager-bg);
 }
 
 .manager-login-panel {
   width: 100%;
-  border-radius: 16px;
+  border-radius: 12px;
   padding: clamp(24px, 4vw, 42px);
   position: relative;
   overflow: hidden;
@@ -616,13 +647,37 @@ select {
 /* ─── Dashboard ─── */
 
 .manager-dashboard {
-  --dashboard-ink: #111827;
-  --dashboard-muted: rgba(17, 24, 39, 0.56);
+  --dashboard-ink: #17202a;
+  --dashboard-muted: rgba(23, 32, 42, 0.58);
 }
 
 .manager-dashboard-toolbar {
   display: flex;
-  justify-content: flex-end;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 18px;
+  border-radius: 8px;
+  border: 1px solid var(--manager-border);
+  background: var(--manager-surface);
+  box-shadow: var(--manager-shadow-sm);
+}
+
+.manager-dashboard-toolbar__copy {
+  min-width: 0;
+}
+
+.manager-dashboard-toolbar__copy h1 {
+  margin: 4px 0;
+  color: var(--dashboard-ink);
+  font-size: 22px;
+  line-height: 1.2;
+  font-weight: 800;
+}
+
+.manager-dashboard-toolbar__copy .ant-typography {
+  color: var(--dashboard-muted);
+  line-height: 1.5;
 }
 
 .manager-dashboard-hero {
@@ -720,7 +775,7 @@ select {
 }
 
 .manager-dashboard-metric--money {
-  border-top: 3px solid #dc2626;
+  border-top: 3px solid #c2413a;
 }
 
 .manager-dashboard-metric--code {
@@ -728,11 +783,11 @@ select {
 }
 
 .manager-dashboard-metric--shop {
-  border-top: 3px solid #12a06d;
+  border-top: 3px solid #17815f;
 }
 
 .manager-dashboard-metric--user {
-  border-top: 3px solid #7c3aed;
+  border-top: 3px solid #b7791f;
 }
 
 .manager-dashboard-metric--product {
@@ -787,7 +842,7 @@ select {
 
 .manager-dashboard-main-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 2fr) minmax(280px, 0.85fr);
   gap: 12px;
   align-items: start;
 }
@@ -802,7 +857,51 @@ select {
 }
 
 .manager-dashboard-panel--wide {
-  grid-column: span 3;
+  grid-column: span 1;
+}
+
+.manager-dashboard-insight-rail {
+  display: grid;
+  gap: 12px;
+}
+
+.manager-dashboard-action-list {
+  display: grid;
+  gap: 10px;
+}
+
+.manager-dashboard-action-row {
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--manager-border);
+}
+
+.manager-dashboard-action-row:last-child {
+  border-bottom: 0;
+}
+
+.manager-dashboard-action-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--manager-primary);
+}
+
+.manager-dashboard-action-row strong {
+  display: block;
+  color: var(--manager-text);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.manager-dashboard-action-row span {
+  display: block;
+  margin-top: 2px;
+  color: var(--manager-text-faint);
+  font-size: 12px;
 }
 
 .manager-dashboard-panel__header {
@@ -1094,6 +1193,11 @@ select {
   .manager-dashboard-panel--wide {
     grid-column: span 2;
   }
+
+  .manager-dashboard-insight-rail {
+    grid-column: span 2;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 992px) {
@@ -1124,11 +1228,16 @@ select {
   .manager-dashboard-hero,
   .manager-dashboard-total-strip,
   .manager-dashboard-metric-grid,
-  .manager-dashboard-main-grid {
+  .manager-dashboard-main-grid,
+  .manager-dashboard-insight-rail {
     grid-template-columns: minmax(0, 1fr);
   }
 
   .manager-dashboard-panel--wide {
+    grid-column: span 1;
+  }
+
+  .manager-dashboard-insight-rail {
     grid-column: span 1;
   }
 
@@ -1178,5 +1287,9 @@ select {
 
   .manager-user-card {
     width: 100%;
+  }
+
+  .manager-command-bar {
+    grid-template-columns: minmax(0, 1fr) !important;
   }
 }

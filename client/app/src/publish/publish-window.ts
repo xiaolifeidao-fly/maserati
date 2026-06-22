@@ -13,6 +13,8 @@ import type { PlaywrightViewerInputEvent } from '@eleapi/collection-workspace/co
 
 /** 右侧验证码面板固定宽度（px） */
 const CAPTCHA_PANEL_WIDTH = 420;
+/** 发布窗口 BrowserView 内容区目标高度（px） */
+const PUBLISH_WINDOW_CONTENT_HEIGHT = 1000;
 
 // ─── 状态 ─────────────────────────────────────────────────────────────────────
 
@@ -25,6 +27,12 @@ let captchaSolvedCallback: (() => void) | null = null;
 let captchaOriginalBoundsWidth: number | null = null;
 /** 验证码面板版本号，用于废弃旧的异步导航/监听。 */
 let captchaPanelVersion = 0;
+/** 用户手动点击「继续发布」按钮时执行的回调（自动检测失效时的兜底）。 */
+let captchaManualSolveHandler: (() => void) | null = null;
+/** 右侧验证码 BrowserView 上的 console-message 监听器（用于接收手动继续信号）。 */
+let captchaConsoleListener: ((...args: unknown[]) => void) | null = null;
+/** 右侧验证码 BrowserView 上的 did-finish-load 监听器（用于重新注入手动继续按钮）。 */
+let captchaFinishLoadListener: (() => void) | null = null;
 
 // ─── 截屏流验证码状态 ─────────────────────────────────────────────────────────
 
@@ -139,6 +147,18 @@ function focusPublishWindow(): void {
       publishBrowserWindow.setAlwaysOnTop(false);
     }
   }, 1200);
+}
+
+function ensurePublishWindowContentHeight(): void {
+  if (!publishBrowserWindow || publishBrowserWindow.isDestroyed()) {
+    return;
+  }
+  const { width, height } = publishBrowserWindow.getContentBounds();
+  if (height === PUBLISH_WINDOW_CONTENT_HEIGHT) {
+    return;
+  }
+  publishBrowserWindow.setContentSize(width, PUBLISH_WINDOW_CONTENT_HEIGHT);
+  syncBounds();
 }
 
 function toElectronCookieUrl(cookie: { domain?: string; path?: string; secure?: boolean }): string {
@@ -441,6 +461,7 @@ export function openPublishWindow(options?: PublishWindowOpenOptions): void {
         log.error('[publish-window] failed to reload left view', err);
       });
     }
+    ensurePublishWindowContentHeight();
     focusPublishWindow();
     const captchaTask = getLatestCaptchaTask();
     if (captchaTask?.captchaUrl) {
@@ -454,9 +475,10 @@ export function openPublishWindow(options?: PublishWindowOpenOptions): void {
 
   publishBrowserWindow = new BrowserWindow({
     width: 960,
-    height: 720,
+    height: PUBLISH_WINDOW_CONTENT_HEIGHT,
+    useContentSize: true,
     minWidth: 640,
-    minHeight: 480,
+    minHeight: 720,
     parent: parent ?? undefined,
     modal: false,
     show: false,
@@ -535,6 +557,94 @@ export function openPublishWindow(options?: PublishWindowOpenOptions): void {
  * 在右侧并排展示验证码面板。
  * 直接加载验证码 URL（淘宝验证码页面）；验证码页面跳转离开后自动调用 onSolved。
  */
+// ─── 手动「继续发布」兜底 ───────────────────────────────────────────────────────
+
+/**
+ * 自动检测（页面跳转）可能因为验证码是「原地校验」（XHR/AJAX，URL 不变）而无法触发，
+ * 导致验证通过后发布流程一直停在 PENDING。为此在验证码面板里注入一个浮动按钮，
+ * 用户验证完成后可手动点击继续，按钮点击通过 console-message 信号回传主进程。
+ */
+const MANUAL_SOLVE_SIGNAL = '__PUBLISH_CAPTCHA_MANUAL_SOLVE__';
+
+/** 兼容不同 Electron 版本的 console-message 回调签名，提取出日志文本。 */
+function extractConsoleText(args: unknown[]): string {
+  const parts: string[] = [];
+  for (const arg of args) {
+    if (typeof arg === 'string') {
+      parts.push(arg);
+    } else if (arg && typeof arg === 'object' && 'message' in arg) {
+      parts.push(String((arg as { message: unknown }).message));
+    }
+  }
+  return parts.join(' ');
+}
+
+/** 向右侧验证码 BrowserView 注入「我已完成验证 · 点此继续发布」浮动按钮（幂等）。 */
+function injectManualSolveButton(): void {
+  if (!rightBrowserView || rightBrowserView.webContents.isDestroyed()) {
+    return;
+  }
+  const label = '我已完成验证 · 点此继续发布';
+  const pending = '正在继续发布…';
+  const js = `(function(){
+    var id='__publish_captcha_manual_solve__';
+    if(document.getElementById(id))return;
+    var b=document.createElement('button');
+    b.id=id;b.type='button';b.textContent=${JSON.stringify(label)};
+    b.style.cssText='position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:2147483647;padding:10px 20px;border:0;border-radius:9px;background:#2563eb;color:#fff;font:600 13px/1.2 system-ui,-apple-system,sans-serif;box-shadow:0 6px 18px rgba(37,99,235,.4);cursor:pointer;';
+    b.onmouseenter=function(){b.style.background='#1d4ed8';};
+    b.onmouseleave=function(){b.style.background='#2563eb';};
+    b.addEventListener('click',function(){b.disabled=true;b.style.opacity='0.7';b.textContent=${JSON.stringify(pending)};console.log(${JSON.stringify(MANUAL_SOLVE_SIGNAL)});});
+    (document.body||document.documentElement).appendChild(b);
+  })();`;
+  rightBrowserView.webContents.executeJavaScript(js, true).catch(() => {
+    /* 注入失败（页面尚未就绪等）忽略，did-finish-load 会再次尝试 */
+  });
+}
+
+/**
+ * 为当前验证码面板挂上「手动继续」兜底：
+ * 1. 在右侧 BrowserView 注入浮动按钮，并在每次页面加载完成后重新注入；
+ * 2. 监听 console-message，收到手动信号后执行 handler。
+ */
+function setupCaptchaManualSolve(version: number, handler: () => void): void {
+  if (!rightBrowserView || rightBrowserView.webContents.isDestroyed()) {
+    return;
+  }
+  const webContents = rightBrowserView.webContents;
+  captchaManualSolveHandler = handler;
+
+  if (captchaConsoleListener) {
+    webContents.removeListener('console-message', captchaConsoleListener);
+  }
+  captchaConsoleListener = (...args: unknown[]): void => {
+    if (version !== captchaPanelVersion) {
+      return;
+    }
+    if (extractConsoleText(args).includes(MANUAL_SOLVE_SIGNAL)) {
+      const handle = captchaManualSolveHandler;
+      captchaManualSolveHandler = null;
+      log.info('[publish-window] captcha manual solve signal received');
+      handle?.();
+    }
+  };
+  webContents.on('console-message', captchaConsoleListener);
+
+  if (captchaFinishLoadListener) {
+    webContents.removeListener('did-finish-load', captchaFinishLoadListener);
+  }
+  captchaFinishLoadListener = (): void => {
+    if (version !== captchaPanelVersion) {
+      return;
+    }
+    injectManualSolveButton();
+  };
+  webContents.on('did-finish-load', captchaFinishLoadListener);
+
+  // 立即尝试注入一次（页面可能已加载完成，did-finish-load 不会再触发）
+  injectManualSolveButton();
+}
+
 export function showCaptchaPanel(captchaUrl: string, onSolved?: () => void, shopId?: number): void {
   if (!publishBrowserWindow || publishBrowserWindow.isDestroyed()) {
     log.warn('[publish-window] showCaptchaPanel: publish window is not open');
@@ -547,6 +657,7 @@ export function showCaptchaPanel(captchaUrl: string, onSolved?: () => void, shop
 
   // 清除上一次的监听器和回调
   rightBrowserView.webContents.removeAllListeners('did-navigate');
+  rightBrowserView.webContents.removeAllListeners('did-navigate-in-page');
   const currentPanelVersion = ++captchaPanelVersion;
   captchaSolvedCallback = onSolved ?? null;
 
@@ -569,23 +680,31 @@ export function showCaptchaPanel(captchaUrl: string, onSolved?: () => void, shop
     if (!captchaSolvedCallback || currentPanelVersion !== captchaPanelVersion || webContents.isDestroyed()) {
       return;
     }
-    const onNavigate = (_event: Electron.Event, url: string): void => {
-      if (currentPanelVersion !== captchaPanelVersion) {
-        webContents.removeListener('did-navigate', onNavigate);
-        return;
-      }
+    // 跳转到非验证码页面 = 验证通过。同时监听整页跳转（did-navigate）和
+    // 单页内部跳转（did-navigate-in-page，覆盖 SPA/hash 场景）。
+    const handleNavigation = (url: string): void => {
+      if (currentPanelVersion !== captchaPanelVersion) return;
       if (!url || url === 'about:blank') return;
       // 忽略验证码页面本身及其重定向
       if (/captcha|checkcode/i.test(url)) return;
-      // 跳转到非验证码页面 = 验证通过
-      log.info('[publish-window] captcha solved, resuming publish', { url });
-      webContents.removeListener('did-navigate', onNavigate);
+      log.info('[publish-window] captcha solved (navigation), resuming publish', { url });
       const cb = captchaSolvedCallback;
       hideCaptchaPanel();
       cb?.();
     };
+    const onNavigate = (_event: Electron.Event, url: string): void => handleNavigation(url);
+    const onNavigateInPage = (_event: Electron.Event, url: string): void => handleNavigation(url);
     webContents.on('did-navigate', onNavigate);
+    webContents.on('did-navigate-in-page', onNavigateInPage);
   };
+
+  // 挂上「手动继续」兜底：原地校验型验证码（URL 不变）无法靠跳转检测，用户可手动点击继续
+  setupCaptchaManualSolve(currentPanelVersion, () => {
+    log.info('[publish-window] captcha manually solved by user, resuming publish');
+    const cb = captchaSolvedCallback;
+    hideCaptchaPanel();
+    cb?.();
+  });
 
   void applyTbSharedStorage(rightBrowserView, shopId)
     .then(() => {
@@ -616,7 +735,17 @@ export function hideCaptchaPanel(): void {
   captchaPanelVisible = false;
   if (rightBrowserView && !rightBrowserView.webContents.isDestroyed()) {
     rightBrowserView.webContents.removeAllListeners('did-navigate');
+    rightBrowserView.webContents.removeAllListeners('did-navigate-in-page');
+    if (captchaConsoleListener) {
+      rightBrowserView.webContents.removeListener('console-message', captchaConsoleListener);
+    }
+    if (captchaFinishLoadListener) {
+      rightBrowserView.webContents.removeListener('did-finish-load', captchaFinishLoadListener);
+    }
   }
+  captchaConsoleListener = null;
+  captchaFinishLoadListener = null;
+  captchaManualSolveHandler = null;
   captchaSolvedCallback = null;
   stopScreenshotCaptchaStream();
   syncBounds();
@@ -659,6 +788,9 @@ export async function showScreenshotCaptchaPanel(
     log.warn('[publish-window] showScreenshotCaptchaPanel: right view is not available');
     return;
   }
+
+  // 递增版本号，废弃上一次面板挂上的导航/手动监听
+  const currentPanelVersion = ++captchaPanelVersion;
 
   // 停止上一次截屏流（如有）
   stopScreenshotCaptchaStream();
@@ -722,6 +854,15 @@ export async function showScreenshotCaptchaPanel(
       onSolved?.();
     };
     page.on('framenavigated', onFrameNavigated);
+
+    // 挂上「手动继续」兜底：原地校验型验证码无法靠跳转检测，用户可在查看器中手动点击继续
+    setupCaptchaManualSolve(currentPanelVersion, () => {
+      log.info('[publish-window] screenshot captcha manually solved by user, resuming publish');
+      page.off('framenavigated', onFrameNavigated);
+      stopScreenshotCaptchaStream();
+      hideCaptchaPanel();
+      onSolved?.();
+    });
 
   } catch (err) {
     log.error('[publish-window] showScreenshotCaptchaPanel: failed to setup playwright page', err);

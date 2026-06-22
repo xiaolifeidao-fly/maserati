@@ -6,9 +6,22 @@ import { publishInfo, publishWarn } from '../utils/publish-logger';
 import { getPropValueByUiType, type CatPropFilledValue } from './prop-ui-type-resolver';
 
 /** 当前已注册的特殊属性 key 列表，后续可按需追加 */
-const SPECIAL_PROP_KEYS = ['p-1930001', 'p-20000'] as const;
+const SPECIAL_PROP_KEYS = ['p-1930001', 'p-21299', 'p-20000'] as const;
+
+/** 走"产地写死中国大陆 + 异步子属性填充"逻辑的属性 key */
+const ORIGIN_PROP_KEYS = ['p-1930001', 'p-21299'] as const;
+
+type OriginPropKey = (typeof ORIGIN_PROP_KEYS)[number];
 
 type SpecialPropKey = (typeof SPECIAL_PROP_KEYS)[number];
+
+/**
+ * 指定子属性的写死填充值。当 asyncOpt 返回的子属性命中此 map 时，
+ * 直接使用此处配置的值，而不走 uiType 兜底逻辑。
+ */
+const FORCED_CHILD_VALUES: Record<string, CatPropFilledValue> = {
+  'p-21299-122450261': { text: '其他', value: 20213 },
+};
 
 /**
  * ProductSpecialProcessor — 商品属性特殊填充处理器
@@ -68,7 +81,8 @@ export class ProductSpecialProcessor {
   ): Promise<void> {
     switch (propKey) {
       case 'p-1930001':
-        await this.handleP1930001(ctx, catPropEntry, catProp);
+      case 'p-21299':
+        await this.handleOriginProp(propKey, ctx, catPropEntry, catProp);
         break;
       case 'p-20000':
         await this.handleP20000(ctx, catProp);
@@ -81,25 +95,26 @@ export class ProductSpecialProcessor {
   }
 
   /**
-   * p-1930001（货源地/产地 - 国家/地区）特殊填充逻辑：
+   * 产地类属性（p-1930001 货源地/产地、p-21299 等）特殊填充逻辑：
    *  1. 写死为 { value: 27772, text: "中国大陆" }
    *  2. 调用 asyncOpt 接口获取子属性
-   *  3. 找到 parent === "p-1930001" 且 required === true 的子属性
+   *  3. 找到 parent === 当前 propKey 且 required === true 的子属性
    *  4. 按 uiType 随机填充子属性
    */
-  private async handleP1930001(
+  private async handleOriginProp(
+    propKey: OriginPropKey,
     ctx: FillerContext,
     _catPropEntry: TbWindowJsonCatProp | null,
     catProp: Record<string, CatPropFilledValue>,
   ): Promise<void> {
     const { taskId } = ctx;
 
-    catProp['p-1930001'] = { value: 27772, text: '中国大陆' };
-    publishInfo(`[task:${taskId}] [PROPS] [special] p-1930001 set to 中国大陆`, { taskId });
+    catProp[propKey] = { value: 27772, text: '中国大陆' };
+    publishInfo(`[task:${taskId}] [PROPS] [special] ${propKey} set to 中国大陆`, { taskId });
 
     if (!ctx.page) {
       publishWarn(
-        `[task:${taskId}] [PROPS] [special] p-1930001: no page available, skip asyncOpt`,
+        `[task:${taskId}] [PROPS] [special] ${propKey}: no page available, skip asyncOpt`,
         { taskId },
       );
       return;
@@ -116,18 +131,30 @@ export class ProductSpecialProcessor {
       );
     } catch (error) {
       publishWarn(
-        `[task:${taskId}] [PROPS] [special] p-1930001: asyncOpt failed, skip child props`,
+        `[task:${taskId}] [PROPS] [special] ${propKey}: asyncOpt failed, skip child props`,
         { taskId, error: error instanceof Error ? error.message : String(error) },
       );
       return;
     }
 
+    // 写死子属性：只要 asyncOpt 返回中包含该子属性（无论是否必填）就直接填充
+    for (const childProp of asyncOptProps) {
+      if (childProp.parent !== propKey) continue;
+      const forced = FORCED_CHILD_VALUES[childProp.name];
+      if (forced === undefined) continue;
+      catProp[childProp.name] = forced;
+      publishInfo(
+        `[task:${taskId}] [PROPS] [special] child prop "${childProp.label ?? childProp.name}" forced filled`,
+        { taskId, key: childProp.name, value: forced },
+      );
+    }
+
     const requiredChildren = asyncOptProps.filter(
-      p => p.parent === 'p-1930001' && p.required === true,
+      p => p.parent === propKey && p.required === true && FORCED_CHILD_VALUES[p.name] === undefined,
     );
 
     if (!requiredChildren.length) {
-      publishInfo(`[task:${taskId}] [PROPS] [special] p-1930001: no required child props`, { taskId });
+      publishInfo(`[task:${taskId}] [PROPS] [special] ${propKey}: no required child props`, { taskId });
       return;
     }
 

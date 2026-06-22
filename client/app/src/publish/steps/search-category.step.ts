@@ -75,25 +75,25 @@ export class SearchCategoryStep extends PublishStep {
       }
     }
 
-    // ── Step B: 查 source-product-tb-categories（通用，PXX 未命中也走此路） ───
-    if (!categoryInfo && product.sourceId) {
+    // ── Step B: TB 商品查 source-product-tb-categories（PXX 不走此表） ────────
+    if (!categoryInfo && sourceType === SourceType.TB && product.sourceId) {
       categoryInfo = await this.fetchFromSourceProductCache(product.sourceId);
     }
 
-    // ── Step C: 触发实际搜索并持久化 ─────────────────────────────────────────
+    // ── Step C: 两类缓存均未命中才触发搜索，并按来源持久化 ──────────────────────
     if (!categoryInfo) {
       categoryInfo = await this.searchCategoryFromTaobao(ctx, {
         title: product.title,
-        category: product.category,
       });
-      if (pddCatId) {
-        await this.savePxxCategoryToServer(pddCatId, categoryInfo);
-        sessionCategoryCache.set(`pxx:${pddCatId}`, categoryInfo);
-      }
-      // 将搜索结果存储到服务端（source product 维度）
-      if (product.sourceId) {
+      if (sourceType === SourceType.PXX) {
+        // PXX：仅写 pxx 映射表
+        if (pddCatId) {
+          await this.savePxxCategoryToServer(pddCatId, categoryInfo);
+          sessionCategoryCache.set(`pxx:${pddCatId}`, categoryInfo);
+        }
+      } else if (product.sourceId) {
+        // TB：仅写 source-product-tb-categories
         await this.saveCategoryToServer(product.sourceId, categoryInfo);
-        // 写入 session 缓存
         sessionCategoryCache.set(product.sourceId, categoryInfo);
       }
     }
@@ -123,8 +123,9 @@ export class SearchCategoryStep extends PublishStep {
   // ─── 缓存查询 ──────────────────────────────────────────────────────────────
 
   /**
-   * 从 PXX 原始数据中提取 pddCatId
-   * 路径：rawSource.store.initDataObj.goods.catId
+   * 从 PXX 原始数据中提取 pddCatId，兼容两种来源形态：
+   *  - 拼多多 App 抓取（camelCase）：rawSource.store.initDataObj.goods.catId
+   *  - 文件导入 / zip（snake_case）：rawSource.goods.cat_id
    */
   private extractPddCatId(rawSource: RawSourceData | undefined): string | null {
     if (!rawSource) return null;
@@ -132,10 +133,10 @@ export class SearchCategoryStep extends PublishStep {
       const raw = rawSource as Record<string, unknown>;
       const store = raw.store as Record<string, unknown> | null | undefined;
       const initDataObj = store?.initDataObj as Record<string, unknown> | null | undefined;
-      const goods = initDataObj?.goods as Record<string, unknown> | null | undefined;
-      const catId = goods?.catId ?? goods?.catIds;
+      const goods = (initDataObj?.goods ?? raw.goods) as Record<string, unknown> | null | undefined;
+      const catId = goods?.catId ?? goods?.catIds ?? goods?.cat_id;
       if (Array.isArray(catId) && catId.length > 0) return String(catId[0]);
-      return catId ? String(catId) : null;
+      return catId != null ? String(catId) : null;
     } catch {
       return null;
     }
@@ -262,7 +263,7 @@ export class SearchCategoryStep extends PublishStep {
    */
   private async searchCategoryFromTaobao(
     ctx: StepContext,
-    params: { title: string; category?: string },
+    params: { title: string },
   ): Promise<TbCategoryInfo> {
     const engine = new TbEngine(String(ctx.shopId), true);
     engine.bindPublishTask(ctx.taskId);
@@ -307,7 +308,7 @@ export class SearchCategoryStep extends PublishStep {
 
     try {
       // ── 2. 搜索类目 ────────────────────────────────────────────────────────
-      const keywordCandidates = this.buildSearchKeywords(params.title, params.category);
+      const keywordCandidates = this.buildSearchKeywords(params.title);
       let categories: TbSearchCategoryItem[] = [];
       let matchedKeyword = keywordCandidates[0] ?? params.title;
       for (const keyword of keywordCandidates) {
@@ -325,7 +326,6 @@ export class SearchCategoryStep extends PublishStep {
 
       const matchedCategory = this.matchBestCategory(categories, {
         title: params.title,
-        category: params.category,
       });
 
       if (!matchedCategory?.id) {
@@ -368,7 +368,6 @@ export class SearchCategoryStep extends PublishStep {
         keyword: matchedKeyword,
         input: {
           title: params.title,
-          category: params.category,
           keyword: matchedKeyword,
         },
         output: summarizeForLog(categoryInfo),
@@ -414,19 +413,9 @@ export class SearchCategoryStep extends PublishStep {
     return { pid };
   }
 
-  private buildSearchKeywords(title: string, category?: string): string[] {
-    const categorySegments = String(category ?? '')
-      .split(/[>\/-]/g)
-      .map(item => item.trim())
-      .filter(Boolean);
-
-    const keywords = [
-      categorySegments[categorySegments.length - 1],
-      String(category ?? '').trim(),
-      String(title ?? '').trim(),
-    ];
-
-    return [...new Set(keywords.filter(Boolean))];
+  private buildSearchKeywords(title: string): string[] {
+    const keyword = String(title ?? '').trim();
+    return keyword ? [keyword] : [];
   }
 
   private async requestTaobaoCategories(
@@ -532,9 +521,9 @@ export class SearchCategoryStep extends PublishStep {
 
   private matchBestCategory(
     categories: TbSearchCategoryItem[],
-    input: { title: string; category?: string },
+    input: { title: string },
   ): TbSearchCategoryItem {
-    const keywords = this.buildSearchKeywords(input.title, input.category);
+    const keywords = this.buildSearchKeywords(input.title);
     const normalizedKeywords = keywords.map(keyword => this.normalizeText(keyword)).filter(Boolean);
 
     let best: TbSearchCategoryItem | null = null;

@@ -1,4 +1,4 @@
-import type { Page } from "playwright";
+import type { Frame, Page } from "playwright";
 import type { ShopLoginPayload, ShopRecord } from "@eleapi/commerce/commerce.api";
 import { DoorEngine } from "./engine";
 import log from "electron-log";
@@ -15,6 +15,8 @@ const TB_COLLECT_ACCOUNT_URL = "https://i.taobao.com/my_taobao.htm";
 const TB_SHOP_INFO_API = "mtop.taobao.jdy.resource.shop.info.get";
 const TB_COLLECT_USER_API = "h5/mtop.user.getusersimple";
 const TB_LOGIN_COOKIE_KEYS = ["cookie2", "cookie3_bak", "cookie1", "login", "uc1", "wk_cookie2", "sgcookie"];
+const TB_LOGIN_ID_SELECTOR = "#fm-login-id";
+const TB_LOGIN_PREFILL_TIMEOUT_MS = 30000;
 
 export class TbEngine extends DoorEngine {
   getNamespace(): string {
@@ -28,6 +30,7 @@ export class TbEngine extends DoorEngine {
     }
 
     await page.goto(getTbLoginUrl(shop), { waitUntil: "domcontentloaded" });
+    void this.prefillLoginNickname(page, shop);
     await page.bringToFront();
     void this.captureLoginLifecycle(page, shop, persistShopLogin);
     return page;
@@ -203,6 +206,36 @@ export class TbEngine extends DoorEngine {
       log.warn("[TbEngine] failed to close tb login context", error);
     }
   }
+
+  private async prefillLoginNickname(page: Page, shop: ShopRecord): Promise<void> {
+    const nickname = getLoginPrefillNickname(shop);
+    if (!nickname || normalizeLoginStatus(shop.loginStatus) === "LOGGED_IN") {
+      return;
+    }
+
+    try {
+      const deadline = Date.now() + TB_LOGIN_PREFILL_TIMEOUT_MS;
+      while (!page.isClosed() && Date.now() < deadline) {
+        const frame = await findFrameWithLoginId(page);
+        if (frame) {
+          await frame.locator(TB_LOGIN_ID_SELECTOR).fill(nickname, { timeout: 2000 });
+          log.info("[TbEngine] prefilled tb login id", {
+            shopId: shop.id,
+            frameUrl: frame.url(),
+          });
+          return;
+        }
+        await page.waitForTimeout(500);
+      }
+      log.info("[TbEngine] tb login id field not found for prefill", {
+        shopId: shop.id,
+        url: page.url(),
+        frameUrls: page.frames().map((frame) => frame.url()),
+      });
+    } catch (error) {
+      log.warn("[TbEngine] failed to prefill tb login id", { shopId: shop.id, error });
+    }
+  }
 }
 
 function buildTbShopLoginPayload(shop: ShopRecord, rawData: unknown): ShopLoginPayload {
@@ -296,6 +329,30 @@ function normalizeShopUsage(shopUsage: string): string {
 
 function normalizeId(value: string | null | undefined): string {
   return String(value ?? "").trim();
+}
+
+function getLoginPrefillNickname(shop: ShopRecord): string {
+  return [shop.nickname, shop.name, shop.remark, shop.code]
+    .map((value) => String(value ?? "").trim())
+    .find((value) => Boolean(value)) || "";
+}
+
+function normalizeLoginStatus(loginStatus: string | null | undefined): string {
+  return String(loginStatus ?? "").trim().toUpperCase();
+}
+
+async function findFrameWithLoginId(page: Page): Promise<Frame | null> {
+  for (const frame of page.frames()) {
+    try {
+      const input = frame.locator(TB_LOGIN_ID_SELECTOR).first();
+      if (await input.isVisible({ timeout: 200 })) {
+        return frame;
+      }
+    } catch {
+      // Frame may navigate while we are scanning it.
+    }
+  }
+  return null;
 }
 
 function parseTbJsonpPayload(rawText: string): unknown {

@@ -44,6 +44,7 @@ import {
   Typography,
   Upload,
   message,
+  notification,
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import type { UploadFile, UploadProps } from "antd/es/upload/interface";
@@ -1229,6 +1230,18 @@ export function AiOperationRobotPanel() {
     const publishApi = getPublishApi();
     void publishApi.onLoginRequired((payload) => {
       setLoginRequiredInfo({ taskId: payload.taskId, shopId: payload.shopId });
+    });
+    void publishApi.onCaptchaRequired(() => {
+      // 验证码面板已自动弹出，这里再给一条醒目的常驻提示，避免「原地校验型」验证码
+      // 验证后进度未自动恢复、用户却没注意到的情况
+      notification.warning({
+        key: "publish-captcha-required",
+        message: "发布需要完成验证码",
+        description:
+          "发布窗口已弹出验证码面板，请完成验证。若验证后发布进度长时间没有继续，请点击面板内的「我已完成验证 · 点此继续发布」按钮。",
+        duration: 0,
+        placement: "topRight",
+      });
     });
   }, []);
 

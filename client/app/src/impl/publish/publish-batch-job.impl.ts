@@ -84,12 +84,15 @@ export class PublishBatchJobImpl extends PublishBatchJobApi {
       } catch (err) {
         // 当前商品发布失败 → 记录错误，让批次中心将此商品标记为失败并继续下一个
         publishError(`[batch-task:${taskId}] task error`, summarizeForLog(err));
-        syncPublishProgressEvent(taskId, {
+        const failedEvent: PublishProgressEvent = {
           taskId,
           stepCode: StepCode.UNKNOWN,
           status: StepStatus.FAILED,
           message: err instanceof Error ? err.message : '未知错误',
-        });
+        };
+        syncPublishProgressEvent(taskId, failedEvent);
+        this.broadcastPublishProgress(failedEvent);
+        this.broadcastPublishCenterState();
         throw err;
       } finally {
         unregisterPublishTaskLogFile(taskId);
@@ -143,6 +146,10 @@ export class PublishBatchJobImpl extends PublishBatchJobApi {
 
         // 检测到验证码：挂起 gate，等待用户通过后才放行
         if (event.captchaUrl) {
+          // 额外广播更醒目的提示，提醒用户验证后留意进度，必要时点击面板内「继续发布」按钮
+          for (const wc of getPublishRelatedWebContents()) {
+            wc.send('publish.onCaptchaRequired', { taskId, shopId, captchaMode: event.captchaMode });
+          }
           captchaGate = new Promise<void>((resolve) => {
             showCaptchaPanel(event.captchaUrl!, () => {
               // 验证码通过后同步 cookies，然后放行 gate

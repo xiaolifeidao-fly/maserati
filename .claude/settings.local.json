@@ -82,7 +82,15 @@
       "Bash(sed -i '' \"s#'./src/publish/fillers/prop-ui-type-resolver'#'./src/publish/fillers/prop-ui-type-resolver'#\" /tmp/test-tao.ts)",
       "Bash(cp /tmp/test-tao.ts ./test-tao.ts)",
       "Bash(sed -i '' \"s#'./src/#'./src/#\" test-tao.ts)",
-      "Bash(npx tsx *)"
+      "Bash(npx tsx *)",
+      "Bash(npx --prefix /Users/fly/Documents/develop/project/private/taobao/maserati/client/app tsc --noEmit -p /Users/fly/Documents/develop/project/private/taobao/maserati/client/app/tsconfig.json)",
+      "Bash(echo \"=== exit code: $? ===\")",
+      "Bash(echo \"=== tsc exit code: $? ===\")",
+      "Bash(echo \"=== tsc exit: $? ===\")",
+      "Bash(grep -n \"^import\\\\|notification\\\\|import { message\\\\|const { message\\\\| message,\" client/webview/src/app/\\\\\\(console\\\\\\)/product/components/ProductPublishModal.tsx)",
+      "Bash(echo \"=== client/app tsc exit: $? ===\")",
+      "Bash(./node_modules/.bin/tsc --noEmit -p tsconfig.json)",
+      "Bash(echo \"app exit=$?\")"
     ]
   }
 }

@@ -12,9 +12,12 @@ import { PropsFiller } from '../fillers/props.filler';
 import { getPropValueByUiType } from '../fillers/prop-ui-type-resolver';
 import { SkuFiller } from '../fillers/sku.filler';
 import { DetailImagesFiller } from '../fillers/detail-images.filler';
+import { PublishConfigFiller } from '../fillers/publish-config.filler';
 import type { FillerContext } from '../fillers/filler.interface';
 import type { TbWindowJsonCatProp, TbWindowJsonDraftData } from '../types/tb-window-json';
-import { publishInfo, publishWarn, summarizeForLog } from '../utils/publish-logger';
+import { publishInfo, publishWarn, summarizeForLog, getPublishTaskLogFilePath } from '../utils/publish-logger';
+import fs from 'fs';
+import path from 'path';
 import { assertTbDraftSubmitSuccess, buildDraftJsonBody, submitDraftToTaobao } from '../utils/tb-publish-api';
 import { getTaskWindowJson, interceptWindowJson } from '../utils/window-json.memory';
 import { ensureTbShopLoggedIn } from '../utils/tb-login-state';
@@ -72,6 +75,14 @@ export class EditDraftStep extends PublishStep {
     // 对它 reload 拿到的仍是该类目的静态属性 schema，不会包含品牌/SKU/价格等
     // 已保存信息后淘宝动态追加的属性（如型号 p-20000-xxx）。
     // 这里改为导航到草稿编辑页（draft.htm?dbDraftId=...），才能拿到这些动态属性。
+    // 第一次填充并更新草稿后，淘宝服务端联动追加动态属性可能存在延迟，
+    // 这里先休眠 3s，让服务端落库完成，再进行第二次刷新拉取最新 window.Json。
+    publishInfo(`[task:${ctx.taskId}] [TB] [draft-update] 等待 3s 后进行第二次刷新`, {
+      taskId: ctx.taskId,
+      draftId: draftCtx.draftId,
+    });
+    await new Promise(resolve => setTimeout(resolve, 3000));
+
     const draftEditUrl = `${TB_DRAFT_PAGE_URL}?dbDraftId=${draftCtx.draftId}`;
     const capturePromise = interceptWindowJson(page, ctx.taskId, TB_WINDOW_JSON_TIMEOUT);
     await page.goto(draftEditUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
@@ -84,6 +95,12 @@ export class EditDraftStep extends PublishStep {
     }
     const tbWindowJson = parseTbWindowJsonForDraft(rawWindowJson);
     const saleSpecUiState = await detectTbSaleSpecUiState(page);
+
+    // [EDIT-DRAFT-WINDOW-JSON-FULL] 第二次刷新后拉取到的完整 window.Json。
+    // 日志框架会对单行字符串做转义并在 120000 字符处截断，无法展示完整且美观的 JSON，
+    // 因此将原文以缩进 JSON 写入任务日志同目录下的独立 .json 文件，日志里只留可搜索的指针。
+    // 搜索关键字：EDIT-DRAFT-WINDOW-JSON-FULL
+    this.dumpWindowJsonToFile(ctx.taskId, draftCtx.draftId, rawWindowJson);
 
     // [EDIT-DRAFT-DEBUG] 打印刷新后的 window.Json 关键数据（catProps/components），
     // 用于核对第一次填充后联动新增的属性是否已出现在最新数据中
@@ -184,6 +201,9 @@ export class EditDraftStep extends PublishStep {
     await new ComponentDefaultsFiller().fill(fillerCtx);
     await new SkuFiller().fill(fillerCtx);
     await new DetailImagesFiller().fill(fillerCtx);
+    // 必须最后执行，覆盖前序填充结果（如 brandMode=none 强制设为"无品牌"），
+    // 与 FillDraftStep 的 filler 链保持一致；否则 PropsFiller 会用源品牌覆盖掉无品牌。
+    await new PublishConfigFiller().fill(fillerCtx);
     correctionPayload['startTime'] = buildPublishStartTime(ctx.get('publishConfig')?.strategy);
 
     // ── Step 3: 补全必填 catProp 缺省值 ──────────────────────────────────────
@@ -235,6 +255,32 @@ export class EditDraftStep extends PublishStep {
       message: `草稿二次修正完成${missingNote}`,
       outputData: { draftContext: draftCtx },
     };
+  }
+
+  /**
+   * 将第二次刷新拿到的完整 window.Json 以缩进 JSON 写入独立文件（完整、不转义、不截断），
+   * 文件落在任务日志同目录下；失败时静默容错，不影响发布流程。
+   * 搜索关键字：EDIT-DRAFT-WINDOW-JSON-FULL
+   */
+  private dumpWindowJsonToFile(taskId: number, draftId: string | undefined, rawWindowJson: unknown): void {
+    try {
+      const logFilePath = getPublishTaskLogFilePath(taskId);
+      const targetDir = logFilePath ? path.dirname(logFilePath) : process.cwd();
+      const fileName = `window-json-edit-task${taskId}-draft${draftId ?? 'unknown'}.json`;
+      const filePath = path.join(targetDir, fileName);
+      fs.writeFileSync(filePath, JSON.stringify(rawWindowJson, null, 2), 'utf8');
+      publishInfo(`[task:${taskId}] [TB] [draft-update] [EDIT-DRAFT-WINDOW-JSON-FULL] 完整 window.Json 已写入文件`, {
+        taskId,
+        draftId,
+        filePath,
+      });
+    } catch (error) {
+      publishWarn(`[task:${taskId}] [TB] [draft-update] [EDIT-DRAFT-WINDOW-JSON-FULL] 写入 window.Json 文件失败`, {
+        taskId,
+        draftId,
+        error: summarizeForLog(error),
+      });
+    }
   }
 
   /**

@@ -7,11 +7,13 @@ import {
   CloudDownloadOutlined,
   KeyOutlined,
   LogoutOutlined,
+  SafetyCertificateOutlined,
+  SearchOutlined,
   ShopOutlined,
   ShoppingOutlined,
   TeamOutlined,
 } from "@ant-design/icons";
-import { Avatar, Badge, Button, Divider, Layout, Menu, Space, Typography } from "antd";
+import { Avatar, Badge, Button, Divider, Input, Layout, Menu, Space, Tag, Typography } from "antd";
 import type { MenuProps } from "antd";
 import { usePathname, useRouter } from "next/navigation";
 import { PropsWithChildren, useMemo } from "react";
@@ -88,6 +90,14 @@ export function ManagerShell({ children }: ManagerShellProps) {
         label: "激活码",
         icon: <KeyOutlined />,
       },
+    ],
+    [],
+  );
+  const operationSignals = useMemo(
+    () => [
+      { label: "系统稳定", value: "99.9%", tone: "success" },
+      { label: "待处理", value: "12", tone: "warning" },
+      { label: "在线店铺", value: "68", tone: "processing" },
     ],
     [],
   );
@@ -241,24 +251,24 @@ export function ManagerShell({ children }: ManagerShellProps) {
 
           <Layout style={{ background: "transparent" }}>
             <Header
-              className="manager-stagger-2"
+              className="manager-command-bar manager-stagger-2"
               style={{
                 height: "auto",
                 lineHeight: "normal",
-                padding: "12px 20px",
+                padding: "12px 18px",
                 background: "var(--manager-surface)",
                 borderBottom: "1px solid var(--manager-border)",
                 boxShadow: "var(--manager-shadow-sm)",
                 display: "grid",
-                gridTemplateColumns: "minmax(0, 1fr) auto",
+                gridTemplateColumns: "minmax(0, 1fr) minmax(280px, 360px) auto",
                 gap: 16,
                 alignItems: "center",
               }}
             >
               <div style={{ minWidth: 0 }}>
                 <div className="manager-topbar-kicker">
-                  <span>快捷入口</span>
-                  <span>高频功能直达</span>
+                  <span>运营指挥台</span>
+                  <span>高频模块与关键状态</span>
                 </div>
                 <Space className="manager-quick-actions" size={8} wrap style={{ width: "100%" }}>
                   {quickActions.map((action) => {
@@ -270,6 +280,7 @@ export function ManagerShell({ children }: ManagerShellProps) {
                         type={isActive ? "primary" : "default"}
                         icon={action.icon}
                         onClick={() => router.push(action.key)}
+                        className="manager-module-button"
                         style={{
                           height: 34,
                           paddingInline: 12,
@@ -282,6 +293,22 @@ export function ManagerShell({ children }: ManagerShellProps) {
                       </Button>
                     );
                   })}
+                </Space>
+              </div>
+
+              <div className="manager-command-search">
+                <Input
+                  allowClear
+                  prefix={<SearchOutlined style={{ color: "var(--manager-text-faint)" }} />}
+                  placeholder="搜索用户、店铺、激活码或任务"
+                  className="manager-toolbar-search"
+                />
+                <Space size={6} wrap className="manager-signal-strip">
+                  {operationSignals.map((item) => (
+                    <Tag key={item.label} color={item.tone} className="manager-signal-tag">
+                      {item.label} {item.value}
+                    </Tag>
+                  ))}
                 </Space>
               </div>
 
@@ -326,7 +353,9 @@ export function ManagerShell({ children }: ManagerShellProps) {
                     </Avatar>
                     <div>
                       <div style={{ fontWeight: 700, fontSize: 13, color: "var(--manager-text)", lineHeight: 1.3 }}>林安</div>
-                      <Text style={{ color: "var(--manager-text-faint)", fontSize: 12 }}>管理员</Text>
+                      <Text style={{ color: "var(--manager-text-faint)", fontSize: 12 }}>
+                        <SafetyCertificateOutlined /> 管理员
+                      </Text>
                     </div>
                     <Button
                       type="text"

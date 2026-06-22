@@ -204,6 +204,13 @@ export class PublishImpl extends PublishApi {
       }
       // 检测到验证码时，自动在发布窗口右侧展示验证码；验证通过后自动继续发布
       if (event.captchaUrl) {
+        // 额外广播一条更醒目的提示：验证码自动恢复可能因「原地校验」失效，
+        // 提醒用户验证后留意进度，必要时点击面板内「继续发布」按钮
+        PublishImpl.broadcast('publish.onCaptchaRequired', {
+          taskId,
+          shopId: task.shopId,
+          captchaMode: event.captchaMode,
+        });
         if (event.captchaMode === 'screenshot') {
           // 图片上传验证码：通过 Playwright 截屏流呈现，验证码直接在有头会话中完成，
           // 无需将 Electron BrowserView cookie 注入 Playwright

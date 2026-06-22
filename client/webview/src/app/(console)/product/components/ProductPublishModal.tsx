@@ -35,6 +35,7 @@ import {
   Table,
   Tag,
   message,
+  notification,
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import {
@@ -379,6 +380,7 @@ export function ProductPublishModal({
   const runningTableWrapRef = useRef<HTMLDivElement | null>(null);
   const publishQueueRef = useRef<PublishQueueItem[]>([]);
   const draftLookupKeysRef = useRef<Set<string>>(new Set());
+  const draftLookupInFlightRef = useRef<Set<string>>(new Set());
   const restoredFromCenterRef = useRef(false);
   const recoveryModeRef = useRef<RecoveryMode>("undecided");
   const stopRequestedRef = useRef(false);
@@ -447,6 +449,7 @@ export function ProductPublishModal({
     setExportingBatchLogs(false);
     setPublishProgressLoading(directToProgress);
     draftLookupKeysRef.current.clear();
+    draftLookupInFlightRef.current.clear();
     stopRequestedRef.current = false;
     publishRunIdRef.current += 1;
   }, [directToProgress, initialBatchId, isCollectionBatchEntry, open]);
@@ -458,6 +461,77 @@ export function ProductPublishModal({
   useEffect(() => {
     restoredFromCenterRef.current = restoredFromCenter;
   }, [restoredFromCenter]);
+
+  useEffect(() => {
+    if (!open || step4Phase !== "running") {
+      return;
+    }
+
+    const runningTaskIds = publishQueue
+      .filter((item) => (
+        item.taskId
+        && (
+          item.status === "CREATING"
+          || item.status === "PUBLISHING"
+          || item.waitingForCaptcha
+          || item.waitingForLogin
+        )
+      ))
+      .map((item) => item.taskId!)
+      .slice(0, 20);
+
+    if (runningTaskIds.length === 0) {
+      return;
+    }
+
+    let cancelled = false;
+    const publishApi = getPublishApi();
+
+    const refreshRunningTasks = async () => {
+      const tasks = await Promise.allSettled(runningTaskIds.map((taskId) => publishApi.getPublishTask(taskId)));
+      if (cancelled) {
+        return;
+      }
+      const snapshots: PublishRuntimeTaskSnapshot[] = [];
+      for (const result of tasks) {
+        if (result.status !== "fulfilled") {
+          continue;
+        }
+        const task = result.value;
+        const currentItem = publishQueueRef.current.find((item) => (
+          item.taskId === task.id
+          || (task.sourceRecordId && item.sourceRecordId === task.sourceRecordId)
+          || (task.sourceProductId && item.sourceProductId === task.sourceProductId)
+        ));
+        snapshots.push({
+          taskId: task.id,
+          shopId: task.shopId,
+          status: task.status as PublishTaskStatusValue,
+          currentStepCode: task.currentStepCode,
+          sourceProductId: task.sourceProductId,
+          title: currentItem?.title || `发布任务 #${task.id}`,
+          errorMessage: task.errorMessage,
+          outerItemId: task.outerItemId,
+          sourceBatchId: task.collectBatchId ?? currentItem?.sourceBatchId,
+          sourceRecordId: task.sourceRecordId ?? currentItem?.sourceRecordId,
+          updatedAt: task.updatedTime || task.createdTime || new Date().toISOString(),
+        });
+      }
+      if (snapshots.length > 0) {
+        setPublishQueue((current) => mergeQueueWithRuntimeTasks(current, snapshots));
+      }
+    };
+
+    void refreshRunningTasks();
+    const timer = window.setInterval(() => {
+      void refreshRunningTasks();
+    }, 2000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [open, publishQueue, step4Phase]);
 
   useEffect(() => {
     recoveryModeRef.current = recoveryMode;
@@ -475,10 +549,12 @@ export function ProductPublishModal({
 
     for (const item of candidates) {
       const lookupKey = `${item.shopId}:${item.sourceProductId}`;
-      if (draftLookupKeysRef.current.has(lookupKey)) {
+      // 已成功取到 draftId 的不再查询；正在查询中的避免并发重复请求。
+      // 未取到（草稿记录可能尚未写入）时不缓存为「已查」，留待下一次轮询重试。
+      if (draftLookupKeysRef.current.has(lookupKey) || draftLookupInFlightRef.current.has(lookupKey)) {
         continue;
       }
-      draftLookupKeysRef.current.add(lookupKey);
+      draftLookupInFlightRef.current.add(lookupKey);
 
       void getPublishApi()
         .getProductDraftBySource(item.shopId, item.sourceProductId)
@@ -487,6 +563,7 @@ export function ProductPublishModal({
           if (!draftId) {
             return;
           }
+          draftLookupKeysRef.current.add(lookupKey);
           setPublishQueue((current) =>
             current.map((queueItem) =>
               queueItem.shopId === item.shopId && queueItem.sourceProductId === item.sourceProductId
@@ -495,7 +572,10 @@ export function ProductPublishModal({
             ),
           );
         })
-        .catch(() => undefined);
+        .catch(() => undefined)
+        .finally(() => {
+          draftLookupInFlightRef.current.delete(lookupKey);
+        });
     }
   }, [open, publishQueue]);
 
@@ -605,10 +685,28 @@ export function ProductPublishModal({
       void applyCenterState(state as PublishCenterState);
     });
 
+    void publishApi.onCaptchaRequired(() => {
+      // 验证码已自动弹出，这里再给一条醒目的常驻提示，避免「原地校验型」验证码
+      // 验证后进度未自动恢复、用户却没注意到的情况
+      notification.warning({
+        key: "publish-captcha-required",
+        message: "发布需要完成验证码",
+        description:
+          "右侧已弹出验证码面板，请完成验证。若验证后发布进度长时间没有继续，请点击面板内的「我已完成验证 · 点此继续发布」按钮。",
+        duration: 0,
+        placement: "topRight",
+      });
+    });
+
     try {
       const publishWindowApi = getPublishWindowApi();
       void publishWindowApi.onCaptchaPanelVisibilityChanged((payload) => {
-        setCaptchaPanelActuallyVisible(Boolean(payload?.visible));
+        const visible = Boolean(payload?.visible);
+        setCaptchaPanelActuallyVisible(visible);
+        // 面板关闭（验证完成/继续发布）时收起验证码提示
+        if (!visible) {
+          notification.destroy("publish-captcha-required");
+        }
       });
     } catch {
       // 非 Electron 环境忽略
@@ -781,6 +879,85 @@ export function ProductPublishModal({
     );
   };
 
+  const refreshShopLoginState = async (shopId: number): Promise<ShopRecord | null> => {
+    if (!shopId) {
+      return null;
+    }
+    const latestShop = await fetchShop(shopId);
+    setShops((current) =>
+      current.map((shop) =>
+        shop.id === shopId
+          ? { ...shop, ...latestShop }
+          : shop,
+      ),
+    );
+    return latestShop;
+  };
+
+  const refreshLoginTaskState = async (taskId: number, shopId: number) => {
+    if (!taskId) {
+      return;
+    }
+    try {
+      const latestTask = await getPublishApi().getPublishTask(taskId);
+      const currentItem = publishQueueRef.current.find((item) => (
+        item.taskId === latestTask.id
+        || (latestTask.sourceRecordId && item.sourceRecordId === latestTask.sourceRecordId)
+        || (latestTask.sourceProductId && item.sourceProductId === latestTask.sourceProductId)
+      ));
+      const runtimeTask: PublishRuntimeTaskSnapshot = {
+        taskId: latestTask.id,
+        shopId: latestTask.shopId || shopId,
+        status: latestTask.status as PublishTaskStatusValue,
+        currentStepCode: latestTask.currentStepCode,
+        sourceProductId: latestTask.sourceProductId,
+        title: currentItem?.title || `发布任务 #${latestTask.id}`,
+        errorMessage: latestTask.errorMessage,
+        outerItemId: latestTask.outerItemId,
+        sourceBatchId: latestTask.collectBatchId ?? selectedBatchId,
+        sourceRecordId: latestTask.sourceRecordId,
+        updatedAt: latestTask.updatedTime || latestTask.createdTime || new Date().toISOString(),
+      };
+      setPublishQueue((current) => mergeQueueWithRuntimeTasks(current, [runtimeTask]));
+    } catch {
+      // 任务可能已经被批次运行器接管，等待 publish center 下一次推送即可。
+    }
+  };
+
+  const pollLoginResolution = async (taskId: number, shopId: number) => {
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < 180000) {
+      await new Promise((resolve) => { window.setTimeout(resolve, 1500); });
+      try {
+        const latestShop = await refreshShopLoginState(shopId);
+        await refreshLoginTaskState(taskId, shopId);
+        if (latestShop?.loginStatus === "LOGGED_IN") {
+          setLoginRequiredModal((current) => (
+            current?.taskId === taskId ? null : current
+          ));
+          setPublishQueue((current) =>
+            current.map((item) =>
+              item.taskId === taskId || item.loginRequiredShopId === shopId
+                ? {
+                    ...item,
+                    waitingForLogin: false,
+                    loginRequiredShopId: undefined,
+                    status: item.status === "PENDING" ? "PUBLISHING" : item.status,
+                    statusText: item.statusText && isLoginPendingMessage(item.statusText)
+                      ? "登录成功，等待任务继续发布"
+                      : item.statusText,
+                  }
+                : item,
+            ),
+          );
+          return;
+        }
+      } catch {
+        // 登录窗口还在处理中，继续等待下一轮。
+      }
+    }
+  };
+
   const handleShopLoginFromPublish = async (shopId: number) => {
     const shop = shops.find((s) => s.id === shopId);
     try {
@@ -793,11 +970,8 @@ export function ProductPublishModal({
     while (Date.now() - startedAt < 180000) {
       await new Promise((resolve) => { window.setTimeout(resolve, 3000); });
       try {
-        const latestShop = await fetchShop(shopId);
-        if (latestShop.loginStatus === "LOGGED_IN") {
-          setShops((current) =>
-            current.map((s) => s.id === shopId ? { ...s, loginStatus: "LOGGED_IN" } : s),
-          );
+        const latestShop = await refreshShopLoginState(shopId);
+        if (latestShop?.loginStatus === "LOGGED_IN") {
           const shopType = shop?.platform ?? "店铺";
           const accountName = latestShop.nickname || latestShop.name || latestShop.code || `#${shopId}`;
           void message.success(`${shopType}-${accountName}-登录成功，可重新尝试`, 6);
@@ -806,6 +980,28 @@ export function ProductPublishModal({
       } catch {
         break;
       }
+    }
+  };
+
+  const handleOpenDraft = async (shopId: number, sourceProductId: string, fallbackDraftId?: string) => {
+    try {
+      // 始终以服务端最新草稿记录为准，避免使用队列里缓存的旧 draftId 打开已失效的草稿
+      let draftId = fallbackDraftId?.trim() ?? "";
+      const normalizedSourceProductId = String(sourceProductId || "").trim();
+      if (shopId > 0 && normalizedSourceProductId) {
+        const draft = await getPublishApi().getProductDraftBySource(shopId, normalizedSourceProductId);
+        const latestDraftId = String(draft?.tbDraftId || "").trim();
+        if (latestDraftId) {
+          draftId = latestDraftId;
+        }
+      }
+      if (!draftId) {
+        message.warning("当前商品暂无有效的淘宝草稿 ID");
+        return;
+      }
+      await getPublishApi().openPublishDraft(shopId, draftId);
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "打开草稿失败");
     }
   };
 
@@ -1660,7 +1856,7 @@ export function ProductPublishModal({
                 icon={<EditOutlined />}
                 tooltip={record.draftId ? "打开淘宝草稿" : "暂无草稿ID，无法打开草稿"}
                 disabled={!record.draftId}
-                onClick={record.draftId ? () => void getPublishApi().openPublishDraft(record.shopId, record.draftId!) : undefined}
+                onClick={record.draftId ? () => void handleOpenDraft(record.shopId, record.sourceProductId, record.draftId) : undefined}
               />
             ) : null}
             {resumeTaskId && (record.waitingForCaptcha || record.status === "FAILED") ? (
@@ -1810,7 +2006,7 @@ export function ProductPublishModal({
     setHandlingLogin(true);
     try {
       await getPublishApi().handlePublishLoginRequired(taskId, shopId);
-      setLoginRequiredModal(null);
+      void pollLoginResolution(taskId, shopId);
     } catch {
       // 失败不关闭弹窗，让用户重试
     } finally {
@@ -2976,6 +3172,8 @@ function mapRuntimeTasksToQueue(tasks: PublishRuntimeTaskSnapshot[]): PublishQue
     currentStepCode: task.currentStepCode,
     statusText: buildRuntimeTaskStatusText(task),
     waitingForCaptcha: Boolean(task.waitingForCaptcha),
+    waitingForLogin: isRuntimeTaskWaitingForLogin(task),
+    loginRequiredShopId: resolveRuntimeTaskLoginRequiredShopId(task),
     error: task.status === PublishTaskStatus.FAILED ? task.errorMessage || task.statusText || "发布失败" : undefined,
   }));
 }
@@ -3001,6 +3199,7 @@ function mergeQueueWithRuntimeTasks(
     if (!runtimeTask) {
       return item;
     }
+    const waitingForLogin = isRuntimeTaskWaitingForLogin(runtimeTask);
     return {
       ...item,
       title: runtimeTask.title || item.title,
@@ -3013,6 +3212,10 @@ function mergeQueueWithRuntimeTasks(
       currentStepCode: runtimeTask.currentStepCode || item.currentStepCode,
       statusText: buildRuntimeTaskStatusText(runtimeTask),
       waitingForCaptcha: Boolean(runtimeTask.waitingForCaptcha),
+      waitingForLogin,
+      loginRequiredShopId: waitingForLogin
+        ? resolveRuntimeTaskLoginRequiredShopId(runtimeTask) ?? item.loginRequiredShopId
+        : undefined,
       error: runtimeTask.status === PublishTaskStatus.FAILED
         ? runtimeTask.errorMessage || runtimeTask.statusText || item.error
         : undefined,
@@ -3047,6 +3250,9 @@ function mapRuntimeTaskStatusToQueueStatus(task: PublishRuntimeTaskSnapshot): Pu
 }
 
 function buildRuntimeTaskStatusText(task: PublishRuntimeTaskSnapshot): string {
+  if (isRuntimeTaskWaitingForLogin(task)) {
+    return "等待登录，请点击处理后重新登录";
+  }
   if (task.waitingForCaptcha) {
     return "等待验证码，完成右侧校验后点击继续发布";
   }
@@ -3059,6 +3265,25 @@ function buildRuntimeTaskStatusText(task: PublishRuntimeTaskSnapshot): string {
     || localizePublishStepCode(task.currentStepCode)
     || task.status
   );
+}
+
+function isRuntimeTaskWaitingForLogin(task: PublishRuntimeTaskSnapshot): boolean {
+  return Boolean(task.waitingForLogin)
+    || Boolean(task.loginRequiredShopId)
+    || (
+      task.status === PublishTaskStatus.PENDING
+      && isLoginPendingMessage(task.errorMessage || task.statusText)
+    );
+}
+
+function resolveRuntimeTaskLoginRequiredShopId(task: PublishRuntimeTaskSnapshot): number | undefined {
+  if (task.loginRequiredShopId && task.loginRequiredShopId > 0) {
+    return task.loginRequiredShopId;
+  }
+  if (isRuntimeTaskWaitingForLogin(task) && task.shopId > 0) {
+    return task.shopId;
+  }
+  return undefined;
 }
 
 function isCaptchaPendingMessage(message?: string): boolean {
@@ -3121,12 +3346,21 @@ async function waitForPublishTaskFinish(
 
   while (Date.now() - startedAt < 10 * 60 * 1000) {
     const task = await publishApi.getPublishTask(taskId);
-    const initialPending = task.status === PublishTaskStatus.PENDING && !seenRunning && !isCaptchaPendingMessage(task.errorMessage);
+    const waitingForLogin = task.status === PublishTaskStatus.PENDING && isLoginPendingMessage(task.errorMessage);
+    const initialPending = task.status === PublishTaskStatus.PENDING
+      && !seenRunning
+      && !isCaptchaPendingMessage(task.errorMessage)
+      && !waitingForLogin;
     const event: PublishProgressEvent = {
       taskId,
       stepCode: task.currentStepCode || PublishStepCode.UNKNOWN,
       status: initialPending ? PublishStepStatus.RUNNING : mapTaskStatusToStepStatus(task.status),
-      message: initialPending ? "准备发布" : task.errorMessage || localizePublishStepCode(task.currentStepCode) || task.status,
+      message: initialPending
+        ? "准备发布"
+        : waitingForLogin
+          ? "等待登录，请点击处理后重新登录"
+          : task.errorMessage || localizePublishStepCode(task.currentStepCode) || task.status,
+      loginRequiredShopId: waitingForLogin ? task.shopId : undefined,
     };
     onProgress?.(event);
 
@@ -3139,7 +3373,7 @@ async function waitForPublishTaskFinish(
       task.status === PublishTaskStatus.FAILED ||
       task.status === PublishTaskStatus.CANCELLED ||
       // 只有曾经进入 RUNNING 之后再变为 PENDING，才是验证码等待，此时应退出轮询
-      (task.status === PublishTaskStatus.PENDING && (seenRunning || isCaptchaPendingMessage(task.errorMessage)))
+      (task.status === PublishTaskStatus.PENDING && (seenRunning || isCaptchaPendingMessage(task.errorMessage) || waitingForLogin))
     ) {
       return task;
     }

@@ -378,6 +378,7 @@ export function CrudManagementPanel<R extends CrudRecord, P extends Record<strin
             />
             {statusField && statusOptions ? (
               <Select
+                className="manager-filter-input"
                 allowClear
                 placeholder="状态"
                 value={statusValue}
