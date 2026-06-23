@@ -13,6 +13,7 @@ import (
 	"app-api/pkg/product"
 	publishTask "app-api/pkg/publish_task"
 	"app-api/pkg/shop"
+	titleFilter "app-api/pkg/title_filter"
 	"app-api/pkg/workspace"
 	"common/middleware/routers"
 )
@@ -31,6 +32,7 @@ func registerHandler() []routers.Handler {
 		product.NewProductHandler(),
 		publishTask.NewPublishTaskHandler(),
 		shop.NewShopHandler(),
+		titleFilter.NewTitleFilterHandler(),
 		workspace.NewWorkspaceHandler(),
 	}
 }

@@ -13,6 +13,7 @@ import (
 	publishTask "manager-api/pkg/publish_task"
 	"manager-api/pkg/shop"
 	"manager-api/pkg/tenant"
+	titleFilter "manager-api/pkg/title_filter"
 	"manager-api/pkg/user"
 
 	"time"
@@ -34,6 +35,7 @@ func registerHandler() []routers.Handler {
 		build("app_user", func() routers.Handler { return appUser.NewAppUserHandler() }),
 		build("tenant", func() routers.Handler { return tenant.NewTenantHandler() }),
 		build("shop", func() routers.Handler { return shop.NewShopHandler() }),
+		build("title_filter", func() routers.Handler { return titleFilter.NewTitleFilterHandler() }),
 		build("collect", func() routers.Handler { return collect.NewCollectHandler() }),
 		build("publish_task", func() routers.Handler { return publishTask.NewPublishTaskHandler() }),
 		build("manager_dashboard", func() routers.Handler {

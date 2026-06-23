@@ -3,7 +3,7 @@
 APP_DIR=$(cd "$(dirname "$0")/.." && pwd)
 PIDS=""
 
-for PID in $(pgrep -f "Electron.*--disable-gpu.*--no-sandbox"); do
+for PID in $(pgrep -f "Electron.*--max-old-space-size=4096"); do
   CWD=$(lsof -a -p "$PID" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p')
   if [ "$CWD" = "$APP_DIR" ]; then
     PIDS="$PIDS $PID"

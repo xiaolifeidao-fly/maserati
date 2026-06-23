@@ -1,0 +1,18 @@
+{
+  "capturedAt": "2026-06-23T10:54:56.805Z",
+  "targetUrl": "https://www.browserscan.net/",
+  "chromePath": "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+  "screenshotPath": "/Users/fly/Documents/develop/project/private/taobao/maserati/artifacts/browserscan-tb-engine-headless-fullpage.png",
+  "summary": {
+    "url": "https://www.browserscan.net/",
+    "title": "Best BrowserScan Fingerprint Detection Tool - Improve your online privacy security | BrowserScan",
+    "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36",
+    "webdriver": false,
+    "bodyText": "blog\nAntidetect Browser\nUtilities\nEN\nSign In\nBest BrowserScan Fingerprint Detection Tool - Improve your online privacy security|Enhance your online privacy security with the best BrowserScan fingerprint checking tool. Protect your privacy from leaking with our advanced technology.support dns leak test,2fa live,check ip,browser checker,port scanner,speed test,user agent parse,proxy server detection,webrtc leak test, etc.\n---.---.---.---\n--/--\nBrowser:\nPlatform:\n\nIP Time Zone:\n\nLocation:\nlanguage:\n\nPostal Code:\n\nISP:\nProxy:\n\nAnonymous:\nBlacklist:\nDNS Leak:\nBot Detection:\nBrowser fingerprint authenticity: 100%\nAd\nWhat websites see about you\nInternet Speed Test\nKernel detection\nBot Detection\nWebRTC leak Test\nIP address\nIP\nWebRTC\nWebRTC STUN\nIP Count (7 days)\nLocation\nCountry\nRegion\nCity\nLatitude\nLongitude\nHardware\nvisitor ID\nCanvas\nWebGL\nWebGL Report\nUnmasked Vendor\nUnmasked Renderer\nAudio\nClient Rects\nWebGPU Report\nScreen Resolution\nAvailable Screen Size\nColor Depth\nTouch Support\nMedia devices\nGet media device permissions\nBrowser\nIncognito mode\n\nNo\n\nOS\nBrowser\nBrowser Version\nHeader\nJavaScript\nSoftware\nTime Zone Based on IP\nTime Zone\nTime From IP\nTime From Javascript\nLanguages\nAccept-Language header\nInternationalization API\nBot Detection\nDo Not Track\nJavascript\nFlash\nActiveX\nJava\nCookie\nPort Scan(Only detect 22,3389)\nMore\nFonts\nFonts listHide all fonts(0)\nDNS Leak Test\nHTTP2/SSL/TLS Test\nIP address lookup\nPort Scanner\nGet 2FA Code\nCookie Converter\nUserAgent Parse\nCurrency Converter\nClient Hints\nMore resources\nblog\nBrowser Fingerprint\nProxies\nAnti-detection Browser\nAffiliate Marketing\nPractical Tutorial\nPractical Tools\nSocial Media\nE-commerce\nPartners\nMore Tools\nMedia Devices\nKernel detection\nUserAgent Parse\nInternet Speed Test\nIP address lookup\nCookie Converter\nPort Scanner\nBot Detection\nPlugin Detection\nGet 2FA Code\nDNS Leak Test\nWebRTC leak Test\nHTTP2/SSL/TLS Test\nCurrency Converter\nClient Hints\nWebGPU Browser Report\nGyroscope Visualizer\nTime zone detection\nPassword Generator\nRelease Notes\n1.4.1.0\n\nCopyright© BrowserScan | Privacy Policy",
+    "viewport": {
+      "width": 1440,
+      "height": 1800,
+      "devicePixelRatio": 1
+    }
+  }
+}

@@ -31,6 +31,11 @@ const browserMap = new Map<string, Browser>();
 
 const contextMap = new Map<string, BrowserContext>();
 
+// patchright/playwright 的 launch 选项 chromiumSandbox 默认 false，为关闭沙箱会自动
+// 注入 --no-sandbox —— 这会让 Chrome 在 macOS/Windows 上弹出「不受支持的命令行标记」黄条。
+// 因此在 mac/win 上启用真实沙箱（不注入该 flag），仅 Linux（容器/root）下才关闭沙箱。
+const CHROMIUM_SANDBOX = process.platform !== 'linux';
+
 type BrowserPluginInfo = {
     name: string;
     description: string;
@@ -41,6 +46,25 @@ type BrowserMimeTypeInfo = {
     type: string;
     suffixes: string;
     description: string;
+};
+
+type BrowserUaBrand = {
+    brand: string;
+    version: string;
+};
+
+// navigator.userAgentData 的低熵 + 高熵快照，全部从真机探针采集后只洗掉 HeadlessChrome
+type BrowserUaData = {
+    brands?: BrowserUaBrand[];
+    fullVersionList?: BrowserUaBrand[];
+    mobile?: boolean;
+    platform?: string;
+    platformVersion?: string;
+    architecture?: string;
+    bitness?: string;
+    model?: string;
+    uaFullVersion?: string;
+    wow64?: boolean;
 };
 
 type BrowserDeviceProfile = {
@@ -60,7 +84,29 @@ type BrowserDeviceProfile = {
     };
     plugins?: BrowserPluginInfo[];
     mimeTypes?: BrowserMimeTypeInfo[];
+    uaData?: BrowserUaData;
 };
+
+// FNV-1a：把店铺 resourceId 等稳定字符串映射成 32 位种子，用于 per-context 确定性 canvas 噪声
+function hashStringToSeed(str: string): number {
+    let h = 0x811c9dc5;
+    for (let i = 0; i < str.length; i++) {
+        h ^= str.charCodeAt(i);
+        h = Math.imul(h, 0x01000193);
+    }
+    return h >>> 0;
+}
+
+// 把 brands / fullVersionList 里的 HeadlessChrome 洗成 Google Chrome，其余原样保留真实 GREASE
+function sanitizeUaBrands(brands?: BrowserUaBrand[]): BrowserUaBrand[] | undefined {
+    if (!Array.isArray(brands)) return undefined;
+    return brands
+        .filter((b) => b && b.brand)
+        .map((b) => ({
+            brand: /headless\s*chrome/i.test(b.brand) ? 'Google Chrome' : String(b.brand),
+            version: String(b.version || ''),
+        }));
+}
 
 // ─── 从 Chrome 自身读取真实 UA，只修掉 HeadlessChrome 标识 ──────────────────
 const chromeUACache = new Map<string, string>();
@@ -126,10 +172,40 @@ async function getBrowserDeviceProfile(chromePath?: string): Promise<BrowserDevi
         tempCtx = await chromium.launchPersistentContext(tmpDir, {
             headless: true,
             executablePath: chromePath,
-            args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+            chromiumSandbox: CHROMIUM_SANDBOX,
+            args: ['--disable-dev-shm-usage'],
         });
         const page = await tempCtx.newPage();
         const rawProfile = await page.evaluate(() => {
+            const getUaData = () => {
+                try {
+                    const uad: any = (navigator as any).userAgentData;
+                    if (!uad) return Promise.resolve(undefined);
+                    const brands = Array.from(uad.brands || []).map((b: any) => ({
+                        brand: String(b.brand || ''), version: String(b.version || ''),
+                    }));
+                    return uad.getHighEntropyValues([
+                            'architecture', 'bitness', 'model', 'platformVersion', 'uaFullVersion', 'fullVersionList', 'wow64',
+                        ])
+                        .catch(() => ({}))
+                        .then((high: any) => ({
+                        brands,
+                        mobile: !!uad.mobile,
+                        platform: String(uad.platform || ''),
+                        architecture: high.architecture,
+                        bitness: high.bitness,
+                        model: high.model,
+                        platformVersion: high.platformVersion,
+                        uaFullVersion: high.uaFullVersion,
+                        wow64: high.wow64,
+                        fullVersionList: Array.from(high.fullVersionList || []).map((b: any) => ({
+                            brand: String(b.brand || ''), version: String(b.version || ''),
+                        })),
+                    }));
+                } catch {
+                    return Promise.resolve(undefined);
+                }
+            };
             const getWebglInfo = () => {
                 try {
                     const canvas = document.createElement('canvas');
@@ -145,7 +221,7 @@ async function getBrowserDeviceProfile(chromePath?: string): Promise<BrowserDevi
                     return {};
                 }
             };
-            return {
+            return getUaData().then((uaData: any) => ({
                 userAgent: navigator.userAgent,
                 platform: navigator.platform,
                 language: navigator.language,
@@ -166,7 +242,8 @@ async function getBrowserDeviceProfile(chromePath?: string): Promise<BrowserDevi
                     suffixes: String(mime.suffixes || ''),
                     description: String(mime.description || ''),
                 })).filter((mime) => mime.type),
-            };
+                uaData,
+            }));
         });
         const profile: BrowserDeviceProfile = {
             userAgent: normalizeUserAgent(rawProfile.userAgent, chromePath),
@@ -182,6 +259,11 @@ async function getBrowserDeviceProfile(chromePath?: string): Promise<BrowserDevi
             webgl: rawProfile.webgl || undefined,
             plugins: Array.isArray(rawProfile.plugins) ? rawProfile.plugins : undefined,
             mimeTypes: Array.isArray(rawProfile.mimeTypes) ? rawProfile.mimeTypes : undefined,
+            uaData: rawProfile.uaData ? {
+                ...rawProfile.uaData,
+                brands: sanitizeUaBrands(rawProfile.uaData.brands),
+                fullVersionList: sanitizeUaBrands(rawProfile.uaData.fullVersionList),
+            } : undefined,
         };
         deviceProfileCache.set(cacheKey, profile);
         chromeUACache.set(cacheKey, profile.userAgent);
@@ -216,15 +298,39 @@ async function getRealChromeUA(chromePath?: string): Promise<string> {
     return profile.userAgent;
 }
 
-function buildSecChUaHeaders(userAgent: string, uaPlatform: string): Record<string, string> {
-    const m = userAgent.match(/Chrome\/(\d+)/);
-    const majorVersion = m ? m[1] : '136';
-    const isMobile = /Mobile|Android|iPhone|iPad|iPod/i.test(userAgent);
-    return {
-        'sec-ch-ua': `"Chromium";v="${majorVersion}", "Google Chrome";v="${majorVersion}", "Not A(Brand";v="24"`,
+function formatBrandList(brands?: BrowserUaBrand[]): string {
+    return (brands || []).map((b) => `"${b.brand}";v="${b.version}"`).join(', ');
+}
+
+// sec-ch-ua* 头一律从「已洗掉 HeadlessChrome 的真机 brands」生成，确保和 JS 侧
+// navigator.userAgentData 完全一致；无头下 Chrome 自带的 HeadlessChrome 头会被这里覆盖。
+// 同时静态下发 full-version-list：即便 Taobao 用 Accept-CH 协商，Chrome 也不会再补发带
+// HeadlessChrome 的真实高熵头。
+function buildSecChUaHeaders(profile: BrowserDeviceProfile): Record<string, string> {
+    const userAgent = profile.userAgent;
+    const isMobile = profile.uaData?.mobile ?? /Mobile|Android|iPhone|iPad|iPod/i.test(userAgent);
+    const brands = profile.uaData?.brands;
+
+    let secChUa: string;
+    if (Array.isArray(brands) && brands.length > 0) {
+        secChUa = formatBrandList(brands);
+    } else {
+        const m = userAgent.match(/Chrome\/(\d+)/);
+        const majorVersion = m ? m[1] : '136';
+        secChUa = `"Chromium";v="${majorVersion}", "Google Chrome";v="${majorVersion}", "Not.A/Brand";v="99"`;
+    }
+
+    const headers: Record<string, string> = {
+        'sec-ch-ua': secChUa,
         'sec-ch-ua-mobile': isMobile ? '?1' : '?0',
-        'sec-ch-ua-platform': `"${uaPlatform}"`,
+        'sec-ch-ua-platform': `"${profile.uaPlatform}"`,
     };
+
+    const fullList = profile.uaData?.fullVersionList;
+    if (Array.isArray(fullList) && fullList.length > 0) {
+        headers['sec-ch-ua-full-version-list'] = formatBrandList(fullList);
+    }
+    return headers;
 }
 
 /**
@@ -488,22 +594,28 @@ export abstract class DoorEngine<T = any> {
     browserArgs : string[] = [
         // '--disable-accelerated-2d-canvas', '--disable-webgl',
         //  '--disable-software-rasterizer',
-        '--no-sandbox', // 取消沙箱，某些网站可能会检测到沙箱模式
-        '--disable-setuid-sandbox',
-        '--disable-webrtc-encryption',
+        // 注意：不要在这里手动加 --no-sandbox / --disable-setuid-sandbox。
+        // 沙箱由 launch 选项 chromiumSandbox(CHROMIUM_SANDBOX) 统一控制：
+        // mac/win 启用真实沙箱、不注入 flag(否则 Chrome 弹黄条)；Linux 下 playwright 自行注入。
+        // WebRTC 只暴露默认公网接口：原生层面隐藏内网/真实本地 IP(host 候选)，
+        // 但保留 srflx 公网候选(与服务端已看到的出口 IP 一致，无泄漏)。
+        // 取代旧的 JS PatchedRTC hack —— 不留 constructor 身份破绽，也不会出现「候选全空」的异常。
+        '--force-webrtc-ip-handling-policy=default_public_interface_only',
         '--disable-webrtc-hw-decoding',
         '--disable-webrtc-hw-encoding',
-        '--disable-extensions-file-access-check',
-        '--disable-blink-features=AutomationControlled',  // 禁用浏览器自动化控制特性
-        '--disable-background-timer-throttling', // 禁用后台定时器节流
-        '--disable-renderer-backgrounding', // 禁用渲染器后台化
-        '--disable-backgrounding-occluded-windows', // 禁用被遮挡窗口的后台化
+        // 以下自动化指纹类 flag 已移除（patchright 已处理 navigator.webdriver；
+        // 后台节流三件套是 puppeteer/playwright 的典型机器人特征；TranslateUI / 扩展文件
+        // 访问检查关闭也属于真实用户不会出现的异常项）：
+        //   --disable-blink-features=AutomationControlled
+        //   --disable-background-timer-throttling
+        //   --disable-renderer-backgrounding
+        //   --disable-backgrounding-occluded-windows
+        //   --disable-features=TranslateUI
+        //   --disable-extensions-file-access-check
         '--disable-dev-shm-usage', // 避免共享内存问题
-        '--disable-gpu-sandbox', // 禁用GPU沙箱
         '--no-first-run', // 跳过首次运行设置
         '--no-default-browser-check', // 跳过默认浏览器检查
         '--disable-default-apps', // 禁用默认应用
-        '--disable-features=TranslateUI' // 禁用翻译UI
       ];
 
     constructor(resourceId : string, headless: boolean = true, chromePath: string = "", usePersistentContext : boolean = true, browserArgs : string[]|undefined = undefined){
@@ -666,10 +778,11 @@ export abstract class DoorEngine<T = any> {
         clearChromeLockFiles(userDataDir);
 
         const deviceProfile = await getBrowserDeviceProfile(storeBrowserPath);
-        const secChUaHeaders = buildSecChUaHeaders(deviceProfile.userAgent, deviceProfile.uaPlatform);
+        const secChUaHeaders = buildSecChUaHeaders(deviceProfile);
 
         const contextConfig: any = {
             headless: this.headless,
+            chromiumSandbox: CHROMIUM_SANDBOX,
             executablePath: storeBrowserPath,
             userAgent: deviceProfile.userAgent,
             viewport: this.getViewportConfig(),
@@ -682,6 +795,11 @@ export abstract class DoorEngine<T = any> {
                 '--enable-blink-features=IdleDetection',
                 '--hide-scrollbars',
                 '--mute-audio',
+                // --disable-blink-features=AutomationControlled 是让 navigator.webdriver=false 的关键 flag，
+                // 但有头模式下 Chrome 会把它判为「不受支持的命令行标记」弹黄条。
+                // 折中：仅【有头】时剥离该 flag（靠 addInitScript 覆盖 webdriver，无黄条）；
+                // 【无头】无窗口无黄条，保留该 flag，让 webdriver=false 由 Chrome 原生保证，最稳。
+                ...(this.headless ? [] : ['--disable-blink-features=AutomationControlled']),
             ],
             extraHTTPHeaders: secChUaHeaders,
             bypassCSP : true,
@@ -1224,7 +1342,8 @@ export abstract class DoorEngine<T = any> {
             tempContext = await chromium.launchPersistentContext(headedUserDataDir, {
                 headless: true,
                 executablePath: chromePath,
-                args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+                chromiumSandbox: CHROMIUM_SANDBOX,
+                args: ['--disable-dev-shm-usage'],
             });
             const state = await tempContext.storageState();
             if (!Array.isArray(state.cookies) || state.cookies.length === 0) {
@@ -1389,7 +1508,7 @@ export abstract class DoorEngine<T = any> {
         
         const storeBrowserPath = await this.getRealChromePath();
         const deviceProfile = await getBrowserDeviceProfile(storeBrowserPath);
-        const secChUaHeadersCtx = buildSecChUaHeaders(deviceProfile.userAgent, deviceProfile.uaPlatform);
+        const secChUaHeadersCtx = buildSecChUaHeaders(deviceProfile);
         // let context;
         const contextConfig : any = {
             bypassCSP : true,
@@ -1407,6 +1526,11 @@ export abstract class DoorEngine<T = any> {
                 '--enable-blink-features=IdleDetection',
                 '--hide-scrollbars',
                 '--mute-audio',
+                // --disable-blink-features=AutomationControlled 是让 navigator.webdriver=false 的关键 flag，
+                // 但有头模式下 Chrome 会把它判为「不受支持的命令行标记」弹黄条。
+                // 折中：仅【有头】时剥离该 flag（靠 addInitScript 覆盖 webdriver，无黄条）；
+                // 【无头】无窗口无黄条，保留该 flag，让 webdriver=false 由 Chrome 原生保证，最稳。
+                ...(this.headless ? [] : ['--disable-blink-features=AutomationControlled']),
             ],
         }
         if (this.headless && deviceProfile.deviceScaleFactor) {
@@ -1576,11 +1700,15 @@ export abstract class DoorEngine<T = any> {
         log.info("init browser start is by ", this.resourceId, args);
         const browser = await chromium.launch({
             headless: this.headless,
+            chromiumSandbox: CHROMIUM_SANDBOX,
             executablePath: storeBrowserPath,
             args: args,
             ignoreDefaultArgs: [
                 '--enable-automation',
                 '--enable-blink-features=IdleDetection',
+                // 仅【有头】剥离此 flag 以消黄条（webdriver 由 addInitScript 覆盖）；
+                // 【无头】保留它，让 navigator.webdriver=false 由 Chrome 原生保证，最稳。
+                ...(this.headless ? [] : ['--disable-blink-features=AutomationControlled']),
             ],
         });
         log.info("init browser end is by ", this.resourceId);
@@ -1602,6 +1730,9 @@ export abstract class DoorEngine<T = any> {
             webgl: deviceProfile.webgl || {},
             plugins: deviceProfile.plugins || [],
             mimeTypes: deviceProfile.mimeTypes || [],
+            uaData: deviceProfile.uaData || null,
+            // 每个店铺一个稳定种子：同店铺画布指纹跨会话不变(像真实设备)，店铺之间互不相同(多账号隔离)
+            canvasSeed: hashStringToSeed(this.resourceId || 'default'),
         };
         await context.addInitScript((args: any) => {
             // =================== 关键浏览器指纹伪装 ===================
@@ -1616,6 +1747,19 @@ export abstract class DoorEngine<T = any> {
                 webgl?: { vendor?: string; renderer?: string };
                 plugins?: Array<{ name: string; description: string; filename: string }>;
                 mimeTypes?: Array<{ type: string; suffixes: string; description: string }>;
+                uaData?: {
+                    brands?: Array<{ brand: string; version: string }>;
+                    fullVersionList?: Array<{ brand: string; version: string }>;
+                    mobile?: boolean;
+                    platform?: string;
+                    platformVersion?: string;
+                    architecture?: string;
+                    bitness?: string;
+                    model?: string;
+                    uaFullVersion?: string;
+                    wow64?: boolean;
+                } | null;
+                canvasSeed?: number;
             } = args || {};
             const __uaPlatform: string = (__antiArgs.uaPlatform || '').toString();
 
@@ -1653,9 +1797,12 @@ export abstract class DoorEngine<T = any> {
             const __defProtoGetter = (proto: any, key: string, getter: () => any) => {
                 try {
                     __markNative(getter, 'get ' + key);
+                    // 不要加 set。navigator 上这些属性(webdriver/platform/languages/deviceMemory…)
+                    // 原生都是「只读访问器」，描述符里 set === undefined。若塞一个 set:()=>{}，
+                    // 检测脚本一查 getOwnPropertyDescriptor(...).set 就是函数(且 toString 非 native)，直接露馅。
+                    // 省略 set ⇒ set:undefined，与原生一致(赋值行为也一致：sloppy 忽略 / strict 抛错)。
                     Object.defineProperty(proto, key, {
                         get: getter,
-                        set: () => {},
                         configurable: true,
                         enumerable: true,
                     });
@@ -1715,6 +1862,67 @@ export abstract class DoorEngine<T = any> {
                 } catch (e) {}
             };
             
+            // 1b. 覆盖 navigator.userAgentData —— 与 sec-ch-ua 头同源于洗过的真机 brands。
+            // 无头(headless=new)下 brands / getHighEntropyValues / toJSON 都会带 HeadlessChrome，
+            // 而 navigator.userAgent 与 HTTP 头已被擦干净 → 三者不一致正是 Taobao 服务端交叉校验的破绽。
+            const overrideUserAgentData = () => {
+                try {
+                    const uad: any = (navigator as any).userAgentData;
+                    const data = __antiArgs.uaData;
+                    if (!uad || !data || !Array.isArray(data.brands) || data.brands.length === 0) return;
+
+                    const cloneBrands = (list: any[]) => list.map((b: any) => ({ brand: b.brand, version: b.version }));
+                    const brands = cloneBrands(data.brands);
+                    const fullVersionList = Array.isArray(data.fullVersionList) && data.fullVersionList.length > 0
+                        ? cloneBrands(data.fullVersionList)
+                        : cloneBrands(data.brands);
+                    const platform = data.platform || __uaPlatform || '';
+                    const mobile = !!data.mobile;
+
+                    const Proto: any = Object.getPrototypeOf(uad)
+                        || ((window as any).NavigatorUAData && (window as any).NavigatorUAData.prototype);
+                    if (Proto) {
+                        __defProtoGetter(Proto, 'brands', () => cloneBrands(brands));
+                        __defProtoGetter(Proto, 'mobile', () => mobile);
+                        __defProtoGetter(Proto, 'platform', () => platform);
+                    }
+
+                    // 高熵值整表，getHighEntropyValues 按入参挑选返回（与真实 API 行为一致）
+                    const high: any = {
+                        architecture: data.architecture || '',
+                        bitness: data.bitness || '',
+                        model: data.model || '',
+                        platformVersion: data.platformVersion || '',
+                        uaFullVersion: data.uaFullVersion || '',
+                        wow64: !!data.wow64,
+                    };
+                    const patchedGHEV: any = function(this: any, hints: any) {
+                        const result: any = { brands: cloneBrands(brands), mobile, platform };
+                        const list = Array.isArray(hints) ? hints : [];
+                        list.forEach((h: string) => {
+                            if (h === 'fullVersionList') result.fullVersionList = cloneBrands(fullVersionList);
+                            else if (h in high) result[h] = high[h];
+                        });
+                        return Promise.resolve(result);
+                    };
+                    __markNative(patchedGHEV, 'getHighEntropyValues');
+                    try {
+                        Object.defineProperty(uad, 'getHighEntropyValues', { value: patchedGHEV, configurable: true, writable: true });
+                    } catch (e) {
+                        if (Proto) Object.defineProperty(Proto, 'getHighEntropyValues', { value: patchedGHEV, configurable: true, writable: true });
+                    }
+
+                    // toJSON 只回低熵三件套，和真实 Chrome 一致
+                    const patchedToJSON: any = function(this: any) {
+                        return { brands: cloneBrands(brands), mobile, platform };
+                    };
+                    __markNative(patchedToJSON, 'toJSON');
+                    try {
+                        Object.defineProperty(uad, 'toJSON', { value: patchedToJSON, configurable: true, writable: true });
+                    } catch (e) {}
+                } catch (e) {}
+            };
+
             // 2. 覆盖 WebGL/WebGL2 的 vendor/renderer —— 必须与 UA 平台一致，避免「macOS UA + Linux Mesa GPU」这种强 bot 信号
             const overrideWebGL = () => {
                 const vendor = __antiArgs.webgl && __antiArgs.webgl.vendor;
@@ -1744,13 +1952,22 @@ export abstract class DoorEngine<T = any> {
             //  patchright + --headless=new 已经提供了与真实 Chrome 一致的 chrome 对象与 Notification.permission，
             //  在此基础上不要再叠加自己的版本。
             
-            // 5. Canvas 指纹弱噪声 —— 直接 patch CanvasRenderingContext2D.prototype.getImageData，
-            //    避免之前「在 getContext 返回值上叠加」每次 getContext 都重复包装的隐患。
-            //    去掉 fillText 加空格的逻辑（会破坏正常文字渲染），仅在非透明像素上轻微扰动 RGB。
+            // 5. Canvas 指纹弱噪声 —— 直接 patch CanvasRenderingContext2D.prototype.getImageData。
+            //    扰动是「确定性」的：位置与通道都由 hash(seed, 像素下标) 决定，纯输入函数。
+            //    => 同一张画布重复读取结果完全一致(挡住 double-read 比对，旧版每次 Math.random 会暴露)；
+            //       同店铺跨会话指纹稳定(像真实设备)；不同店铺 seed 不同 => 指纹不同(多账号隔离)。
             const overrideCanvas = () => {
                 try {
                     const Ctx2d: any = (window as any).CanvasRenderingContext2D;
                     if (!Ctx2d || !Ctx2d.prototype) return;
+                    const seed = ((__antiArgs.canvasSeed as number) >>> 0) || 0x9e3779b9;
+                    // 32 位整数雪崩 hash：(seed, index) 决定该像素是否扰动及扰动哪个通道
+                    const hashAt = (i: number): number => {
+                        let h = (seed ^ Math.imul(i + 1, 0x27d4eb2d)) >>> 0;
+                        h = Math.imul(h ^ (h >>> 15), 0x85ebca6b) >>> 0;
+                        h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35) >>> 0;
+                        return (h ^ (h >>> 16)) >>> 0;
+                    };
                     const originalGetImageData = Ctx2d.prototype.getImageData;
                     const patched: any = function(this: any) {
                         const imageData = originalGetImageData.apply(this, arguments as any);
@@ -1758,11 +1975,13 @@ export abstract class DoorEngine<T = any> {
                             if (imageData && imageData.data && imageData.data.length >= 4) {
                                 const data = imageData.data;
                                 const totalPixels = data.length / 4;
-                                for (let i = 0; i < 10; i++) {
-                                    const pixel = Math.floor(Math.random() * totalPixels);
-                                    const base = pixel * 4;
+                                for (let p = 0; p < totalPixels; p++) {
+                                    const h = hashAt(p);
+                                    // 稀疏扰动：约 1/256 像素被改，强度固定 ±1，仅非透明像素
+                                    if ((h & 0xff) !== 0) continue;
+                                    const base = p * 4;
                                     if (data[base + 3] === 0) continue;
-                                    const channel = Math.floor(Math.random() * 3);
+                                    const channel = h % 3;
                                     data[base + channel] = data[base + channel] ^ 1;
                                 }
                             }
@@ -1871,57 +2090,21 @@ export abstract class DoorEngine<T = any> {
                 } catch (e) {}
             };
             
-            // WebRTC 本地/真实 IP 泄漏屏蔽：阻止 host/srflx 候选地址回流到 JS
-            const blockWebRTCLeak = () => {
-                try {
-                    // @ts-ignore
-                    const RTC = (window as any).RTCPeerConnection || (window as any).webkitRTCPeerConnection || (window as any).mozRTCPeerConnection;
-                    if (!RTC) return;
-                    const OriginalRTC = RTC;
-                    const PatchedRTC: any = function(this: any, ...args: any[]) {
-                        const pc = new OriginalRTC(...args);
-                        const origAddIce = pc.addIceCandidate && pc.addIceCandidate.bind(pc);
-                        if (origAddIce) {
-                            const patchedAddIce: any = function(candidate: any, ...rest: any[]) {
-                                const c = candidate && (candidate.candidate || (candidate.toJSON && candidate.toJSON().candidate));
-                                if (typeof c === 'string' && /(host|srflx)/i.test(c)) {
-                                    return Promise.resolve();
-                                }
-                                return origAddIce(candidate, ...rest);
-                            };
-                            __markNative(patchedAddIce, 'addIceCandidate');
-                            pc.addIceCandidate = patchedAddIce;
-                        }
-                        const origCreateOffer = pc.createOffer && pc.createOffer.bind(pc);
-                        if (origCreateOffer) {
-                            const patchedCreateOffer: any = function(opts: any) {
-                                const merged = Object.assign({}, opts, { offerToReceiveAudio: false, offerToReceiveVideo: false });
-                                return origCreateOffer(merged);
-                            };
-                            __markNative(patchedCreateOffer, 'createOffer');
-                            pc.createOffer = patchedCreateOffer;
-                        }
-                        return pc;
-                    };
-                    PatchedRTC.prototype = OriginalRTC.prototype;
-                    __markNative(PatchedRTC, 'RTCPeerConnection');
-                    (window as any).RTCPeerConnection = PatchedRTC;
-                    if ((window as any).webkitRTCPeerConnection) (window as any).webkitRTCPeerConnection = PatchedRTC;
-                    if ((window as any).mozRTCPeerConnection) (window as any).mozRTCPeerConnection = PatchedRTC;
-                } catch (e) {
-                    // ignore
-                }
-            };
+            // WebRTC 本地/真实 IP 泄漏：已改由启动参数 --force-webrtc-ip-handling-policy=default_public_interface_only
+            // 在原生层面处理(见 browserArgs)。不再用 JS 包装 RTCPeerConnection ——
+            // 旧实现 PatchedRTC.prototype 共享 OriginalRTC.prototype 但没改 constructor，
+            // 导致 RTCPeerConnection.prototype.constructor !== window.RTCPeerConnection，一行就能测出篡改；
+            // 且吞掉 host/srflx 让候选完全为空本身也是异常信号。原生参数无这些破绽。
 
-            // 执行所有伪装。已删除的 overrideChrome / overrideNotification 不再调用 ——
-            // 那两块整体替换反而暴露，详见函数定义处注释。
+            // 执行所有伪装。已删除的 overrideChrome / overrideNotification / blockWebRTCLeak 不再调用 ——
+            // 那几块整体替换/包装反而暴露，详见各自注释。
             try {
                 overrideNavigator();
+                overrideUserAgentData();
                 overrideCanvas();
                 hideAutomationFeatures();
                 blockFingerprinting();
                 antiHeadlessDetection();
-                blockWebRTCLeak();
             } catch (err) {
                 // 忽略错误继续执行
             }

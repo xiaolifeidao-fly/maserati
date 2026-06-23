@@ -366,6 +366,7 @@ export function ProductPublishModal({
   const [exportingBatchLogs, setExportingBatchLogs] = useState(false);
   const [publishProgressLoading, setPublishProgressLoading] = useState(directToProgress);
   const [captchaPanelActuallyVisible, setCaptchaPanelActuallyVisible] = useState(false);
+  const [openingCaptchaBrowser, setOpeningCaptchaBrowser] = useState(false);
   const [loginRequiredModal, setLoginRequiredModal] = useState<{ taskId: number; shopId: number } | null>(null);
   const [handlingLogin, setHandlingLogin] = useState(false);
   const [logDrawerItem, setLogDrawerItem] = useState<PublishQueueItem | null>(null);
@@ -685,14 +686,16 @@ export function ProductPublishModal({
       void applyCenterState(state as PublishCenterState);
     });
 
-    void publishApi.onCaptchaRequired(() => {
+    void publishApi.onCaptchaRequired((payload) => {
       // 验证码已自动弹出，这里再给一条醒目的常驻提示，避免「原地校验型」验证码
       // 验证后进度未自动恢复、用户却没注意到的情况
+      const headed = payload?.captchaMode === "headed";
       notification.warning({
         key: "publish-captcha-required",
         message: "发布需要完成验证码",
-        description:
-          "右侧已弹出验证码面板，请完成验证。若验证后发布进度长时间没有继续，请点击面板内的「我已完成验证 · 点此继续发布」按钮。",
+        description: headed
+          ? "已自动打开浏览器窗口，请在该窗口中用鼠标完成验证。若验证后发布进度长时间没有继续，请点击窗口内的「我已完成验证 · 点此继续发布」按钮。"
+          : "右侧已弹出验证码面板，请完成验证。若验证后发布进度长时间没有继续，请点击面板内的「我已完成验证 · 点此继续发布」按钮。",
         duration: 0,
         placement: "topRight",
       });
@@ -2509,13 +2512,49 @@ export function ProductPublishModal({
                       description={<span>当前选中的店铺未登录，需要去店铺管理中重新<a onClick={() => { void handleShopLoginFromPublish(selectedTargetShopId); }} style={{ cursor: "pointer", textDecoration: "underline" }}>授权登录</a></span>}
                     />
                   ) : null}
-                  {activeCaptchaItem && captchaPanelActuallyVisible ? (
+                  {activeCaptchaItem ? (
                     <Alert
                       type="warning"
                       showIcon
                       style={{ marginBottom: 16 }}
                       message={`任务 #${activeCaptchaItem.taskId} 正在等待验证码`}
-                      description={`${activeCaptchaItem.title} 需要先在右侧完成淘宝验证码，再点击该行右侧的"继续发布"。`}
+                      description={
+                        <Space direction="vertical" size={8}>
+                          {captchaPanelActuallyVisible ? (
+                            <span>{`${activeCaptchaItem.title} 需要先在右侧完成淘宝验证码，再点击该行右侧的"继续发布"。`}</span>
+                          ) : (
+                            <span>{`${activeCaptchaItem.title} 需要完成淘宝验证码后才能继续发布。`}</span>
+                          )}
+                          <span className="manager-muted" style={{ fontSize: 12 }}>
+                            若右侧面板多次滑动都验证失败，可点击下方按钮在真实浏览器窗口中手动完成验证，验证通过后将自动继续发布。
+                          </span>
+                          <Button
+                            size="small"
+                            type="primary"
+                            loading={openingCaptchaBrowser}
+                            onClick={() => {
+                              const taskId = activeCaptchaItem.taskId;
+                              if (!taskId) return;
+                              setOpeningCaptchaBrowser(true);
+                              void getPublishApi()
+                                .openCaptchaInBrowser(taskId)
+                                .then((res) => {
+                                  if (res?.opened) {
+                                    message.info("已在浏览器窗口打开验证码，请在新窗口中完成验证");
+                                  } else {
+                                    message.error("打开验证码浏览器失败，请重试");
+                                  }
+                                })
+                                .catch(() => {
+                                  message.error("打开验证码浏览器失败，请重试");
+                                })
+                                .finally(() => setOpeningCaptchaBrowser(false));
+                            }}
+                          >
+                            用浏览器打开验证码
+                          </Button>
+                        </Space>
+                      }
                     />
                   ) : null}
                   {loginPendingItems.length > 0 ? (
@@ -3211,7 +3250,7 @@ function mergeQueueWithRuntimeTasks(
       publishedTime: runtimeTask.updatedAt || item.publishedTime,
       currentStepCode: runtimeTask.currentStepCode || item.currentStepCode,
       statusText: buildRuntimeTaskStatusText(runtimeTask),
-      waitingForCaptcha: Boolean(runtimeTask.waitingForCaptcha),
+      waitingForCaptcha: isRuntimeTaskWaitingForCaptcha(runtimeTask),
       waitingForLogin,
       loginRequiredShopId: waitingForLogin
         ? resolveRuntimeTaskLoginRequiredShopId(runtimeTask) ?? item.loginRequiredShopId
@@ -3253,7 +3292,7 @@ function buildRuntimeTaskStatusText(task: PublishRuntimeTaskSnapshot): string {
   if (isRuntimeTaskWaitingForLogin(task)) {
     return "等待登录，请点击处理后重新登录";
   }
-  if (task.waitingForCaptcha) {
+  if (isRuntimeTaskWaitingForCaptcha(task)) {
     return "等待验证码，完成右侧校验后点击继续发布";
   }
   if (task.status === PublishTaskStatus.SUCCESS && task.outerItemId) {
@@ -3273,6 +3312,23 @@ function isRuntimeTaskWaitingForLogin(task: PublishRuntimeTaskSnapshot): boolean
     || (
       task.status === PublishTaskStatus.PENDING
       && isLoginPendingMessage(task.errorMessage || task.statusText)
+    );
+}
+
+/**
+ * 判断运行时任务是否处于「等待验证码」状态。
+ * 除了 live 进度事件设置的 waitingForCaptcha 布尔标记外，还要兼顾断点/重载场景：
+ * 此时任务只在 errorMessage/statusText 上保留「等待验证码」字样（由 step-chain 写入），
+ * 布尔标记可能为 false，需要据消息内容补判，否则验证码提示与按钮不会出现。
+ */
+function isRuntimeTaskWaitingForCaptcha(task: PublishRuntimeTaskSnapshot): boolean {
+  if (isRuntimeTaskWaitingForLogin(task)) {
+    return false;
+  }
+  return Boolean(task.waitingForCaptcha)
+    || (
+      task.status === PublishTaskStatus.PENDING
+      && isCaptchaPendingMessage(task.errorMessage || task.statusText)
     );
 }
 

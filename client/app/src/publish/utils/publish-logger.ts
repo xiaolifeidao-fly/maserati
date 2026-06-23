@@ -256,6 +256,18 @@ class PublishLogWriter {
   }
 
   private resolveTargetFile(meta?: unknown): string {
+    this.ensureCurrentDir();
+
+    const sourceProductId = this.resolveSourceProductId(meta);
+    if (!sourceProductId) {
+      return path.join(this.currentDir, 'publish.log');
+    }
+
+    return this.filePath(sourceProductId);
+  }
+
+  /** 确保已初始化，并在跨天时滚动到新的日期目录。 */
+  private ensureCurrentDir(): void {
     this.ensureInitialized();
     const today = formatDate(new Date());
 
@@ -264,13 +276,33 @@ class PublishLogWriter {
       this.currentDir = path.join(this.baseDir, this.currentDate);
       fs.mkdirSync(this.currentDir, { recursive: true });
     }
+  }
 
-    const sourceProductId = this.resolveSourceProductId(meta);
-    if (!sourceProductId) {
-      return path.join(this.currentDir, 'publish.log');
+  /**
+   * 将最终提交/发布的数据写入独立的 JSON 文件，返回文件绝对路径。
+   * 文件存放在当天日志目录下的 submit-payloads/ 子目录中。
+   */
+  writeSubmitPayload(payload: unknown, meta?: unknown): string | undefined {
+    if (!isEnabled()) {
+      return undefined;
     }
 
-    return this.filePath(sourceProductId);
+    try {
+      this.ensureCurrentDir();
+      const dir = path.join(this.currentDir, 'submit-payloads');
+      fs.mkdirSync(dir, { recursive: true });
+
+      const taskId = this.extractTaskId(isRecord(meta) ? meta : undefined);
+      const idPart = this.resolveSourceProductId(meta)
+        ?? (taskId !== undefined ? `task-${taskId}` : 'unknown');
+      const fileName = `${idPart}-${formatTimestampForFile(new Date())}.json`;
+      const filePath = path.join(dir, fileName);
+      fs.writeFileSync(filePath, JSON.stringify(payload, null, 2), 'utf8');
+      return filePath;
+    } catch (error) {
+      console.error('[publish-log] write submit payload failed', error);
+      return undefined;
+    }
   }
 
   private ensureInitialized(): void {
@@ -430,6 +462,14 @@ export function showPublishLogFileInFolder(taskId: number): { shown: boolean } {
 
 export function getPublishTaskLogFilePath(taskId: number): string | undefined {
   return writer.getTaskLogFilePath(taskId);
+}
+
+/**
+ * 将最终提交/发布的数据写入独立 JSON 文件，返回文件绝对路径（写入失败时返回 undefined）。
+ * meta 用于路由文件名（按 sourceProductId 或 taskId 命名）。
+ */
+export function writePublishSubmitPayload(payload: unknown, meta?: unknown): string | undefined {
+  return writer.writeSubmitPayload(payload, meta);
 }
 
 export function publishInfo(message: string, meta?: unknown): void {
@@ -661,6 +701,15 @@ function truncate(text: string): string {
     return text;
   }
   return `${text.slice(0, MAX_TEXT_LENGTH)}...(truncated ${text.length - MAX_TEXT_LENGTH} chars)`;
+}
+
+function formatTimestampForFile(date: Date): string {
+  const pad = (n: number): string => String(n).padStart(2, '0');
+  return (
+    `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}`
+    + `-${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`
+    + `${String(date.getMilliseconds()).padStart(3, '0')}`
+  );
 }
 
 function formatDate(date: Date): string {

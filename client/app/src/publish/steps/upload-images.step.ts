@@ -2,7 +2,7 @@ import { StepCode, StepStatus, STEP_ORDER } from '../types/publish-task';
 import type { StepResult } from '../core/publish-step';
 import { PublishStep } from '../core/publish-step';
 import type { StepContext } from '../core/step-context';
-import { PublishError, StepSkippedError, CaptchaRequiredError, ScreenshotCaptchaRequiredError, LoginRequiredError } from '../core/errors';
+import { PublishError, StepSkippedError, CaptchaRequiredError, HeadedCaptchaRequiredError, LoginRequiredError } from '../core/errors';
 import { CaptchaChecker } from './captcha.step';
 import { requestBackend } from '@src/impl/shared/backend';
 import { TbEngine } from '@src/browser/tb.engine';
@@ -24,7 +24,7 @@ import {
 } from '../utils/publish-logger';
 import { handleTbLoginRequired, handleTbMaybeLoginRequired } from '../utils/tb-login-state';
 import type { TbUploadedImageMeta } from '../types/draft';
-import { parseTaobaoResponseText } from '../utils/tb-publish-api';
+import { parseTaobaoResponseText, parseTbDialogSize } from '../utils/tb-publish-api';
 import { setImageCropMeta } from '../core/publish-image-meta-store';
 
 /**
@@ -354,14 +354,16 @@ export class UploadImagesStep extends PublishStep {
         }
       } catch (captchaError) {
         if (captchaError instanceof CaptchaRequiredError) {
-          // 标记验证码已触发：下次恢复时从 Playwright 直接提取 cookie（截屏流模式已在验证码页完成）
+          // 标记验证码已触发：下次恢复时从 Playwright 直接提取 cookie（验证码已在有头会话页完成）
           tbEngine.setValidateAutoTag(false);
           tbEngine.clearHeader();
-          // 图片上传的验证码通过截屏流呈现（而非 Electron BrowserView），以便直接在 Playwright 会话中完成
-          throw new ScreenshotCaptchaRequiredError(
+          // 图片上传的验证码在「真实有头窗口」中呈现：点选/滑块类靠真实鼠标轨迹判定，
+          // 合成鼠标几乎过不了；用户在原生窗口用真鼠标完成，并按 dialogSize 对齐窗口几何。
+          throw new HeadedCaptchaRequiredError(
             captchaError.stepCode,
             captchaError.captchaUrl,
             ctx.shopId,
+            captchaError.dialogSize,
           );
         }
         throw captchaError;
@@ -759,14 +761,19 @@ export class UploadImagesStep extends PublishStep {
 
         // 验证拦截（需要滑块验证）
         if ('ret' in data && Array.isArray(data.ret) && data.ret[0] === 'FAIL_SYS_USER_VALIDATE') {
-          const captchaUrl = String((data as Record<string, unknown> & { data?: { url?: string } }).data?.url ?? '');
-          CaptchaChecker.require(this.stepCode, captchaUrl);
+          const punish = (data as Record<string, unknown> & { data?: { url?: string; dialogSize?: unknown } }).data;
+          const captchaUrl = String(punish?.url ?? '');
+          CaptchaChecker.require(this.stepCode, captchaUrl, undefined, parseTbDialogSize(punish?.dialogSize));
         }
 
         // 安全拦截
         if (data.rgv587_flag === 'sm') {
           const captchaUrl = String((data as Record<string, unknown> & { url?: string }).url ?? '');
-          CaptchaChecker.require(this.stepCode, captchaUrl);
+          const dialogSize = parseTbDialogSize(
+            (data as Record<string, unknown> & { dialogSize?: unknown; data?: { dialogSize?: unknown } }).dialogSize
+              ?? (data as Record<string, unknown> & { data?: { dialogSize?: unknown } }).data?.dialogSize,
+          );
+          CaptchaChecker.require(this.stepCode, captchaUrl, undefined, dialogSize);
         }
 
         if (!data.success) {

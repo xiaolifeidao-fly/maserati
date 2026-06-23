@@ -30,7 +30,7 @@ function getOpenKeys(pathname: string) {
   if (pathname.startsWith("/activation-code")) {
     return ["/activation-code"];
   }
-  if (pathname.startsWith("/product")) {
+  if (pathname.startsWith("/product") || pathname.startsWith("/title-filter")) {
     return ["/product"];
   }
   if (pathname.startsWith("/collect")) {
@@ -126,6 +126,10 @@ export function ManagerShell({ children }: ManagerShellProps) {
           {
             key: "/product/publish",
             label: "商品发布管理",
+          },
+          {
+            key: "/title-filter/list",
+            label: "标题关键词过滤",
           },
         ],
       },

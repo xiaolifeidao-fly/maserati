@@ -41,10 +41,57 @@ let screenshotCaptchaPage: Page | null = null;
 let screenshotCaptchaTimer: ReturnType<typeof setInterval> | null = null;
 let screenshotCaptchaFrameBusy = false;
 
+// ─── 有头浏览器验证码状态 ───────────────────────────────────────────────────────
+
+/** 当前有头验证码页面绑定的「继续发布」回调（注入按钮 / 跳转检测共用）。 */
+let headedCaptchaSolveHandler: (() => void) | null = null;
+/** 已绑定过 exposeFunction 的有头验证码页面（避免重复 expose 抛错）。 */
+const headedCaptchaBoundPages = new WeakSet<Page>();
+/** 上一次有头验证码页面及其监听器，用于重新打开时清理。 */
+let headedCaptchaPage: Page | null = null;
+let headedCaptchaNavListener: ((frame: { parentFrame(): unknown; url(): string }) => void) | null = null;
+let headedCaptchaLoadListener: (() => void) | null = null;
+
 // ─── 工具函数 ─────────────────────────────────────────────────────────────────
 
 function getPreloadPath() {
   return path.join(__dirname, 'preload.js');
+}
+
+/**
+ * 通过 CDP 把有头浏览器窗口尺寸调整为目标尺寸（淘宝 dialogSize），
+ * 让点选/滑块类验证码按其预期的 mobile 竖屏几何渲染。返回调整前的窗口尺寸用于事后恢复。
+ * 持久化上下文为 viewport:null，page.setViewportSize 不可用，故走 Browser.setWindowBounds。
+ */
+async function resizeHeadedWindow(
+  page: Page,
+  size: { width: number; height: number },
+): Promise<{ width: number; height: number } | null> {
+  try {
+    const session = await page.context().newCDPSession(page);
+    const info = (await session.send('Browser.getWindowForTarget')) as {
+      windowId: number;
+      bounds?: { width?: number; height?: number; windowState?: string };
+    };
+    const bounds = info.bounds ?? {};
+    const prev = Number(bounds.width) > 0 && Number(bounds.height) > 0
+      ? { width: Number(bounds.width), height: Number(bounds.height) }
+      : null;
+    // 最大化/全屏状态下 setWindowBounds 的宽高不生效，先切回 normal
+    if (bounds.windowState && bounds.windowState !== 'normal') {
+      await session.send('Browser.setWindowBounds', { windowId: info.windowId, bounds: { windowState: 'normal' } });
+    }
+    // 严格采用淘宝返回的 dialogSize（动态值），不做最小值兜底，避免覆盖真实尺寸
+    await session.send('Browser.setWindowBounds', {
+      windowId: info.windowId,
+      bounds: { width: Math.round(size.width), height: Math.round(size.height) },
+    });
+    await session.detach().catch(() => { /* ignore */ });
+    return prev;
+  } catch (err) {
+    log.warn('[publish-window] resizeHeadedWindow failed', err);
+    return null;
+  }
 }
 
 function openExternalUrl(url: string) {
@@ -779,6 +826,7 @@ export async function showScreenshotCaptchaPanel(
   shopId: number,
   taskId: number,
   onSolved?: () => void,
+  dialogSize?: { width: number; height: number },
 ): Promise<void> {
   if (!publishBrowserWindow || publishBrowserWindow.isDestroyed()) {
     log.warn('[publish-window] showScreenshotCaptchaPanel: publish window is not open');
@@ -835,6 +883,16 @@ export async function showScreenshotCaptchaPanel(
     const pages = context.pages();
     const page: Page = pages.length > 0 ? pages[0] : await context.newPage();
     screenshotCaptchaPage = page;
+
+    // 按淘宝 dialogSize 对齐验证码渲染几何。截屏流的画面映射依赖 viewportSize()，因此只用
+    // setViewportSize；持久化上下文 viewport:null 不支持时保持原尺寸（不改窗口，避免帧映射错位）。
+    if (dialogSize && dialogSize.width > 0 && dialogSize.height > 0) {
+      try {
+        await page.setViewportSize(dialogSize);
+      } catch {
+        /* viewport:null 不支持，保持原尺寸 */
+      }
+    }
 
     await page.goto(captchaUrl, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch((err) => {
       log.warn('[publish-window] showScreenshotCaptchaPanel: navigate to captcha url failed', err);
@@ -917,6 +975,138 @@ export async function dispatchPublishCaptchaViewerInput(input: PlaywrightViewerI
     }
   } catch (err) {
     log.warn('[publish-window] dispatchPublishCaptchaViewerInput: failed', { type: input.type, err });
+  }
+}
+
+/**
+ * 读取当前正在展示的验证码 URL（截屏流页面或右侧 BrowserView）。
+ * 用于断点/重载场景下 runtime 快照里缺少 captchaUrl 时的兜底。
+ * 注意：必须在 hideCaptchaPanel() 之前调用，面板隐藏后地址即不可用。
+ */
+export function getActiveCaptchaUrl(): string | undefined {
+  try {
+    if (screenshotCaptchaPage && !screenshotCaptchaPage.isClosed()) {
+      const url = screenshotCaptchaPage.url();
+      if (url && /captcha|checkcode|turing|punish/i.test(url)) {
+        return url;
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  try {
+    if (rightBrowserView && !rightBrowserView.webContents.isDestroyed()) {
+      const url = rightBrowserView.webContents.getURL();
+      if (url && url !== 'about:blank' && !url.startsWith('data:')) {
+        return url;
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  return undefined;
+}
+
+/**
+ * 在真实有头 Playwright 浏览器窗口中打开验证码，供用户用原生鼠标手动完成校验。
+ *
+ * 与 showScreenshotCaptchaPanel（截屏流 + 合成鼠标事件）不同，此函数直接把同 shopId 的
+ * 有头浏览器窗口带到前台，用户在原生窗口里完成滑动验证 —— 滑块类验证码在原生窗口里通过率
+ * 显著更高。校验完成后（页面跳离验证码页 / 用户点击注入的「继续发布」按钮）调用 onSolved。
+ */
+export async function openCaptchaInHeadedBrowser(
+  captchaUrl: string,
+  shopId: number,
+  taskId: number,
+  onSolved?: () => void,
+  dialogSize?: { width: number; height: number },
+): Promise<{ opened: boolean }> {
+  // 先关闭右侧嵌入式验证码面板（截屏流 / BrowserView），避免其导航监听重复触发恢复
+  hideCaptchaPanel();
+
+  try {
+    const engine = new TbEngine(String(shopId), false);
+    engine.bindPublishTask(taskId);
+
+    // 有头持久化 context（不存在则创建可见窗口，并恢复该店铺登录态）
+    const context = await engine.getContextOnly();
+    if (!context) {
+      log.warn('[publish-window] openCaptchaInHeadedBrowser: no playwright context for shop', shopId);
+      return { opened: false };
+    }
+
+    const pages = context.pages();
+    const page: Page = pages.length > 0 ? pages[0] : await context.newPage();
+
+    // 清理 framenavigated/load 监听器，避免截屏流面板（showScreenshotCaptchaPanel）遗留的
+    // 跳转检测与本函数同时触发 onSolved 造成重复 resume；engine 仅使用 'response' 监听器，清理安全。
+    headedCaptchaPage = page;
+    page.removeAllListeners('framenavigated');
+    page.removeAllListeners('load');
+
+    // 按淘宝 dialogSize 把有头窗口调成验证码预期几何（mobile 竖屏），通过后再恢复原尺寸
+    let prevWindowBounds: { width: number; height: number } | null = null;
+    if (dialogSize && dialogSize.width > 0 && dialogSize.height > 0) {
+      prevWindowBounds = await resizeHeadedWindow(page, dialogSize);
+    }
+
+    let solved = false;
+    const finish = (reason: string): void => {
+      if (solved) return;
+      solved = true;
+      headedCaptchaSolveHandler = null;
+      if (headedCaptchaNavListener) page.off('framenavigated', headedCaptchaNavListener);
+      if (headedCaptchaLoadListener) page.off('load', headedCaptchaLoadListener);
+      // 恢复验证前的窗口尺寸，避免后续发布沿用 375 宽的小窗
+      if (prevWindowBounds) void resizeHeadedWindow(page, prevWindowBounds);
+      log.info('[publish-window] headed captcha solved', { reason, shopId, taskId });
+      onSolved?.();
+    };
+    headedCaptchaSolveHandler = () => finish('manual');
+
+    // 自动检测：顶层 frame 跳离验证码页 = 校验通过
+    headedCaptchaNavListener = (frame): void => {
+      if (frame.parentFrame() !== null) return;
+      const url = frame.url();
+      if (!url || /captcha|checkcode|turing|punish/i.test(url)) return;
+      finish('navigation');
+    };
+    page.on('framenavigated', headedCaptchaNavListener);
+
+    // 兜底：原地校验型验证码（XHR，URL 不变）无法靠跳转检测，向页面注入「继续发布」浮动按钮
+    const bindingName = '__publishHeadedCaptchaSolved__';
+    if (!headedCaptchaBoundPages.has(page)) {
+      try {
+        await page.exposeFunction(bindingName, () => { headedCaptchaSolveHandler?.(); });
+      } catch {
+        /* 同一 page 上重复 expose 会抛错，忽略即可 */
+      }
+      headedCaptchaBoundPages.add(page);
+    }
+    const injectJs = `(function(){
+      var id='__publish_headed_captcha_solve__';
+      if(document.getElementById(id))return;
+      var b=document.createElement('button');
+      b.id=id;b.type='button';b.textContent='我已完成验证 · 点此继续发布';
+      b.style.cssText='position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:2147483647;padding:10px 20px;border:0;border-radius:9px;background:#2563eb;color:#fff;font:600 13px/1.2 system-ui,-apple-system,sans-serif;box-shadow:0 6px 18px rgba(37,99,235,.4);cursor:pointer;';
+      b.addEventListener('click',function(){b.disabled=true;b.style.opacity='0.7';b.textContent='正在继续发布…';if(window.${bindingName}){window.${bindingName}();}});
+      (document.body||document.documentElement).appendChild(b);
+    })();`;
+    const injectButton = (): void => { void page.evaluate(injectJs).catch(() => { /* 页面未就绪，load 后重试 */ }); };
+    headedCaptchaLoadListener = injectButton;
+    page.on('load', headedCaptchaLoadListener);
+
+    await page.goto(captchaUrl, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch((err) => {
+      log.warn('[publish-window] openCaptchaInHeadedBrowser: navigate to captcha url failed', err);
+    });
+    injectButton();
+    await page.bringToFront().catch(() => { /* ignore */ });
+
+    log.info('[publish-window] headed captcha browser opened', { captchaUrl, shopId, taskId });
+    return { opened: true };
+  } catch (err) {
+    log.error('[publish-window] openCaptchaInHeadedBrowser failed', err);
+    return { opened: false };
   }
 }
 

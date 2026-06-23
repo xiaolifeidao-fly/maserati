@@ -1,5 +1,6 @@
 import { requestBackend } from '@src/impl/shared/backend';
 import { publishError, publishInfo } from '../utils/publish-logger';
+import { batchGapMs } from '../utils/human-timing';
 import { PublishBatchJobDb } from './publish-batch-job.db';
 import { PublishBatchJobStatus } from './publish-batch-job.types';
 import type {
@@ -207,7 +208,8 @@ class PublishBatchJobCenter {
       const taskIds = await this.fetchBatchTaskIds(batchId);
       publishInfo(`[batch:${batchId}] task ids resolved`, { count: taskIds.length });
 
-      for (const taskId of taskIds) {
+      for (let i = 0; i < taskIds.length; i++) {
+        const taskId = taskIds[i];
         try {
           await this.runSingleTask(taskId);
           completedCount += 1;
@@ -217,6 +219,14 @@ class PublishBatchJobCenter {
         }
         this.db.update(batchId, { completedCount, failedCount });
         this.emitStateChange();
+
+        // 拟人化：任务之间拉开随机间隔(含小概率长停顿)，打破固定 cadence
+        // —— 等间隔连发是淘宝识别批量铺货的最强行为信号。最后一个任务后不再等待。
+        if (i < taskIds.length - 1) {
+          const gapMs = batchGapMs();
+          publishInfo(`[batch:${batchId}] human gap before next task`, { gapMs });
+          await new Promise((resolve) => setTimeout(resolve, gapMs));
+        }
       }
     } catch (err) {
       publishError(`[batch:${batchId}] batch execution error`, { error: String(err) });

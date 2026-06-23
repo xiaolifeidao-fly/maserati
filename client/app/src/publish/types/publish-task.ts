@@ -172,8 +172,13 @@ export interface PublishProgressEvent {
    * 验证码呈现方式：
    *  - 'browser'（默认）：在 Electron BrowserView 中直接加载验证码 URL
    *  - 'screenshot'：通过 Playwright 截屏流呈现，用于图片上传步骤
+   *  - 'headed'：在真实有头浏览器窗口中呈现，用于最终发布的 punish 点选/滑块验证码
    */
-  captchaMode?: 'browser' | 'screenshot';
+  captchaMode?: 'browser' | 'screenshot' | 'headed';
+  /** 验证码弹窗目标宽度（淘宝 dialogSize），用于按其预期几何渲染点选/滑块验证码 */
+  captchaDialogWidth?: number;
+  /** 验证码弹窗目标高度（淘宝 dialogSize） */
+  captchaDialogHeight?: number;
   /** 淘宝会话过期（未登录）时携带店铺 ID，前端据此展示登录弹窗 */
   loginRequiredShopId?: number;
 }

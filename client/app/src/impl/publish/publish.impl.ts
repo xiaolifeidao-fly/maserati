@@ -10,7 +10,7 @@ import { resolveLoginGate } from '@src/publish/runtime/login-gate';
 import type { ShopLoginPayload, ShopRecord } from '@eleapi/commerce/commerce.api';
 import { PublishRunner } from '@src/publish/core/publish-runner';
 import { HttpPublishPersister } from '@src/publish/core/http-publish-persister';
-import { showCaptchaPanel, showScreenshotCaptchaPanel, getCaptchaBrowserCookies } from '@src/publish/publish-window';
+import { showCaptchaPanel, showScreenshotCaptchaPanel, getCaptchaBrowserCookies, openCaptchaInHeadedBrowser, getActiveCaptchaUrl } from '@src/publish/publish-window';
 import { closePublishPage } from '@src/publish/steps/fill-draft.step';
 import { injectCookiesIntoTbContext } from '@src/browser/engine';
 import type {
@@ -43,6 +43,7 @@ import {
 } from '@src/publish/utils/publish-logger';
 import {
   announcePublishBatchFromTask,
+  getCaptchaTaskById,
   getPublishCenterState as getRuntimePublishCenterState,
   syncPublishProgressEvent,
   syncPublishTaskRecord,
@@ -211,7 +212,20 @@ export class PublishImpl extends PublishApi {
           shopId: task.shopId,
           captchaMode: event.captchaMode,
         });
-        if (event.captchaMode === 'screenshot') {
+        const dialogSize = event.captchaDialogWidth && event.captchaDialogHeight
+          ? { width: event.captchaDialogWidth, height: event.captchaDialogHeight }
+          : undefined;
+        if (event.captchaMode === 'headed') {
+          // 最终发布的 punish 点选/滑块验证码：直接在真实有头窗口中呈现，让用户用原生鼠标完成，
+          // 并按淘宝返回的 dialogSize 把窗口调成其预期几何。完成后同步会话并继续发布。
+          void openCaptchaInHeadedBrowser(
+            event.captchaUrl,
+            task.shopId,
+            taskId,
+            this.buildHeadedCaptchaResumeHandler(taskId, task.shopId),
+            dialogSize,
+          );
+        } else if (event.captchaMode === 'screenshot') {
           // 图片上传验证码：通过 Playwright 截屏流呈现，验证码直接在有头会话中完成，
           // 无需将 Electron BrowserView cookie 注入 Playwright
           void showScreenshotCaptchaPanel(event.captchaUrl, task.shopId, taskId, () => {
@@ -219,7 +233,7 @@ export class PublishImpl extends PublishApi {
             const engine = new TbEngine(String(task.shopId), false);
             engine.setValidateAutoTag(true);
             void this.resumePublish(taskId);
-          });
+          }, dialogSize);
         } else {
           // 其他步骤验证码：Electron BrowserView 加载验证码 URL，通过后同步 cookie 到 Playwright
           showCaptchaPanel(event.captchaUrl, () => {
@@ -326,6 +340,69 @@ export class PublishImpl extends PublishApi {
     }
     const result = await this.startPublish(taskId);
     return { resumed: result.started };
+  }
+
+  /**
+   * 在真实有头浏览器窗口中打开当前任务的验证码，供用户用原生鼠标手动完成校验。
+   * 适用于右侧嵌入式面板多次滑动均失败的滑块验证码：原生窗口通过率更高。
+   * 用户在有头窗口完成验证后（页面跳转 / 点击注入的「继续发布」按钮），自动同步会话并继续发布。
+   */
+  async openCaptchaInBrowser(taskId: number): Promise<{ opened: boolean }> {
+    const snapshot = getCaptchaTaskById(taskId);
+    // 断点/重载场景快照里可能没有 captchaUrl，兜底读取当前正在展示的验证码地址（须在隐藏面板前读取）
+    const captchaUrl = snapshot?.captchaUrl || getActiveCaptchaUrl();
+    const shopId = snapshot?.shopId ?? 0;
+    if (!captchaUrl || !shopId) {
+      publishInfo(`[task:${taskId}] openCaptchaInBrowser skipped: missing captcha url or shopId`, {
+        hasSnapshot: Boolean(snapshot),
+        shopId,
+        captchaUrl,
+      });
+      return { opened: false };
+    }
+    publishInfo(`[task:${taskId}] open captcha in headed browser`, { shopId, captchaUrl });
+
+    return openCaptchaInHeadedBrowser(captchaUrl, shopId, taskId, this.buildHeadedCaptchaResumeHandler(taskId, shopId));
+  }
+
+  /**
+   * 构造「有头窗口验证码通过后」的恢复回调：
+   * 把有头窗口里通过校验后的会话 cookie 同步回发布所用的 context，再继续发布。
+   * 供自动呈现（最终发布 punish）与手动「在浏览器中打开」两条路径共用。
+   */
+  private buildHeadedCaptchaResumeHandler(taskId: number, shopId: number): () => void {
+    return () => {
+      void (async () => {
+        try {
+          // 把有头窗口里通过校验后的会话 cookie 同步到发布所用的（可能是无头的）context
+          const engine = new TbEngine(String(shopId), false);
+          const context = await engine.getContextOnly();
+          const cookies = context ? await context.cookies() : [];
+          const tbCookies = cookies
+            .filter((c) => c.domain && (
+              c.domain.includes('taobao.com') ||
+              c.domain.includes('tmall.com') ||
+              c.domain.includes('alipay.com') ||
+              c.domain.includes('alibaba.com')
+            ))
+            .map((c) => ({
+              name: c.name,
+              value: c.value,
+              domain: c.domain,
+              path: c.path || '/',
+              expires: c.expires,
+              httpOnly: c.httpOnly,
+              secure: c.secure,
+              sameSite: c.sameSite,
+            }));
+          await injectCookiesIntoTbContext(String(shopId), tbCookies);
+          engine.setValidateAutoTag(true);
+        } catch (err) {
+          publishInfo(`[task:${taskId}] headed captcha cookie sync failed, resuming anyway`, { error: String(err) });
+        }
+        await this.resumePublish(taskId);
+      })();
+    };
   }
 
   async cancelPublish(taskId: number): Promise<{ cancelled: boolean }> {

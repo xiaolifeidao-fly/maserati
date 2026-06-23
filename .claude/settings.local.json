@@ -93,7 +93,10 @@
       "Bash(echo \"app exit=$?\")",
       "Read(//Users/fly/.claude/projects/-Users-fly-Documents-develop-project-private-taobao-maserati/memory/**)",
       "Bash(cat MEMORY.md)",
-      "Bash(echo \"===exit $?===\")"
+      "Bash(echo \"===exit $?===\")",
+      "Bash(echo \"=== total TS errors: $\\(npx tsc --noEmit 2>&1)",
+      "Bash(cat src/eleapi/publish/publish-window.api.ts)",
+      "Bash(find src/impl -iname \"*publish-window*\" -o -iname \"*publish-captcha*\")"
     ]
   }
 }

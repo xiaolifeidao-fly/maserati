@@ -2,8 +2,7 @@ import { StepCode, StepStatus, STEP_ORDER } from '../types/publish-task';
 import type { StepResult } from '../core/publish-step';
 import { PublishStep } from '../core/publish-step';
 import type { StepContext } from '../core/step-context';
-import { PublishError } from '../core/errors';
-import { CaptchaChecker } from './captcha.step';
+import { PublishError, HeadedCaptchaRequiredError } from '../core/errors';
 import { publishInfo, summarizeForLog } from '../utils/publish-logger';
 import { ensurePublishPageForDraft } from './fill-draft.step';
 import type { NormalizedTbResponse } from '../utils/tb-publish-api';
@@ -47,8 +46,11 @@ export class PublishFinalStep extends PublishStep {
     ) as NormalizedTbResponse;
 
     // 验证码检测
+    // 最终发布触发的 punish/RGV587 多为点选/连字/滑块，靠点击坐标 + 真实行为轨迹判定，
+    // 合成鼠标几乎过不了。故在「真实有头窗口」中呈现，让用户用原生鼠标完成，并按淘宝返回的
+    // dialogSize 把窗口调成其预期几何（点选验证码为 mobile 竖屏布局）。
     if (result.captchaUrl) {
-      CaptchaChecker.require(this.stepCode, result.captchaUrl, result.validateUrl);
+      throw new HeadedCaptchaRequiredError(this.stepCode, result.captchaUrl, ctx.shopId, result.dialogSize);
     }
 
     // 参考旧代码：type == "warning" 视为发布失败，返回平台警告消息

@@ -1,4 +1,3 @@
-import axios from 'axios';
 import type { Page } from 'playwright';
 import type { TbDraftContext } from '../types/draft';
 import {
@@ -7,10 +6,12 @@ import {
   publishTaobaoRequestLog,
   publishTaobaoResponseLog,
   summarizeForLog,
+  writePublishSubmitPayload,
 } from './publish-logger';
 import { handleTbLoginRequired, handleTbMaybeLoginRequired } from './tb-login-state';
 import { StepCode } from '../types/publish-task';
 import { PublishError } from '../core/errors';
+import { humanDelay } from './human-timing';
 
 declare const navigator: any;
 
@@ -537,6 +538,8 @@ function buildDraftSubmitFormData(
 export interface NormalizedTbResponse extends Record<string, unknown> {
   captchaUrl?: string;
   validateUrl?: string;
+  /** 淘宝 punish/验证码返回的弹窗目标尺寸（已从 "375px" 解析为数字） */
+  dialogSize?: { width: number; height: number };
   itemId?: string;
   draftId?: string;
   dbDraftId?: string | number;
@@ -602,6 +605,75 @@ export function summarizeTbFailureForResult(response: NormalizedTbResponse): Rec
   };
 }
 
+/**
+ * 通过「页面内 fetch」发起淘宝接口请求，取代 Node 端 axios。
+ *
+ * 为什么：axios 在 Node 进程发请求，用的是 Node(OpenSSL) 的 TLS 栈，JA3/JA4 指纹与
+ * header 顺序都和浏览器会话不一致 —— 提交环节(submit.htm/draftOp)正是淘宝做
+ * TLS/header 一致性交叉校验的地方。改由渲染进程 fetch 发出后：TLS、header 顺序、
+ * sec-ch-ua / sec-fetch-* 、Cookie、Origin、Referer、User-Agent 全部由真实 Chrome 自动
+ * 注入并与会话一致。
+ *
+ * 前提：所有目标接口都在 item.upload.taobao.com，发布页本身也在该 origin → 同源，无 CORS。
+ * 因此 Cookie/Origin/Referer/User-Agent 等「forbidden header」无需(也无法)手工传，
+ * 浏览器会接管；这里只透传 x-xsrf-token / X-Requested-With / Content-Type / Accept* 等自定义头。
+ *
+ * 返回结构与 axios 对齐(`{ status, data }`，data 为响应文本)，方便各调用点无痛替换。
+ */
+async function tbBrowserRequest(
+  page: Page,
+  method: 'GET' | 'POST',
+  url: string,
+  data: Record<string, unknown> | undefined,
+  headers: Record<string, string>,
+  timeoutMs = 30000,
+): Promise<{ status: number; data: string }> {
+  // 浏览器会自动接管/锁定的头，手工传只会被忽略，这里直接剔除避免误导
+  const FORBIDDEN = new Set([
+    'cookie', 'origin', 'referer', 'user-agent', 'host',
+    'content-length', 'connection', 'accept-encoding',
+  ]);
+  const safeHeaders: Record<string, string> = {};
+  for (const [k, v] of Object.entries(headers || {})) {
+    if (!FORBIDDEN.has(k.toLowerCase())) safeHeaders[k] = v;
+  }
+
+  // 复刻 axios 对「平铺对象 + urlencoded」的序列化(本项目所有 data 均为 Record<string,string>)
+  let body: string | undefined;
+  if (method === 'POST') {
+    const usp = new URLSearchParams();
+    for (const [k, v] of Object.entries(data || {})) {
+      usp.append(k, typeof v === 'string' ? v : String(v ?? ''));
+    }
+    body = usp.toString();
+  }
+
+  const result = await page.evaluate(
+    (args: { url: string; method: string; body?: string; headers: Record<string, string>; timeoutMs: number }) => {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), args.timeoutMs);
+      return fetch(args.url, {
+          method: args.method,
+          headers: args.headers,
+          body: args.method === 'POST' ? (args.body ?? '') : undefined,
+          credentials: 'include',
+          signal: controller.signal,
+        })
+        .then((resp) => resp.text().then((text) => ({ status: resp.status, data: text, error: '' })))
+        .catch((e) => ({ status: 0, data: '', error: String((e && (e as { message?: string }).message) || e) }))
+        .finally(() => {
+          clearTimeout(timer);
+        });
+    },
+    { url, method, body, headers: safeHeaders, timeoutMs },
+  );
+
+  if (result.status === 0 && result.error) {
+    throw new Error(`[tb-browser-request] 页面内 fetch 失败(${method} ${url}): ${result.error}`);
+  }
+  return { status: result.status, data: result.data };
+}
+
 export async function submitDraftToTaobao(
   taskId: number,
   shopId: number,
@@ -637,15 +709,15 @@ export async function submitDraftToTaobao(
     },
   });
 
-  const response = await axios.post<string>(
+  // 拟人化：保存草稿前的短暂「填写收尾」停留，避免开页瞬发
+  await humanDelay(1200, 4000);
+
+  const response = await tbBrowserRequest(
+    page,
+    'POST',
     `${TB_DRAFT_UPDATE_URL}?catId=${draftContext.catId}`,
     data,
-    {
-      headers,
-      timeout: 30000,
-      responseType: 'text',
-      transformResponse: [raw => raw],
-    },
+    headers,
   );
 
   await handleTbMaybeLoginRequired(StepCode.FILL_DRAFT, shopId, response.data);
@@ -704,12 +776,7 @@ export async function syncCustomSalePropsToTaobao(
     },
   });
 
-  const response = await axios.post<string>(requestUrl, data, {
-    headers,
-    timeout: 30000,
-    responseType: 'text',
-    transformResponse: [raw => raw],
-  });
+  const response = await tbBrowserRequest(page, 'POST', requestUrl, data, headers);
 
   await handleTbMaybeLoginRequired(StepCode.FILL_DRAFT, shopId, response.data);
   const rawData = parseTaobaoResponseText(response.data, '淘宝自定义销售属性接口');
@@ -760,24 +827,46 @@ export async function publishToTaobao(
     globalExtendInfo: JSON.stringify(globalExtendInfo),
   };
 
+  // 将最终提交发布的数据写入独立 JSON 文件，并在发布日志中体现文件地址
+  const submitPayloadFilePath = writePublishSubmitPayload(
+    {
+      taskId,
+      shopId,
+      url: TB_PUBLISH_URL,
+      catId: draftContext.catId,
+      draftId: draftContext.draftId,
+      itemId: draftContext.itemId,
+      copyItemMode: 0,
+      jsonBody,
+      globalExtendInfo,
+    },
+    { taskId },
+  );
+  publishInfo(`[task:${taskId}] [TB] [final-publish-direct] 最终提交发布数据已写入文件`, {
+    taskId,
+    catId: draftContext.catId,
+    draftId: draftContext.draftId,
+    itemId: draftContext.itemId,
+    submitPayloadFile: submitPayloadFilePath ?? '(写入失败)',
+  });
+
   publishTaobaoRequestLog(taskId, 'final-publish-direct', {
     url: TB_PUBLISH_URL,
     method: 'POST',
     catId: draftContext.catId,
     draftId: draftContext.draftId,
     itemId: draftContext.itemId,
+    submitPayloadFile: submitPayloadFilePath,
     input: {
       headers: summarizeForLog(headers),
       data: summarizeForLog(data),
     },
   });
 
-  const response = await axios.post<string>(TB_PUBLISH_URL, data, {
-    headers,
-    timeout: 30000,
-    responseType: 'text',
-    transformResponse: [raw => raw],
-  });
+  // 拟人化：点「发布」前真人会通览整个表单，这里给一段较长的审核停留
+  await humanDelay(3000, 12000);
+
+  const response = await tbBrowserRequest(page, 'POST', TB_PUBLISH_URL, data, headers);
 
   await handleTbMaybeLoginRequired(StepCode.PUBLISH, shopId, response.data);
   const rawData = parseTaobaoResponseText(response.data, '淘宝发布商品接口');
@@ -828,12 +917,7 @@ export async function listTaobaoDrafts(
     },
   });
 
-  const response = await axios.get<string>(requestUrl, {
-    headers,
-    timeout: 30000,
-    responseType: 'text',
-    transformResponse: [raw => raw],
-  });
+  const response = await tbBrowserRequest(page, 'GET', requestUrl, undefined, headers);
 
   await handleTbMaybeLoginRequired(StepCode.FILL_DRAFT, shopId, response.data);
   const rawData = parseTaobaoResponseText(response.data, '淘宝草稿列表接口') as TaobaoDraftListResponse;
@@ -897,12 +981,7 @@ export async function deleteTaobaoDraftById(
     },
   });
 
-  const response = await axios.post<string>(requestUrl, data, {
-    headers,
-    timeout: 30000,
-    responseType: 'text',
-    transformResponse: [raw => raw],
-  });
+  const response = await tbBrowserRequest(page, 'POST', requestUrl, data, headers);
 
   await handleTbMaybeLoginRequired(StepCode.FILL_DRAFT, shopId, response.data);
   const rawData = parseTaobaoResponseText(response.data, '淘宝删除草稿接口');
@@ -961,12 +1040,7 @@ export async function deleteTaobaoDraft(
     },
   });
 
-  const response = await axios.post<string>(requestUrl, data, {
-    headers,
-    timeout: 30000,
-    responseType: 'text',
-    transformResponse: [raw => raw],
-  });
+  const response = await tbBrowserRequest(page, 'POST', requestUrl, data, headers);
 
   await handleTbMaybeLoginRequired(StepCode.PUBLISH, shopId, response.data);
   const rawData = parseTaobaoResponseText(response.data, '淘宝删除草稿接口');
@@ -1067,12 +1141,7 @@ export async function fetchTbCatPropAsyncOpt(
     input: { data: summarizeForLog(data) },
   });
 
-  const response = await axios.post<string>(requestUrl, data, {
-    headers,
-    timeout: 30000,
-    responseType: 'text',
-    transformResponse: [raw => raw],
-  });
+  const response = await tbBrowserRequest(page, 'POST', requestUrl, data, headers);
 
   await handleTbMaybeLoginRequired(StepCode.FILL_DRAFT, shopId, response.data);
   const rawData = parseTaobaoResponseText(response.data, '淘宝商品属性扩展接口');
@@ -1164,6 +1233,16 @@ export async function buildTaobaoHeaders(
   };
 }
 
+/** 将淘宝 dialogSize（形如 {width:"375px",height:"665px"}）解析为数字尺寸 */
+export function parseTbDialogSize(raw: unknown): { width: number; height: number } | undefined {
+  const size = raw as { width?: unknown; height?: unknown } | undefined;
+  if (!size || typeof size !== 'object') return undefined;
+  const toPx = (v: unknown): number => Math.round(Number(String(v ?? '').replace(/px$/i, '').trim()) || 0);
+  const width = toPx(size.width);
+  const height = toPx(size.height);
+  return width > 0 && height > 0 ? { width, height } : undefined;
+}
+
 function normalizeTbResponse(data: NormalizedTbResponse): NormalizedTbResponse {
   const result = { ...(data ?? {}) };
   const ret = Array.isArray((result as any).ret) ? (result as any).ret : [];
@@ -1177,6 +1256,10 @@ function normalizeTbResponse(data: NormalizedTbResponse): NormalizedTbResponse {
   if (retCode === 'FAIL_SYS_USER_VALIDATE') {
     result.captchaUrl = String((result as any).data?.url ?? '');
     result.validateUrl = result.captchaUrl;
+    const dialogSize = parseTbDialogSize((result as any).data?.dialogSize ?? (result as any).dialogSize);
+    if (dialogSize) {
+      result.dialogSize = dialogSize;
+    }
   }
 
   const inferredSuccess = inferTbSuccess(result);

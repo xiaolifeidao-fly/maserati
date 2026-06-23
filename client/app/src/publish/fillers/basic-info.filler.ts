@@ -1,5 +1,6 @@
 import type { IFiller, FillerContext } from './filler.interface';
 import { findLowestPositivePriceInStock, formatPrice } from './price.utils';
+import { filterTitle } from './title.utils';
 
 /**
  * BasicInfoFiller — 基本信息填充器
@@ -17,8 +18,9 @@ export class BasicInfoFiller implements IFiller {
   async fill(ctx: FillerContext): Promise<void> {
     const { product, uploadedMainImages, draftPayload } = ctx;
 
-    // 标题（淘宝限 60 字）
-    draftPayload['title'] = product.title.slice(0, 60);
+    // 标题：先过滤违规关键词（规则来自服务端），再按淘宝限制截断至 60 字
+    const filteredTitle = await filterTitle(product.title, { taskId: ctx.taskId });
+    draftPayload['title'] = filteredTitle.slice(0, 60);
 
     draftPayload['shopping_title'] = '';
 

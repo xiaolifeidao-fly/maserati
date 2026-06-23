@@ -44,6 +44,7 @@ import {
   type TaobaoDraftListResponse,
 } from '../utils/tb-publish-api';
 import { ensureTbShopLoggedIn, handleTbMaybeLoginRequired } from '../utils/tb-login-state';
+import { humanClick } from '../utils/human-timing';
 import {
   getTaskWindowJson,
   interceptWindowJson,
@@ -182,11 +183,11 @@ function parseRequestForm(postData: string): Record<string, string> {
 }
 
 async function clickTbSaveDraftButton(page: Page): Promise<void> {
-  await page
+  const saveBtn = page
     .locator(TB_SAVE_DRAFT_SELECTOR)
     .filter({ hasText: new RegExp(`^\\s*${TB_SAVE_DRAFT_TEXT}\\s*$`) })
-    .first()
-    .click();
+    .first();
+  await humanClick(saveBtn);
 }
 
 export async function detectTbSaleSpecUiState(page: Page): Promise<TbSaleSpecUiState> {
@@ -523,7 +524,7 @@ export class FillDraftStep extends PublishStep {
     try {
       const protocolBtn = page.locator(TB_PROTOCOL_BTN_SELECTOR);
       if (await protocolBtn.first().isVisible({ timeout: 2000 })) {
-        await protocolBtn.first().click();
+        await humanClick(protocolBtn.first());
       }
     } catch {
       // 无弹窗，忽略

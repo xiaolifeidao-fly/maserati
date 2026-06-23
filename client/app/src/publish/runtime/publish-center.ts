@@ -447,6 +447,11 @@ class PublishCenterStore {
     this.ensureHydrated();
     return this.getSortedTasks().find((task) => task.waitingForCaptcha && task.captchaUrl);
   }
+
+  getCaptchaTaskById(taskId: number): PublishRuntimeTaskSnapshot | undefined {
+    this.ensureHydrated();
+    return this.taskMap.get(taskId);
+  }
 }
 
 const publishCenterStore = new PublishCenterStore();
@@ -472,4 +477,8 @@ export function announcePublishBatchFromTask(task: PublishTaskRecord): void {
 
 export function getLatestCaptchaTask() {
   return publishCenterStore.getLatestCaptchaTask();
+}
+
+export function getCaptchaTaskById(taskId: number) {
+  return publishCenterStore.getCaptchaTaskById(taskId);
 }

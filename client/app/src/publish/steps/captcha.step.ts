@@ -1,4 +1,4 @@
-import { CaptchaRequiredError } from '../core/errors';
+import { CaptchaRequiredError, type CaptchaDialogSize } from '../core/errors';
 import type { StepCode } from '../types/publish-task';
 
 /**
@@ -35,8 +35,13 @@ export class CaptchaChecker {
   /**
    * 直接抛出验证码错误（已明确有验证码时使用）
    */
-  static require(stepCode: StepCode, captchaUrl: string, validateUrl?: string): never {
-    throw new CaptchaRequiredError(stepCode, captchaUrl, validateUrl);
+  static require(
+    stepCode: StepCode,
+    captchaUrl: string,
+    validateUrl?: string,
+    dialogSize?: CaptchaDialogSize,
+  ): never {
+    throw new CaptchaRequiredError(stepCode, captchaUrl, validateUrl, dialogSize);
   }
 
   private static extractCaptchaUrl(body: string): string | null {

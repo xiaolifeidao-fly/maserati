@@ -23,6 +23,9 @@ export class PublishError extends Error {
   }
 }
 
+/** 淘宝验证码弹窗的目标尺寸（dialogSize），用于按其预期几何渲染点选/滑块验证码 */
+export type CaptchaDialogSize = { width: number; height: number };
+
 /**
  * 需要人工处理验证码时抛出此错误
  * StepChain 捕获后暂停流程，等待渲染进程反馈验证码结果
@@ -30,12 +33,15 @@ export class PublishError extends Error {
 export class CaptchaRequiredError extends PublishError {
   readonly captchaUrl: string;
   readonly validateUrl?: string;
+  /** 淘宝返回的验证码弹窗尺寸（如 punish 的 375×665），呈现时据此对齐布局/坐标基准 */
+  readonly dialogSize?: CaptchaDialogSize;
 
-  constructor(stepCode: StepCode, captchaUrl: string, validateUrl?: string) {
+  constructor(stepCode: StepCode, captchaUrl: string, validateUrl?: string, dialogSize?: CaptchaDialogSize) {
     super(stepCode, '需要验证码', true);
     this.name = 'CaptchaRequiredError';
     this.captchaUrl = captchaUrl;
     this.validateUrl = validateUrl;
+    this.dialogSize = dialogSize;
   }
 }
 
@@ -57,11 +63,32 @@ export class StepSkippedError extends PublishError {
 export class ScreenshotCaptchaRequiredError extends CaptchaRequiredError {
   readonly shopId: number;
 
-  constructor(stepCode: StepCode, captchaUrl: string, shopId: number) {
-    super(stepCode, captchaUrl);
+  constructor(stepCode: StepCode, captchaUrl: string, shopId: number, dialogSize?: CaptchaDialogSize) {
+    super(stepCode, captchaUrl, undefined, dialogSize);
     this.name = 'ScreenshotCaptchaRequiredError';
     this.shopId = shopId;
   }
+}
+
+/**
+ * 需要在「真实有头浏览器窗口」中完成的验证码（点选 / 连字 / 滑块类）。
+ *
+ * 与 ScreenshotCaptchaRequiredError（Playwright 截屏流 + 合成鼠标）的区别：
+ * 这类验证码靠点击坐标 + 真实行为轨迹判定，合成鼠标几乎无法通过，故直接把同 shopId 的
+ * 有头窗口带到前台，让用户用原生鼠标完成。最终发布触发的 punish/RGV587 校验即属此类。
+ */
+export class HeadedCaptchaRequiredError extends CaptchaRequiredError {
+  readonly shopId: number;
+
+  constructor(stepCode: StepCode, captchaUrl: string, shopId: number, dialogSize?: CaptchaDialogSize) {
+    super(stepCode, captchaUrl, undefined, dialogSize);
+    this.name = 'HeadedCaptchaRequiredError';
+    this.shopId = shopId;
+  }
+}
+
+export function isHeadedCaptchaError(err: unknown): err is HeadedCaptchaRequiredError {
+  return err instanceof HeadedCaptchaRequiredError;
 }
 
 export function isCaptchaError(err: unknown): err is CaptchaRequiredError {

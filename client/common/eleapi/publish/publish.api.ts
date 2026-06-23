@@ -134,6 +134,16 @@ export class PublishApi extends ElectronApi {
   }
 
   /**
+   * 在真实有头浏览器窗口中打开当前任务的验证码，供用户用原生鼠标手动完成校验。
+   * 适用于右侧嵌入式面板多次滑动均失败的滑块验证码。
+   * 用户验证完成后主进程自动同步会话并继续发布。
+   */
+  @InvokeType(Protocols.INVOKE)
+  async openCaptchaInBrowser(taskId: number): Promise<{ opened: boolean }> {
+    return this.invokeApi('openCaptchaInBrowser', taskId);
+  }
+
+  /**
    * 用户点击"处理"后调用：打开指定店铺的淘宝登录窗口（Playwright）。
    * 登录成功后主进程自动恢复暂停中的发布任务。
    */
