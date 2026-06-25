@@ -24,6 +24,7 @@ import type {
   PublishTaskQuery,
   PublishProgressEvent,
   PublishBatchRepublishStats,
+  TaobaoFreightTemplateOption,
 } from '@src/publish/types/publish-task';
 import { StepCode, StepStatus, TaskStatus } from '@src/publish/types/publish-task';
 import type { PageResult } from '@eleapi/commerce/commerce.api';
@@ -35,6 +36,7 @@ import {
   previewPublishProductLog,
   publishError,
   publishInfo,
+  publishWarn,
   registerPublishTaskLogFile,
   getPublishTaskLogFilePath,
   showPublishLogFileInFolder,
@@ -54,6 +56,11 @@ import {
   persistPublishStepPayload,
 } from '@src/publish/runtime/publish-step-store';
 import { getPublishRelatedWebContents } from '@src/publish/publish-window';
+import {
+  listTaobaoFreightTemplates,
+  openTaobaoFreightTemplateSession,
+} from '@src/publish/utils/taobao-freight-template';
+import { freightTemplateCacheDb } from '@src/publish/cache/freight-template-cache.db';
 
 function mapElectronSameSite(sameSite?: string): 'Strict' | 'Lax' | 'None' {
   if (sameSite === 'strict') return 'Strict';
@@ -509,6 +516,65 @@ export class PublishImpl extends PublishApi {
     if (page) {
       await page.bringToFront();
     }
+  }
+
+  async listTaobaoFreightTemplates(
+    shopId: number,
+    name?: string,
+    options?: { forceRefresh?: boolean },
+  ): Promise<TaobaoFreightTemplateOption[]> {
+    const forceRefresh = Boolean(options?.forceRefresh);
+    publishInfo('[freight-template] list request received from publish config', {
+      shopId,
+      name: name ?? '',
+      forceRefresh,
+    });
+    if (!Number.isFinite(shopId) || shopId <= 0) {
+      publishWarn('[freight-template] list skipped: invalid shopId', { shopId });
+      return [];
+    }
+
+    await freightTemplateCacheDb.ensureInit();
+    if (!forceRefresh && !String(name ?? '').trim()) {
+      const cached = freightTemplateCacheDb.get(shopId);
+      if (cached) {
+        publishInfo('[freight-template] cache hit', {
+          shopId,
+          count: cached.templates.length,
+          updatedAt: cached.updatedAt,
+        });
+        return cached.templates;
+      }
+      publishInfo('[freight-template] cache miss', { shopId });
+    }
+
+    const session = await openTaobaoFreightTemplateSession(undefined, shopId);
+    if (!session) {
+      publishWarn('[freight-template] list skipped: session unavailable', { shopId });
+      throw new Error('当前店铺卖家后台登录已失效，请重新登录后再加载物流运费模板');
+    }
+
+    const templates = await listTaobaoFreightTemplates({
+      name,
+      cookieString: session.cookieString,
+      userAgent: session.userAgent,
+      pageIndex: 1,
+      pageSize: 100,
+    });
+    if (!String(name ?? '').trim()) {
+      freightTemplateCacheDb.upsert(shopId, templates);
+      publishInfo('[freight-template] cache updated', {
+        shopId,
+        count: templates.length,
+      });
+    }
+    publishInfo('[freight-template] list request completed', {
+      shopId,
+      name: name ?? '',
+      count: templates.length,
+      templates,
+    });
+    return templates;
   }
 
   async handlePublishLoginRequired(taskId: number, shopId: number): Promise<{ handled: boolean }> {

@@ -54,6 +54,7 @@ import { normalizeCollectSourceType } from "@/app/(console)/collection/api/colle
 import { IconOnlyButton } from "@/components/manager-shell/IconOnlyButton";
 import { getPublishApi } from "@/utils/publish";
 import { getPublishWindowApi } from "@/utils/publish-window";
+import type { TaobaoFreightTemplateOption } from "@eleapi/publish/publish.api";
 
 // ─── 价格设置持久化 ─────────────────────────────────────────────────────────────
 
@@ -353,6 +354,10 @@ export function ProductPublishModal({
   const [priceSettings, setPriceSettings] = useState<PublishSettings>(loadPriceSettings);
   const [priceRatioInput, setPriceRatioInput] = useState(() => formatEditableNumber(loadPriceSettings().floatRatio));
   const [priceAmountInput, setPriceAmountInput] = useState(() => formatEditableNumber(loadPriceSettings().floatAmount));
+  const [freightTemplates, setFreightTemplates] = useState<TaobaoFreightTemplateOption[]>([]);
+  const [freightTemplatesLoading, setFreightTemplatesLoading] = useState(false);
+  const [freightTemplatesLoadedShopId, setFreightTemplatesLoadedShopId] = useState(0);
+  const [selectedFreightTemplateId, setSelectedFreightTemplateId] = useState<string | undefined>(undefined);
   const [publishQueue, setPublishQueue] = useState<PublishQueueItem[]>([]);
   const [publishRunning, setPublishRunning] = useState(false);
   const [fetchingFavorites, setFetchingFavorites] = useState(false);
@@ -439,6 +444,10 @@ export function ProductPublishModal({
     setPriceSettings(nextPriceSettings);
     setPriceRatioInput(formatEditableNumber(nextPriceSettings.floatRatio));
     setPriceAmountInput(formatEditableNumber(nextPriceSettings.floatAmount));
+    setFreightTemplates([]);
+    setFreightTemplatesLoading(false);
+    setFreightTemplatesLoadedShopId(0);
+    setSelectedFreightTemplateId(undefined);
     setResumingTaskIds([]);
     setRestoredFromCenter(directToProgress);
     setRecoveryMode(directToProgress ? "continue" : "undecided");
@@ -752,6 +761,11 @@ export function ProductPublishModal({
     selectedTargetShop && selectedTargetShop.authorizationStatus !== "AUTHORIZED",
   );
 
+  const selectedFreightTemplate = useMemo(
+    () => freightTemplates.find((template) => template.templateId === selectedFreightTemplateId) ?? null,
+    [freightTemplates, selectedFreightTemplateId],
+  );
+
   const showBatchHistory = isCollectionBatchEntry;
   const selectedBatchRepublishStats = selectedBatchId > 0 && showBatchHistory
     ? republishStatsByBatchId[selectedBatchId]
@@ -843,6 +857,70 @@ export function ProductPublishModal({
       cancelled = true;
     };
   }, [open, republishStatsByBatchId, republishStatsLoadingBatchIds, selectedBatchId, showBatchHistory]);
+
+  const resetFreightTemplates = () => {
+    setSelectedFreightTemplateId(undefined);
+    setFreightTemplates([]);
+    setFreightTemplatesLoadedShopId(0);
+  };
+
+  const loadFreightTemplates = async (forceRefresh = false) => {
+    console.info("[publish-config][freight-template] dropdown requested", {
+      open,
+      selectedTargetPlatform,
+      selectedTargetShopId,
+      selectedTargetShopNeedsLogin,
+      selectedTargetShopNotAuthorized,
+      loadedShopId: freightTemplatesLoadedShopId,
+      currentCount: freightTemplates.length,
+      forceRefresh,
+    });
+
+    if (!open || selectedTargetPlatform !== "tb") {
+      return;
+    }
+    if (selectedTargetShopId <= 0) {
+      message.warning("请先选择淘宝店铺");
+      return;
+    }
+    if (selectedTargetShopNeedsLogin || selectedTargetShopNotAuthorized) {
+      message.warning(selectedTargetShopNeedsLogin ? SHOP_LOGIN_REQUIRED_MESSAGE : "当前选中的店铺尚未授权");
+      return;
+    }
+    if (!forceRefresh && freightTemplatesLoadedShopId === selectedTargetShopId) {
+      console.info("[publish-config][freight-template] skip reload for loaded shop", {
+        shopId: selectedTargetShopId,
+        count: freightTemplates.length,
+      });
+      return;
+    }
+
+    setFreightTemplatesLoading(true);
+    try {
+      const templates = await getPublishApi().listTaobaoFreightTemplates(
+        selectedTargetShopId,
+        undefined,
+        { forceRefresh },
+      );
+      const nextTemplates = Array.isArray(templates) ? templates : [];
+      console.info("[publish-config][freight-template] loaded", {
+        shopId: selectedTargetShopId,
+        count: nextTemplates.length,
+        forceRefresh,
+        templates: nextTemplates,
+      });
+      setFreightTemplates(nextTemplates);
+      setFreightTemplatesLoadedShopId(selectedTargetShopId);
+      if (nextTemplates.length === 0) {
+        message.warning("当前店铺未加载到物流运费模板，请查看日志排查淘宝接口返回");
+      }
+    } catch (error) {
+      console.warn("[publish-config][freight-template] load failed", error);
+      message.error(error instanceof Error ? error.message : "加载物流运费模板失败");
+    } finally {
+      setFreightTemplatesLoading(false);
+    }
+  };
 
   useEffect(() => {
     if (!open || !selectedBatchId) return;
@@ -1335,12 +1413,15 @@ export function ProductPublishModal({
           if (!item.sourceProductId) {
             throw new Error("缺少源商品 ID，无法创建发布任务");
           }
+          const freightTemplateRemark = selectedFreightTemplate
+            ? `;freightTemplateId:${encodeURIComponent(selectedFreightTemplate.templateId)};freightTemplateName:${encodeURIComponent(selectedFreightTemplate.name || "")}`
+            : "";
           const createdTask = await publishApi.createPublishTask({
             shopId: item.shopId,
             sourceType: sourceType as Parameters<typeof publishApi.createPublishTask>[0]["sourceType"],
             sourceProductId: item.sourceProductId,
             sourceRecordId: item.sourceRecordId,
-            remark: `batch:${item.sourceBatchId};batchName:${encodeURIComponent(selectedBatch.name || `发布批次 #${item.sourceBatchId}`)};record:${item.sourceRecordId};targetShop:${item.shopId};entryScene:${initialEntryScene};publishStrategy:${priceSettings.strategy};priceRatio:${priceSettings.floatRatio};priceAmount:${priceSettings.floatAmount};brandMode:${priceSettings.brandMode}`,
+            remark: `batch:${item.sourceBatchId};batchName:${encodeURIComponent(selectedBatch.name || `发布批次 #${item.sourceBatchId}`)};record:${item.sourceRecordId};targetShop:${item.shopId};entryScene:${initialEntryScene};publishStrategy:${priceSettings.strategy};priceRatio:${priceSettings.floatRatio};priceAmount:${priceSettings.floatAmount};brandMode:${priceSettings.brandMode}${freightTemplateRemark}`,
           });
 
           if (publishRunIdRef.current !== runId || stopRequestedRef.current) {
@@ -2146,6 +2227,7 @@ export function ProductPublishModal({
                 onChange={(value) => {
                   setSelectedTargetPlatform(String(value || "tb"));
                   setSelectedTargetShopId(0);
+                  resetFreightTemplates();
                 }}
                 options={[
                   { label: "淘宝", value: "tb" },
@@ -2158,7 +2240,10 @@ export function ProductPublishModal({
               <Select
                 value={selectedTargetShopId || undefined}
                 placeholder={`请选择要发布到的${selectedTargetPlatform === "tb" ? "淘宝" : "拼多多"}店铺`}
-                onChange={(value) => setSelectedTargetShopId(Number(value ?? 0))}
+                onChange={(value) => {
+                  setSelectedTargetShopId(Number(value ?? 0));
+                  resetFreightTemplates();
+                }}
                 options={publishShops.map((shop) => {
                   const loggedIn = shop.loginStatus === "LOGGED_IN";
                   const suffix = !loggedIn ? " · 未登录" : "";
@@ -2248,7 +2333,7 @@ export function ProductPublishModal({
                 <div>
                   <div className="manager-panel-title">发布配置</div>
                   <div className="manager-muted" style={{ marginTop: 6, fontSize: 13 }}>
-                    统一设置价格、品牌和上架策略，调整会自动保存到本机。
+                    统一设置价格、品牌、物流模板和上架策略；物流模板仅作用于本次发布批次。
                   </div>
                 </div>
                 {renderMetricCard("示例售价", `${(100 * priceSettings.floatRatio + priceSettings.floatAmount).toFixed(2)} 元`, "success")}
@@ -2314,6 +2399,44 @@ export function ProductPublishModal({
                     </div>
                   </div>
 
+                  <div style={{ marginBottom: 16 }}>
+                    <div className="publish-field-label">物流运费模板</div>
+                    <Space.Compact style={{ width: "100%" }}>
+                      <Select
+                        value={selectedFreightTemplateId}
+                        onChange={(value) => setSelectedFreightTemplateId(value ? String(value) : undefined)}
+                        options={freightTemplates.map((template) => ({
+                          label: `${template.name || "未命名模板"} · ${template.templateId}`,
+                          value: template.templateId,
+                        }))}
+                        placeholder={freightTemplatesLoading ? "正在加载模板" : "不预设，按现有逻辑自动匹配"}
+                        style={{ width: "100%" }}
+                        size="large"
+                        loading={freightTemplatesLoading}
+                        disabled={selectedTargetPlatform !== "tb" || freightTemplatesLoading}
+                        onDropdownVisibleChange={(visible) => {
+                          if (visible) {
+                            void loadFreightTemplates();
+                          }
+                        }}
+                        allowClear
+                        showSearch
+                        filterOption={(input, option) =>
+                          String(option?.label ?? "").toLowerCase().includes(input.toLowerCase())
+                        }
+                      />
+                      <IconOnlyButton
+                        icon={<ReloadOutlined />}
+                        shape="default"
+                        tooltip="刷新物流运费模板"
+                        size="large"
+                        loading={freightTemplatesLoading}
+                        disabled={selectedTargetPlatform !== "tb" || selectedTargetShopId <= 0}
+                        onClick={() => void loadFreightTemplates(true)}
+                      />
+                    </Space.Compact>
+                  </div>
+
                   <IconOnlyButton type="link" shape="default" icon={<ReloadOutlined />} tooltip="恢复默认值（×1.3 + 0 元）" style={{ paddingInline: 0 }} onClick={handleResetPriceSettings} />
                 </div>
 
@@ -2327,7 +2450,7 @@ export function ProductPublishModal({
                     原价 × {priceSettings.floatRatio} + {priceSettings.floatAmount} 元
                   </div>
                   <div className="manager-muted" style={{ fontSize: 12, lineHeight: 1.7 }}>
-                    示例：原价 100 元，发布价约为 {(100 * priceSettings.floatRatio + priceSettings.floatAmount).toFixed(2)} 元。若选择立即上架，请确认标题、图片、库存与店铺登录状态已准备好。
+                    示例：原价 100 元，发布价约为 {(100 * priceSettings.floatRatio + priceSettings.floatAmount).toFixed(2)} 元。物流模板：{selectedFreightTemplate ? selectedFreightTemplate.name || selectedFreightTemplate.templateId : "不预设"}。
                   </div>
                 </div>
               </div>
@@ -2391,6 +2514,9 @@ export function ProductPublishModal({
                       </Descriptions.Item>
                       <Descriptions.Item label="品牌配置">
                         {priceSettings.brandMode === "none" ? "无品牌" : "跟随原商品"}
+                      </Descriptions.Item>
+                      <Descriptions.Item label="物流模板">
+                        {selectedFreightTemplate ? selectedFreightTemplate.name || selectedFreightTemplate.templateId : "不预设"}
                       </Descriptions.Item>
                       <Descriptions.Item label="选品总数">
                         {selectedBatchRepublishStatsLoading

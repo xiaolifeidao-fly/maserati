@@ -108,6 +108,7 @@
     "axios": "^1.7.2",
     "builder-util-runtime": "^9.2.10",
     "cheerio": "^1.0.0",
+    "chrome-launcher": "^0.15.2",
     "class-transformer": "^0.5.1",
     "combined-stream": "^1.0.8",
     "concurrently": "^9.2.1",

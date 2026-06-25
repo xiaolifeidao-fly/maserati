@@ -40,12 +40,19 @@ import { clearPublishStepPayloads } from '../runtime/publish-step-store';
 import { clearImageCropMeta } from './publish-image-meta-store';
 import { cleanupPublishImages } from '../steps/upload-images.step';
 import { clearTaskWindowJson } from '../utils/window-json.memory';
-import type { PublishBrandMode, PublishConfig, PublishPriceSettings, PublishStrategy } from '../types/publish-task';
+import type {
+  PublishBrandMode,
+  PublishConfig,
+  PublishFreightTemplateConfig,
+  PublishPriceSettings,
+  PublishStrategy,
+} from '../types/publish-task';
 
 function parseTaskPublishConfig(remark?: string): PublishConfig {
   const priceSettings: PublishPriceSettings = { floatRatio: 1.3, floatAmount: 0 };
   let strategy: PublishStrategy = 'warehouse';
   let brandMode: PublishBrandMode = 'follow_source';
+  let freightTemplate: PublishFreightTemplateConfig | undefined;
 
   for (const part of String(remark ?? '').split(';')) {
     const [rawKey, ...rest] = part.split(':');
@@ -75,6 +82,20 @@ function parseTaskPublishConfig(remark?: string): PublishConfig {
     }
     if (key === 'brandMode' && (value === 'none' || value === 'follow_source')) {
       brandMode = value;
+      continue;
+    }
+    if (key === 'freightTemplateId') {
+      freightTemplate = {
+        templateId: decodeURIComponent(value),
+        name: freightTemplate?.name,
+      };
+      continue;
+    }
+    if (key === 'freightTemplateName') {
+      freightTemplate = {
+        templateId: freightTemplate?.templateId ?? '',
+        name: decodeURIComponent(value),
+      };
     }
   }
 
@@ -82,6 +103,7 @@ function parseTaskPublishConfig(remark?: string): PublishConfig {
     strategy,
     priceSettings,
     brandMode,
+    freightTemplate: freightTemplate?.templateId ? freightTemplate : undefined,
   };
 }
 

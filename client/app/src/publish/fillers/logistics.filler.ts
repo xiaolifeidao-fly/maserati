@@ -4,6 +4,11 @@ import { publishInfo, publishWarn } from '../utils/publish-logger';
 import { TbEngine } from '@src/browser/tb.engine';
 import { PublishError } from '../core/errors';
 import { StepCode } from '../types/publish-task';
+import {
+  fetchTaobaoFreightTemplateIdByName,
+  TB_FREIGHT_TEMPLATE_CREATE_API,
+  TB_FREIGHT_TEMPLATE_PAGE,
+} from '../utils/taobao-freight-template';
 import axios from 'axios';
 
 declare const navigator: { userAgent: string };
@@ -93,6 +98,7 @@ export class LogisticsFiller implements IFiller {
     // ── tbExtractWay 解析（按优先级依次尝试）────────────────────────────────────
     publishInfo(`[task:${taskId}] [LogisticsFiller] ⑤ 开始解析 templateId`, {
       taskId,
+      p0_publishConfigTemplate: ctx.publishConfig?.freightTemplate ?? null,
       p1_productTemplateId: logistics.templateId ?? null,
       p2_keyword: shipFromKeyword,
       p2_templateOptions: templateOptions,
@@ -103,14 +109,27 @@ export class LogisticsFiller implements IFiller {
 
     let resolvedTemplateId: string | null = null;
 
+    // 优先级 0：发布配置预设运费模板
+    const configuredTemplate = ctx.publishConfig?.freightTemplate;
+    if (configuredTemplate?.templateId) {
+      resolvedTemplateId = String(configuredTemplate.templateId);
+      publishInfo(`[task:${taskId}] [LogisticsFiller] ⑤-P0 hit: publishConfig.freightTemplate`, {
+        taskId,
+        templateId: resolvedTemplateId,
+        templateName: configuredTemplate.name ?? null,
+      });
+    } else {
+      publishInfo(`[task:${taskId}] [LogisticsFiller] ⑤-P0 miss: 发布配置未预设运费模板`, { taskId });
+    }
+
     // 优先级 1：源商品直接带了 templateId
-    if (logistics.templateId) {
+    if (!resolvedTemplateId && logistics.templateId) {
       resolvedTemplateId = String(logistics.templateId);
       publishInfo(`[task:${taskId}] [LogisticsFiller] ⑤-P1 hit: product.templateId`, {
         taskId,
         templateId: resolvedTemplateId,
       });
-    } else {
+    } else if (!resolvedTemplateId) {
       publishInfo(`[task:${taskId}] [LogisticsFiller] ⑤-P1 miss: product.templateId 为空`, { taskId });
     }
 
@@ -319,12 +338,6 @@ async function trySingleAddressQuery(taskId: number, keywords: string): Promise<
   }
 }
 
-const TB_FREIGHT_TEMPLATE_PAGE =
-  'https://qn.taobao.com/home.htm/consign-tools-group/freightTemplate/templateEdit?toolAuth=cm-tool-manage&pageVersion=V2';
-
-const TB_FREIGHT_TEMPLATE_API =
-  'https://adpmanager.taobao.com/user/normal_template_setting_action.do';
-
 /**
  * 通过淘宝 qn.taobao.com 运费模板页面动态创建运费模板
  *
@@ -389,7 +402,7 @@ async function createTaobaoShippingTemplate(
 
     publishInfo(`[task:${taskId}] [LogisticsFiller] create-template: 发起 POST 请求`, {
       taskId,
-      api: TB_FREIGHT_TEMPLATE_API,
+      api: TB_FREIGHT_TEMPLATE_CREATE_API,
       templateName,
       addressId: `${address.countryCode},${address.provinceCode},${address.cityCode}`,
       userAgent: userAgent.slice(0, 80),
@@ -546,7 +559,7 @@ async function postTaobaoAddressTemplate(params: {
 
   let response;
   try {
-    response = await axios.post(TB_FREIGHT_TEMPLATE_API, body.toString(), { headers });
+    response = await axios.post(TB_FREIGHT_TEMPLATE_CREATE_API, body.toString(), { headers });
   } catch (axiosErr: unknown) {
     const isAxiosError = axiosErr !== null && typeof axiosErr === 'object' && 'response' in axiosErr;
     const axiosResponse = isAxiosError ? (axiosErr as { response?: { status?: number; data?: unknown } }).response : undefined;
@@ -580,81 +593,7 @@ async function postTaobaoAddressTemplate(params: {
   await new Promise(resolve => setTimeout(resolve, 2000));
 
   // 创建成功，接口不直接返回 templateId，调列表接口按 name 精确匹配
-  return fetchTemplateIdByName(taskId, templateName, cookieString, userAgent);
-}
-
-const TB_FREIGHT_TEMPLATE_LIST_API =
-  'https://adpmanager.taobao.com/user/normal_template_list.do';
-
-/**
- * 查询运费模板列表，按 name 精确匹配返回 templateId
- * 新创建的模板在列表首位，pageSize=50 覆盖大多数情况
- */
-async function fetchTemplateIdByName(
-  taskId: number,
-  templateName: string,
-  cookieString: string,
-  userAgent: string,
-): Promise<string | null> {
-  const listHeaders: Record<string, string> = {
-    'accept': 'application/json',
-    'accept-language': 'zh-CN,zh;q=0.9',
-    'origin': 'https://qn.taobao.com',
-    'pragma': 'no-cache',
-    'referer': 'https://qn.taobao.com/home.htm/consign-tools-group/freightTemplate',
-    'cookie': cookieString,
-    'user-agent': userAgent || 'Mozilla/5.0',
-  };
-
-  let listResponse;
-  try {
-    listResponse = await axios.get(TB_FREIGHT_TEMPLATE_LIST_API, {
-      params: { name: templateName, pageIndex: 1, pageSize: 50 },
-      headers: listHeaders,
-    });
-  } catch (axiosErr: unknown) {
-    const isAxiosError = axiosErr !== null && typeof axiosErr === 'object' && 'response' in axiosErr;
-    const axiosResponse = isAxiosError ? (axiosErr as { response?: { status?: number; data?: unknown } }).response : undefined;
-    publishWarn(`[task:${taskId}] [LogisticsFiller] create-template: 列表接口异常`, {
-      taskId,
-      error: axiosErr instanceof Error ? axiosErr.message : String(axiosErr),
-      httpStatus: axiosResponse?.status ?? null,
-      responseBody: axiosResponse?.data ?? null,
-    });
-    return null;
-  }
-
-  const listData = listResponse.data as {
-    success?: boolean;
-    data?: Array<{ name?: string; templateId?: number | string }>;
-  };
-
-  publishInfo(`[task:${taskId}] [LogisticsFiller] create-template: 列表接口响应`, {
-    taskId,
-    success: listData?.success,
-    totalCount: (listData as Record<string, unknown>)?.pageInfo
-      ? ((listData as Record<string, unknown>).pageInfo as Record<string, unknown>)?.totalCount
-      : null,
-    names: (listData?.data ?? []).map(t => t.name),
-  });
-
-  const matched = (listData?.data ?? []).find(t => t.name === templateName);
-  if (matched?.templateId) {
-    const templateId = String(matched.templateId);
-    publishInfo(`[task:${taskId}] [LogisticsFiller] create-template: 列表匹配成功`, {
-      taskId,
-      templateName,
-      templateId,
-    });
-    return templateId;
-  }
-
-  publishWarn(`[task:${taskId}] [LogisticsFiller] create-template: 列表中未找到 name="${templateName}"`, {
-    taskId,
-    templateName,
-    availableNames: (listData?.data ?? []).map(t => t.name),
-  });
-  return null;
+  return fetchTaobaoFreightTemplateIdByName({ taskId, templateName, cookieString, userAgent });
 }
 
 /**

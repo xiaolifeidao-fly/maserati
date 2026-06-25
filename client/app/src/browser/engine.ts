@@ -6,6 +6,10 @@ import type { Browser, BrowserContext, Page, Route, Request, Response } from 'pl
 // patchright 是 playwright 的 drop-in 替换，去除了 __pwInitScripts__、utility world、
 // CDP Runtime.enable 等可被 aplus_v2 / umsdk 反爬脚本探测到的自动化痕迹。
 import { chromium } from 'patchright';
+// chrome-launcher 锁定 0.15.x（CommonJS 版）：webpack 配置使用 nodeExternals，
+// node_modules 不会被打包而是以 require() 留在产物里。1.x 是 ESM-only，CJS require
+// 会在 Electron 主进程抛 ERR_REQUIRE_ESM；0.15.x 是 CJS，可被 require 且保持同步调用。
+import { Launcher } from 'chrome-launcher';
 import { getGlobal, removeGlobal, setGlobal } from '@utils/store/electron';
 import { app, screen as electronScreen } from 'electron';
 import { Monitor, MonitorChain, MonitorRequest, MonitorResponse } from './monitor/monitor';
@@ -445,11 +449,36 @@ export function saveChromePath(path: string){
     setGlobal("current_chrome_path", path);
 }
 
+// 优先用 chrome-launcher 跨平台探测系统安装的 Chrome。
+// 它内部已处理各平台细节（Windows 查注册表、mac 走 LaunchServices、Linux 走 which/常见路径），
+// 比手写路径清单更全也更易维护。返回 undefined 表示未检测到，由调用方回退到硬编码扫描。
+function detectChromeViaLauncher(): string | undefined {
+    try {
+        const installations = Launcher.getInstallations(); // 已按优先级排序（stable > beta > dev > canary）
+        if (installations && installations.length) {
+            const found = installations[0];
+            log.info(`✅ chrome-launcher 找到Chrome: ${found}`);
+            return found;
+        }
+        log.info('chrome-launcher 未检测到任何 Chrome 安装');
+    } catch (error) {
+        log.warn('chrome-launcher 检测失败，回退到硬编码路径扫描', (error as Error).message);
+    }
+    return undefined;
+}
+
 // 获取系统真实的Chrome浏览器路径
 function getSystemChromePath(): string {
+    // 1. 先用 chrome-launcher 自动探测
+    const detected = detectChromeViaLauncher();
+    if (detected) {
+        return os.platform() === 'win32' ? detected.replace(/\\\\/g, '\\') : detected;
+    }
+
+    // 2. 回退：硬编码的各平台常见路径扫描（双保险，防止 chrome-launcher 漏检）
     const platform = os.platform();
-    
-    log.info(`检测操作系统: ${platform}`);
+
+    log.info(`chrome-launcher 未命中，回退硬编码扫描，操作系统: ${platform}`);
     //C:\Users\Administrator\AppData\Local\Google\Chrome\Bin\chromex.exe
     const winPaths = [
         path.join('C:', 'Program Files', 'Google', 'Chrome', 'Application', 'chrome.exe'),
@@ -534,28 +563,30 @@ function getSystemChromePath(): string {
     throw new Error(`未找到系统安装的Chrome浏览器，请检查Chrome是否已安装。操作系统: ${platform}`);
 }
 
-// 获取Chrome浏览器路径的主方法
+// 把候选路径规范化（Windows 下统一为单反斜杠），不存在则返回 undefined。
+function resolveValidChromePath(candidate: string | undefined): string | undefined {
+    if (!candidate) return undefined;
+    const normalized = os.platform() === 'win32' ? candidate.replace(/\\\\/g, '\\') : candidate;
+    return fs.existsSync(normalized) ? normalized : undefined;
+}
+
+// 获取Chrome浏览器路径的主方法。优先级：用户手动指定 > 环境变量 > 自动探测。
 function getChromePath(): string {
-    // 1. 优先使用环境变量中的路径
-    // if (process.env.CHROME_PATH) {
-    //     const envPath = process.env.CHROME_PATH;
-    //     log.info(`使用环境变量中的Chrome路径: ${envPath}`);
-        
-    //     // 验证环境变量中的路径是否存在
-    //     if (fs.existsSync(envPath)) {
-    //         log.info(`✅ 环境变量路径有效: ${envPath}`);
-    //         // 在Windows系统中将双反斜杠替换为单反斜杠
-    //         if (os.platform() === 'win32') {
-    //             return envPath.replace(/\\\\/g, '\\');
-    //         }
-    //         return envPath;
-    //     } else {
-    //         log.info(`❌ 环境变量路径无效: ${envPath}`);
-    //         log.info('将尝试自动检测系统Chrome路径...');
-    //     }
-    // }
-    
-    // 2. 自动检测系统Chrome路径
+    // 1. 用户在设置里手动指定的路径（持久化在 store）
+    const userPath = resolveValidChromePath(loadChromePath());
+    if (userPath) {
+        log.info(`✅ 使用用户指定的Chrome路径: ${userPath}`);
+        return userPath;
+    }
+
+    // 2. 环境变量 CHROME_PATH
+    const envPath = resolveValidChromePath(process.env.CHROME_PATH);
+    if (envPath) {
+        log.info(`✅ 使用环境变量CHROME_PATH: ${envPath}`);
+        return envPath;
+    }
+
+    // 3. 自动检测系统Chrome路径（chrome-launcher → 硬编码扫描）
     try {
         return getSystemChromePath();
     } catch (error) {
@@ -795,11 +826,10 @@ export abstract class DoorEngine<T = any> {
                 '--enable-blink-features=IdleDetection',
                 '--hide-scrollbars',
                 '--mute-audio',
-                // --disable-blink-features=AutomationControlled 是让 navigator.webdriver=false 的关键 flag，
-                // 但有头模式下 Chrome 会把它判为「不受支持的命令行标记」弹黄条。
-                // 折中：仅【有头】时剥离该 flag（靠 addInitScript 覆盖 webdriver，无黄条）；
-                // 【无头】无窗口无黄条，保留该 flag，让 webdriver=false 由 Chrome 原生保证，最稳。
-                ...(this.headless ? [] : ['--disable-blink-features=AutomationControlled']),
+                // 不要把 --disable-blink-features=AutomationControlled 放进本剔除清单：
+                // 它是 patchright 默认参数(让 navigator.webdriver=false 的关键 flag)，有头/无头都保留，
+                // 使 webdriver=false 由 Chrome 原生保证(addInitScript 再兜底)。patchright 默认已带
+                // --disable-infobars，有头下不会出现「不受支持的命令行标记」黄条。
             ],
             extraHTTPHeaders: secChUaHeaders,
             bypassCSP : true,
@@ -1526,11 +1556,10 @@ export abstract class DoorEngine<T = any> {
                 '--enable-blink-features=IdleDetection',
                 '--hide-scrollbars',
                 '--mute-audio',
-                // --disable-blink-features=AutomationControlled 是让 navigator.webdriver=false 的关键 flag，
-                // 但有头模式下 Chrome 会把它判为「不受支持的命令行标记」弹黄条。
-                // 折中：仅【有头】时剥离该 flag（靠 addInitScript 覆盖 webdriver，无黄条）；
-                // 【无头】无窗口无黄条，保留该 flag，让 webdriver=false 由 Chrome 原生保证，最稳。
-                ...(this.headless ? [] : ['--disable-blink-features=AutomationControlled']),
+                // 不要把 --disable-blink-features=AutomationControlled 放进本剔除清单：
+                // 它是 patchright 默认参数(让 navigator.webdriver=false 的关键 flag)，有头/无头都保留，
+                // 使 webdriver=false 由 Chrome 原生保证(addInitScript 再兜底)。patchright 默认已带
+                // --disable-infobars，有头下不会出现「不受支持的命令行标记」黄条。
             ],
         }
         if (this.headless && deviceProfile.deviceScaleFactor) {
@@ -1706,9 +1735,8 @@ export abstract class DoorEngine<T = any> {
             ignoreDefaultArgs: [
                 '--enable-automation',
                 '--enable-blink-features=IdleDetection',
-                // 仅【有头】剥离此 flag 以消黄条（webdriver 由 addInitScript 覆盖）；
-                // 【无头】保留它，让 navigator.webdriver=false 由 Chrome 原生保证，最稳。
-                ...(this.headless ? [] : ['--disable-blink-features=AutomationControlled']),
+                // 不剔除 --disable-blink-features=AutomationControlled：patchright 默认带它，
+                // 有头/无头都保留，webdriver=false 由 Chrome 原生保证(addInitScript 再兜底)。
             ],
         });
         log.info("init browser end is by ", this.resourceId);
@@ -1733,6 +1761,10 @@ export abstract class DoorEngine<T = any> {
             uaData: deviceProfile.uaData || null,
             // 每个店铺一个稳定种子：同店铺画布指纹跨会话不变(像真实设备)，店铺之间互不相同(多账号隔离)
             canvasSeed: hashStringToSeed(this.resourceId || 'default'),
+            // 仅无头模式才伪装 canvas / WebGL：
+            //  - 有头(headed)：用系统 Chrome 的真实 GPU 渲染，真值最自洽、无任何篡改痕迹 → 不覆盖；
+            //  - 无头(headless)：补偿无头环境的渲染差异 + 提供多账号画布隔离 → 保留覆盖。
+            headless: this.headless,
         };
         await context.addInitScript((args: any) => {
             // =================== 关键浏览器指纹伪装 ===================
@@ -1760,7 +1792,9 @@ export abstract class DoorEngine<T = any> {
                     wow64?: boolean;
                 } | null;
                 canvasSeed?: number;
+                headless?: boolean;
             } = args || {};
+            const __headless: boolean = __antiArgs.headless === true;
             const __uaPlatform: string = (__antiArgs.uaPlatform || '').toString();
 
             // ---------- Function.prototype.toString 隐身 ----------
@@ -2101,7 +2135,16 @@ export abstract class DoorEngine<T = any> {
             try {
                 overrideNavigator();
                 overrideUserAgentData();
-                overrideCanvas();
+                // canvas 仅在无头模式覆盖：
+                //  - 有头：系统 Chrome 真实 GPU 渲染，真值最自洽、无篡改痕迹 → 不覆盖；
+                //  - 无头：噪声补偿无头渲染差异，并按店铺 seed 提供多账号画布隔离 → 覆盖。
+                if (__headless) {
+                    overrideCanvas();
+                }
+                // WebGL 两种模式都不覆盖：patchright 用新无头(--headless)+系统 Chrome，未注入
+                // --disable-gpu，无头同样走真实 GPU；探针与运行时同路径同机 ⇒ 真值一致，
+                // 注入只是「真值覆盖真值」，零收益且平白多一个可被检测的 getParameter 包装。
+                // overrideWebGL 保留定义但不调用，仅作历史参考。
                 hideAutomationFeatures();
                 blockFingerprinting();
                 antiHeadlessDetection();

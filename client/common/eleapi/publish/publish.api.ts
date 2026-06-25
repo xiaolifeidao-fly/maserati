@@ -10,11 +10,12 @@ import type {
   PublishProgressEvent,
   PublishCenterState,
   PublishBatchRepublishStats,
+  TaobaoFreightTemplateOption,
 } from '../../../app/src/publish/types/publish-task';
 import type { PageResult } from '../commerce/commerce.api';
 
 export type { PageResult };
-export type { PublishStepRecord, PublishTaskRecord };
+export type { PublishStepRecord, PublishTaskRecord, TaobaoFreightTemplateOption };
 
 export interface PublishLogExportResult {
   exported: boolean;
@@ -198,6 +199,15 @@ export class PublishApi extends ElectronApi {
   @InvokeType(Protocols.INVOKE)
   async openPublishDraft(shopId: number, draftId: string): Promise<void> {
     return this.invokeApi('openPublishDraft', shopId, draftId);
+  }
+
+  @InvokeType(Protocols.INVOKE)
+  async listTaobaoFreightTemplates(
+    shopId: number,
+    name?: string,
+    options?: { forceRefresh?: boolean },
+  ): Promise<TaobaoFreightTemplateOption[]> {
+    return this.invokeApi('listTaobaoFreightTemplates', shopId, name, options);
   }
 
   // ─── 进度监听（主进程 → 渲染进程推送）────────────────────────────────────

@@ -55,6 +55,17 @@ export interface PublishConfig {
   strategy: PublishStrategy;
   priceSettings?: PublishPriceSettings;
   brandMode?: PublishBrandMode;
+  freightTemplate?: PublishFreightTemplateConfig;
+}
+
+export interface PublishFreightTemplateConfig {
+  templateId: string;
+  name?: string;
+}
+
+export interface TaobaoFreightTemplateOption {
+  templateId: string;
+  name: string;
 }
 
 // ─── 服务端记录 ───────────────────────────────────────────────────────────────
