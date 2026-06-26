@@ -133,6 +133,38 @@ function getCurrentDeviceScaleFactor(): number | undefined {
     }
 }
 
+type ScreenInfo = {
+    width: number;
+    height: number;
+    availWidth: number;
+    availHeight: number;
+    availLeft: number;
+    availTop: number;
+};
+
+// 真实主显示器的整体尺寸与可用区域(DIP/points，与 JS screen.* 单位一致)。
+// 无头模式下 screen.* 默认等于 viewport，且 availHeight==height、outer==inner —— 三者
+// 在真实桌面浏览器里绝不会成立(显示器 > 窗口、菜单栏占掉 availTop、浏览器外框 > 内容区)。
+// 用真值覆盖以消除这组无头特征。
+function getScreenInfo(): ScreenInfo | undefined {
+    try {
+        const d = electronScreen.getPrimaryDisplay();
+        const b = d.bounds;          // 显示器整体
+        const wa = d.workArea;       // 扣除菜单栏/任务栏后的可用区
+        if (!b || !wa || !b.width || !b.height) return undefined;
+        return {
+            width: b.width,
+            height: b.height,
+            availWidth: wa.width,
+            availHeight: wa.height,
+            availLeft: wa.x - b.x,
+            availTop: wa.y - b.y,
+        };
+    } catch {
+        return undefined;
+    }
+}
+
 function getUaPlatformByOS(): string {
     const p = os.platform();
     return p === 'darwin' ? 'macOS' : p === 'win32' ? 'Windows' : 'Linux';
@@ -447,6 +479,10 @@ export function loadChromePath(){
 
 export function saveChromePath(path: string){
     setGlobal("current_chrome_path", path);
+}
+
+export function clearChromePath(){
+    removeGlobal("current_chrome_path");
 }
 
 // 优先用 chrome-launcher 跨平台探测系统安装的 Chrome。
@@ -822,7 +858,7 @@ export abstract class DoorEngine<T = any> {
                 `--window-size=${this.width},${this.height}`,
             ],
             ignoreDefaultArgs: [
-                '--enable-automation',
+                // 注：patchright 默认不添加 --enable-automation，无需在此剔除。
                 '--enable-blink-features=IdleDetection',
                 '--hide-scrollbars',
                 '--mute-audio',
@@ -1531,12 +1567,12 @@ export abstract class DoorEngine<T = any> {
         if(!this.browser){
             return;
         }
-        const key = this.headless.toString() + "_" + this.getKey();
+        const storeBrowserPath = await this.getRealChromePath();
+        const key = this.getPersistentContextKey(storeBrowserPath);
         if(contextMap.has(key)){
             return contextMap.get(key);
         }
         
-        const storeBrowserPath = await this.getRealChromePath();
         const deviceProfile = await getBrowserDeviceProfile(storeBrowserPath);
         const secChUaHeadersCtx = buildSecChUaHeaders(deviceProfile);
         // let context;
@@ -1552,7 +1588,7 @@ export abstract class DoorEngine<T = any> {
                 `--window-size=${this.width},${this.height}`,
             ],
             ignoreDefaultArgs: [
-                '--enable-automation',
+                // 注：patchright 默认不添加 --enable-automation，无需在此剔除。
                 '--enable-blink-features=IdleDetection',
                 '--hide-scrollbars',
                 '--mute-audio',
@@ -1701,18 +1737,19 @@ export abstract class DoorEngine<T = any> {
         return this.chromePath;
     }
 
-    getBrowserKey(){
+    getBrowserKey(storeBrowserPath?: string){
         let key = this.headless.toString() + "_" + this.needValidateImage.toString();
-        if (this.chromePath) {
-            key += "_" + this.chromePath;
+        const chromePath = storeBrowserPath || this.chromePath;
+        if (chromePath) {
+            key += "_" + chromePath;
         }
         return key;
     }
 
     async createBrowser(){
-        let key = this.getBrowserKey();
-        log.info("browser key is ", key);
         let storeBrowserPath = await this.getRealChromePath();
+        let key = this.getBrowserKey(storeBrowserPath);
+        log.info("browser key is ", key);
         if(browserMap.has(key)){
             return browserMap.get(key);
         }
@@ -1733,7 +1770,7 @@ export abstract class DoorEngine<T = any> {
             executablePath: storeBrowserPath,
             args: args,
             ignoreDefaultArgs: [
-                '--enable-automation',
+                // 注：patchright 默认不添加 --enable-automation，无需在此剔除。
                 '--enable-blink-features=IdleDetection',
                 // 不剔除 --disable-blink-features=AutomationControlled：patchright 默认带它，
                 // 有头/无头都保留，webdriver=false 由 Chrome 原生保证(addInitScript 再兜底)。
@@ -1747,6 +1784,15 @@ export abstract class DoorEngine<T = any> {
 
     // 添加新方法：注入反检测脚本
     async addAntiDetectionScript(context: BrowserContext, deviceProfile: BrowserDeviceProfile) {
+        // 有头模式整段跳过注入：实测系统 Chrome 有头下指纹原生已全部自洽
+        //   —— webdriver=false(--disable-blink-features=AutomationControlled 原生保证)、
+        //   UA 干净、真实 GPU、真实显示器几何、plugins/mimeTypes 齐全、hover/pointer 为桌面值。
+        // 此时任何 prototype getter 替换 / toString 代理都只是凭空增加的篡改面，故零注入最干净。
+        // （注入脚本经 patchright addInitScript 在主世界生效，下方逻辑仅用于无头补偿。）
+        if (!this.headless) {
+            log.info('[Engine] headed mode: skip anti-detection init script (native fingerprint already authentic)');
+            return;
+        }
         const antiArgs = {
             userAgent: deviceProfile.userAgent || '',
             uaPlatform: deviceProfile.uaPlatform || getUaPlatformByOS(),
@@ -1765,6 +1811,8 @@ export abstract class DoorEngine<T = any> {
             //  - 有头(headed)：用系统 Chrome 的真实 GPU 渲染，真值最自洽、无任何篡改痕迹 → 不覆盖；
             //  - 无头(headless)：补偿无头环境的渲染差异 + 提供多账号画布隔离 → 保留覆盖。
             headless: this.headless,
+            // 真实显示器几何，仅无头模式用于覆盖 screen.* / window.outer*（消除无头几何特征）
+            screenInfo: this.headless ? getScreenInfo() : undefined,
         };
         await context.addInitScript((args: any) => {
             // =================== 关键浏览器指纹伪装 ===================
@@ -1793,6 +1841,14 @@ export abstract class DoorEngine<T = any> {
                 } | null;
                 canvasSeed?: number;
                 headless?: boolean;
+                screenInfo?: {
+                    width: number;
+                    height: number;
+                    availWidth: number;
+                    availHeight: number;
+                    availLeft: number;
+                    availTop: number;
+                };
             } = args || {};
             const __headless: boolean = __antiArgs.headless === true;
             const __uaPlatform: string = (__antiArgs.uaPlatform || '').toString();
@@ -1897,8 +1953,11 @@ export abstract class DoorEngine<T = any> {
             };
             
             // 1b. 覆盖 navigator.userAgentData —— 与 sec-ch-ua 头同源于洗过的真机 brands。
-            // 无头(headless=new)下 brands / getHighEntropyValues / toJSON 都会带 HeadlessChrome，
-            // 而 navigator.userAgent 与 HTTP 头已被擦干净 → 三者不一致正是 Taobao 服务端交叉校验的破绽。
+            // 注意：实测 Chrome 149 新无头下 brands / getHighEntropyValues / toJSON 已【不再】带
+            // HeadlessChrome(只有 navigator.userAgent 字符串会带，且已由 context.userAgent 擦掉)。
+            // 因此本函数对当前版本而言主要是「冗余兜底」——washSanitize 一个已干净的值仍为干净值；
+            // 之所以保留，是为防御旧版/其他渠道(如真·old headless 或非 stable 分支)brands 仍可能
+            // 泄漏，并保证 brands 与 sec-ch-ua 头同源一致。三者不一致正是服务端交叉校验的破绽。
             const overrideUserAgentData = () => {
                 try {
                     const uad: any = (navigator as any).userAgentData;
@@ -1986,13 +2045,17 @@ export abstract class DoorEngine<T = any> {
             //  patchright + --headless=new 已经提供了与真实 Chrome 一致的 chrome 对象与 Notification.permission，
             //  在此基础上不要再叠加自己的版本。
             
-            // 5. Canvas 指纹弱噪声 —— 直接 patch CanvasRenderingContext2D.prototype.getImageData。
+            // 5. Canvas 指纹弱噪声 —— 同时覆盖三条读取路径：
+            //      getImageData（像素级读取）/ toDataURL / toBlob（位图导出，主流指纹脚本走这两条）。
             //    扰动是「确定性」的：位置与通道都由 hash(seed, 像素下标) 决定，纯输入函数。
-            //    => 同一张画布重复读取结果完全一致(挡住 double-read 比对，旧版每次 Math.random 会暴露)；
+            //    => 同一张画布重复读取/导出结果完全一致(挡住 double-read 比对，旧版每次 Math.random 会暴露)；
             //       同店铺跨会话指纹稳定(像真实设备)；不同店铺 seed 不同 => 指纹不同(多账号隔离)。
+            //    关键：toDataURL/toBlob 不直接改原画布(XOR 自反，二次导出会抵消 => 双读不稳)，
+            //    而是把原画布 drawImage 到临时画布、对副本注入噪声后再导出，原画布始终保持原样。
             const overrideCanvas = () => {
                 try {
                     const Ctx2d: any = (window as any).CanvasRenderingContext2D;
+                    const HTMLCanvas: any = (window as any).HTMLCanvasElement;
                     if (!Ctx2d || !Ctx2d.prototype) return;
                     const seed = ((__antiArgs.canvasSeed as number) >>> 0) || 0x9e3779b9;
                     // 32 位整数雪崩 hash：(seed, index) 决定该像素是否扰动及扰动哪个通道
@@ -2002,28 +2065,111 @@ export abstract class DoorEngine<T = any> {
                         h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35) >>> 0;
                         return (h ^ (h >>> 16)) >>> 0;
                     };
+                    // 对一段 RGBA 像素就地注入确定性稀疏噪声：约 1/256 像素、强度 ±1、仅非透明像素
+                    const perturb = (data: any) => {
+                        const totalPixels = data.length / 4;
+                        for (let p = 0; p < totalPixels; p++) {
+                            const h = hashAt(p);
+                            if ((h & 0xff) !== 0) continue;
+                            const base = p * 4;
+                            if (data[base + 3] === 0) continue;
+                            const channel = h % 3;
+                            data[base + channel] = data[base + channel] ^ 1;
+                        }
+                    };
+
                     const originalGetImageData = Ctx2d.prototype.getImageData;
-                    const patched: any = function(this: any) {
+                    const patchedGID: any = function(this: any) {
                         const imageData = originalGetImageData.apply(this, arguments as any);
                         try {
                             if (imageData && imageData.data && imageData.data.length >= 4) {
-                                const data = imageData.data;
-                                const totalPixels = data.length / 4;
-                                for (let p = 0; p < totalPixels; p++) {
-                                    const h = hashAt(p);
-                                    // 稀疏扰动：约 1/256 像素被改，强度固定 ±1，仅非透明像素
-                                    if ((h & 0xff) !== 0) continue;
-                                    const base = p * 4;
-                                    if (data[base + 3] === 0) continue;
-                                    const channel = h % 3;
-                                    data[base + channel] = data[base + channel] ^ 1;
-                                }
+                                perturb(imageData.data);
                             }
                         } catch (e) {}
                         return imageData;
                     };
-                    __markNative(patched, 'getImageData');
-                    Ctx2d.prototype.getImageData = patched;
+                    __markNative(patchedGID, 'getImageData');
+                    Ctx2d.prototype.getImageData = patchedGID;
+
+                    if (!HTMLCanvas || !HTMLCanvas.prototype) return;
+                    const originalPutImageData = Ctx2d.prototype.putImageData;
+                    // 生成「带噪副本画布」：drawImage 复制原画布 → 用未打补丁的原始 getImageData 读出
+                    // → perturb 注入噪声 → putImageData 写回副本。原画布不动，故 getImageData 与导出
+                    // 走各自路径都只叠加一层确定性噪声，互不干扰、双读稳定。
+                    const makeNoisyClone = (canvas: any): any => {
+                        const w = canvas.width, h = canvas.height;
+                        if (!w || !h) return null;
+                        const clone = canvas.ownerDocument.createElement('canvas');
+                        clone.width = w; clone.height = h;
+                        const cctx = clone.getContext('2d');
+                        if (!cctx) return null;
+                        cctx.drawImage(canvas, 0, 0);
+                        const imgd = originalGetImageData.call(cctx, 0, 0, w, h);
+                        perturb(imgd.data);
+                        originalPutImageData.call(cctx, imgd, 0, 0);
+                        return clone;
+                    };
+
+                    const originalToDataURL = HTMLCanvas.prototype.toDataURL;
+                    const patchedToDataURL: any = function(this: any) {
+                        try {
+                            const clone = makeNoisyClone(this);
+                            if (clone) return originalToDataURL.apply(clone, arguments as any);
+                        } catch (e) {}
+                        return originalToDataURL.apply(this, arguments as any);
+                    };
+                    __markNative(patchedToDataURL, 'toDataURL');
+                    HTMLCanvas.prototype.toDataURL = patchedToDataURL;
+
+                    const originalToBlob = HTMLCanvas.prototype.toBlob;
+                    if (typeof originalToBlob === 'function') {
+                        const patchedToBlob: any = function(this: any, callback: any) {
+                            try {
+                                const clone = makeNoisyClone(this);
+                                if (clone) {
+                                    const rest = Array.prototype.slice.call(arguments, 1);
+                                    return originalToBlob.apply(clone, [callback].concat(rest) as any);
+                                }
+                            } catch (e) {}
+                            return originalToBlob.apply(this, arguments as any);
+                        };
+                        __markNative(patchedToBlob, 'toBlob');
+                        HTMLCanvas.prototype.toBlob = patchedToBlob;
+                    }
+                } catch (e) {}
+            };
+
+            // 5b. 屏幕/窗口几何（仅无头）—— 用真实显示器尺寸覆盖，消除「screen==viewport、
+            //     availHeight==height、outer==inner」这组无头特征(真实桌面浏览器三者皆不成立)。
+            const overrideScreen = () => {
+                const s = __antiArgs.screenInfo;
+                if (!s || !s.width || !s.height) return;
+                try {
+                    const ScreenProto: any = (window as any).Screen && (window as any).Screen.prototype;
+                    if (ScreenProto) {
+                        __defProtoGetter(ScreenProto, 'width', () => s.width);
+                        __defProtoGetter(ScreenProto, 'height', () => s.height);
+                        __defProtoGetter(ScreenProto, 'availWidth', () => s.availWidth || s.width);
+                        __defProtoGetter(ScreenProto, 'availHeight', () => s.availHeight || s.height);
+                        __defProtoGetter(ScreenProto, 'availLeft', () => s.availLeft || 0);
+                        __defProtoGetter(ScreenProto, 'availTop', () => s.availTop || 0);
+                    }
+                } catch (e) {}
+                // window.outerWidth/Height：真实窗口外框 > 内容区。无头下 outer==inner，
+                // 这里让 outerWidth==innerWidth、outerHeight=innerHeight + 典型浏览器 chrome 高度。
+                // 描述符在不同 Chrome 版本可能位于 window 实例或 Window.prototype，覆盖到原本所在处，
+                // 避免凭空在 window 上多出一个 own 属性(本身就是篡改信号)。
+                try {
+                    const CHROME_H = 88; // 标题栏 + 标签页 + 地址栏的典型高度
+                    const Win: any = (window as any).Window;
+                    const ownOuter = Object.getOwnPropertyDescriptor(window, 'outerWidth');
+                    const target: any = ownOuter ? window : (Win && Win.prototype ? Win.prototype : window);
+                    __defProtoGetter(target, 'outerWidth', () => (window as any).innerWidth);
+                    __defProtoGetter(target, 'outerHeight', () => {
+                        const inner = (window as any).innerHeight || 0;
+                        const max = (s.availHeight || s.height);
+                        return Math.min(inner + CHROME_H, max);
+                    });
                 } catch (e) {}
             };
             
@@ -2090,9 +2236,10 @@ export abstract class DoorEngine<T = any> {
             };
             
             // 8. 无头浏览器专用反检测
-            //   - screen.availWidth/Height/width/height 不再强行 = window.innerWidth/Height：
-            //     真值是显示器整体尺寸（远大于窗口内尺寸），相等是 bot 信号。--headless=new 自带真值。
-            //   - WebGL2 vendor/renderer 已统一在 overrideWebGL 中按平台处理，这里不再重复覆盖。
+            //   - screen.* / window.outer*：实测无头【并不】自带真值(screen 反映的是 viewport，
+            //     且 availHeight==height、outer==inner)，这是明确的无头特征。已由 overrideScreen()
+            //     用真实显示器尺寸覆盖(仅无头)，不要再误以为「headless=new 自带真值」而不处理。
+            //   - WebGL vendor/renderer：实测新无头走真实 GPU(ANGLE Metal)，无需伪装，故不覆盖。
             const antiHeadlessDetection = () => {
                 // mimeTypes：仅在真值为空时基于 MimeTypeArray.prototype / MimeType.prototype 兜底
                 try {
@@ -2140,6 +2287,7 @@ export abstract class DoorEngine<T = any> {
                 //  - 无头：噪声补偿无头渲染差异，并按店铺 seed 提供多账号画布隔离 → 覆盖。
                 if (__headless) {
                     overrideCanvas();
+                    overrideScreen();
                 }
                 // WebGL 两种模式都不覆盖：patchright 用新无头(--headless)+系统 Chrome，未注入
                 // --disable-gpu，无头同样走真实 GPU；探针与运行时同路径同机 ⇒ 真值一致，

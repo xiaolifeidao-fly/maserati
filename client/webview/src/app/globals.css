@@ -391,12 +391,12 @@ select {
 .manager-wordmark {
   display: inline-flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
 }
 
 .manager-wordmark strong {
   font-family: "Avenir Next", "SF Pro Display", "PingFang SC", sans-serif;
-  font-size: clamp(28px, 3vw, 42px);
+  font-size: clamp(22px, 2.2vw, 32px);
   line-height: 0.98;
   letter-spacing: 0.02em;
   color: #60351f;
@@ -404,15 +404,15 @@ select {
 
 .manager-wordmark span {
   color: rgba(96, 53, 31, 0.5);
-  font-size: 11px;
+  font-size: 10px;
   letter-spacing: 0.18em;
   text-transform: uppercase;
 }
 
 .manager-crest {
-  width: 54px;
-  height: 54px;
-  border-radius: 16px;
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
   position: relative;
   background:
     radial-gradient(circle at 30% 30%, rgba(255, 255, 255, 0.72), transparent 24%),
@@ -683,9 +683,9 @@ select {
 .manager-commerce-header {
   display: flex;
   flex-direction: column;
-  gap: 18px;
-  border-radius: 30px;
-  padding: 22px 24px;
+  gap: 12px;
+  border-radius: 24px;
+  padding: 16px 18px;
   background:
     radial-gradient(circle at top left, rgba(242, 191, 114, 0.16), transparent 26%),
     linear-gradient(180deg, rgba(255, 251, 246, 0.98), rgba(255, 243, 230, 0.96));
@@ -695,13 +695,13 @@ select {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 24px;
+  gap: 16px;
 }
 
 .manager-commerce-summary {
   display: flex;
   align-items: center;
-  gap: 28px;
+  gap: 18px;
   flex: 1;
   min-width: 0;
 }
@@ -714,10 +714,11 @@ select {
 .manager-commerce-description {
   margin: 0;
   color: var(--manager-text-soft);
-  max-width: 520px;
+  max-width: 460px;
   flex: 1;
   min-width: 260px;
-  line-height: 1.7;
+  line-height: 1.5;
+  font-size: 12px;
 }
 
 .manager-crest-commerce::before {
@@ -736,8 +737,8 @@ select {
 .manager-commerce-nav-item {
   border: 1px solid rgba(191, 143, 108, 0.16);
   background: rgba(255, 250, 244, 0.92);
-  border-radius: 16px;
-  padding: 8px 10px;
+  border-radius: 12px;
+  padding: 6px 8px;
   display: flex;
   gap: 8px;
   align-items: center;
@@ -755,7 +756,7 @@ select {
 .manager-commerce-nav-item strong {
   display: block;
   color: var(--manager-text);
-  font-size: 13px;
+  font-size: 12px;
   white-space: nowrap;
 }
 
@@ -763,7 +764,7 @@ select {
   display: block;
   margin-top: 2px;
   color: var(--manager-text-faint);
-  font-size: 11px;
+  font-size: 10px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -782,15 +783,15 @@ select {
 }
 
 .manager-commerce-nav-icon {
-  font-size: 16px;
+  font-size: 14px;
   color: var(--manager-primary-strong);
 }
 
 .manager-commerce-actions {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   align-items: flex-end;
-  gap: 14px;
+  gap: 10px;
   flex-shrink: 0;
 }
 
@@ -798,32 +799,33 @@ select {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  padding: 10px 14px;
+  padding: 7px 10px;
   border-radius: 999px;
   background: rgba(255, 247, 239, 0.9);
   border: 1px solid rgba(191, 143, 108, 0.18);
   color: #8a4a21;
+  font-size: 12px;
   font-weight: 600;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
 }
 
 .manager-commerce-icon-button {
-  width: 50px;
-  height: 50px;
+  width: 42px;
+  height: 42px;
   border: 1px solid rgba(191, 143, 108, 0.18);
-  border-radius: 16px;
+  border-radius: 12px;
   background: rgba(255, 252, 248, 0.98);
   color: var(--manager-primary);
-  font-size: 18px;
+  font-size: 16px;
   cursor: pointer;
 }
 
 .manager-commerce-user-card {
   display: inline-flex;
   align-items: center;
-  gap: 12px;
-  padding: 8px 10px 8px 8px;
-  border-radius: 18px;
+  gap: 8px;
+  padding: 6px 8px 6px 6px;
+  border-radius: 14px;
   border: 1px solid rgba(191, 143, 108, 0.16);
   background: rgba(255, 252, 248, 0.97);
 }

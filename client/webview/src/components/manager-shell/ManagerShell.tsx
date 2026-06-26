@@ -6,9 +6,13 @@ import {
   BellOutlined,
   BulbOutlined,
   CustomerServiceOutlined,
+  DeleteOutlined,
   DownOutlined,
+  FolderOpenOutlined,
   LockOutlined,
   LogoutOutlined,
+  SaveOutlined,
+  SettingOutlined,
   ShareAltOutlined,
   ShopOutlined,
   ShoppingOutlined,
@@ -22,6 +26,7 @@ import { fetchCollectBatches, fetchCollectionShopOptions, type CollectBatchRecor
 import { changePassword, getAuthState, getCurrentProfile, logout, updateCurrentProfile } from "@/utils/auth";
 import { getPublishApi } from "@/utils/publish";
 import { getPublishWindowApi } from "@/utils/publish-window";
+import { getSystemSettingsApi } from "@/utils/system-settings";
 
 const { Content, Header } = Layout;
 const { Paragraph, Text } = Typography;
@@ -89,6 +94,10 @@ interface PasswordFormValues {
   oldPassword: string;
   newPassword: string;
   confirmPassword: string;
+}
+
+interface SystemSettingsFormValues {
+  chromePath?: string;
 }
 
 const navigationItems = [
@@ -228,6 +237,7 @@ export function ManagerShell({ children }: ManagerShellProps) {
   const activePath = getActivePath(pathname ?? "/workspace");
   const [profileForm] = Form.useForm<ProfileFormValues>();
   const [passwordForm] = Form.useForm<PasswordFormValues>();
+  const [systemSettingsForm] = Form.useForm<SystemSettingsFormValues>();
   const [displayName, setDisplayName] = useState("管理员");
   const [username, setUsername] = useState("已登录用户");
   const [loggingOut, setLoggingOut] = useState(false);
@@ -236,6 +246,9 @@ export function ManagerShell({ children }: ManagerShellProps) {
   const [profileSaving, setProfileSaving] = useState(false);
   const [passwordOpen, setPasswordOpen] = useState(false);
   const [passwordSaving, setPasswordSaving] = useState(false);
+  const [systemSettingsOpen, setSystemSettingsOpen] = useState(false);
+  const [systemSettingsLoading, setSystemSettingsLoading] = useState(false);
+  const [systemSettingsSaving, setSystemSettingsSaving] = useState(false);
   const [publishCenterState, setPublishCenterState] = useState<PublishCenterState>({
     tasks: [],
     messages: [],
@@ -654,6 +667,60 @@ export function ManagerShell({ children }: ManagerShellProps) {
     setPasswordOpen(true);
   };
 
+  const handleOpenSystemSettings = async () => {
+    setSystemSettingsOpen(true);
+    setSystemSettingsLoading(true);
+    try {
+      const setting = await getSystemSettingsApi().getChromePathSetting();
+      systemSettingsForm.setFieldsValue({ chromePath: setting.chromePath || "" });
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "读取系统设置失败");
+    } finally {
+      setSystemSettingsLoading(false);
+    }
+  };
+
+  const handleSelectChromePath = async () => {
+    setSystemSettingsLoading(true);
+    try {
+      const result = await getSystemSettingsApi().selectChromeExecutable();
+      if (!result.cancelled && result.chromePath) {
+        systemSettingsForm.setFieldsValue({ chromePath: result.chromePath });
+      }
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "选择 Chrome 文件失败");
+    } finally {
+      setSystemSettingsLoading(false);
+    }
+  };
+
+  const handleSaveSystemSettings = async () => {
+    const values = await systemSettingsForm.validateFields();
+    setSystemSettingsSaving(true);
+    try {
+      const setting = await getSystemSettingsApi().saveChromePathSetting(values.chromePath || "");
+      systemSettingsForm.setFieldsValue({ chromePath: setting.chromePath || "" });
+      message.success("系统设置已保存");
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "保存系统设置失败");
+    } finally {
+      setSystemSettingsSaving(false);
+    }
+  };
+
+  const handleClearSystemSettings = async () => {
+    setSystemSettingsSaving(true);
+    try {
+      await getSystemSettingsApi().clearChromePathSetting();
+      systemSettingsForm.setFieldsValue({ chromePath: "" });
+      message.success("Chrome 路径已清空");
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "清空 Chrome 路径失败");
+    } finally {
+      setSystemSettingsSaving(false);
+    }
+  };
+
   const handleSavePassword = async () => {
     const values = await passwordForm.validateFields();
     setPasswordSaving(true);
@@ -759,6 +826,16 @@ export function ManagerShell({ children }: ManagerShellProps) {
                     >
                       {publishCenterTrigger}
                     </Popover>
+
+                    <button
+                      type="button"
+                      className="manager-commerce-icon-button"
+                      aria-label="系统设置"
+                      title="系统设置"
+                      onClick={() => void handleOpenSystemSettings()}
+                    >
+                      <SettingOutlined />
+                    </button>
 
                     <Dropdown
                       trigger={["hover"]}
@@ -909,6 +986,68 @@ export function ManagerShell({ children }: ManagerShellProps) {
             ]}
           >
             <Input.Password placeholder="请再次输入新密码" autoComplete="new-password" />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal
+        title="系统设置"
+        open={systemSettingsOpen}
+        okText="保存"
+        cancelText="关闭"
+        confirmLoading={systemSettingsSaving}
+        onOk={() => void handleSaveSystemSettings()}
+        onCancel={() => setSystemSettingsOpen(false)}
+        destroyOnClose
+        footer={(_, { CancelBtn }) => (
+          <Space style={{ width: "100%", justifyContent: "space-between" }}>
+            <Button
+              danger
+              icon={<DeleteOutlined />}
+              loading={systemSettingsSaving}
+              onClick={() => void handleClearSystemSettings()}
+            >
+              清空
+            </Button>
+            <Space>
+              <CancelBtn />
+              <Button
+                type="primary"
+                icon={<SaveOutlined />}
+                loading={systemSettingsSaving}
+                onClick={() => void handleSaveSystemSettings()}
+              >
+                保存
+              </Button>
+            </Space>
+          </Space>
+        )}
+      >
+        <Form<SystemSettingsFormValues>
+          form={systemSettingsForm}
+          layout="vertical"
+          disabled={systemSettingsLoading || systemSettingsSaving}
+          preserve={false}
+        >
+          <Form.Item
+            label="Chrome 路径"
+            name="chromePath"
+            extra="请选择本机的 chrome.exe 文件；保存后发布和采集浏览器会优先使用该路径。"
+            rules={[{ required: true, message: "请选择本机的 chrome.exe 文件" }]}
+          >
+            <Input
+              placeholder="请选择本机的 chrome.exe 文件"
+              addonAfter={(
+                <Button
+                  type="text"
+                  size="small"
+                  icon={<FolderOpenOutlined />}
+                  onClick={() => void handleSelectChromePath()}
+                >
+                  选择
+                </Button>
+              )}
+            />
           </Form.Item>
         </Form>
       </Modal>
